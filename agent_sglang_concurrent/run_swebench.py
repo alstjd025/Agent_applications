@@ -117,6 +117,7 @@ class SWEBenchRunner:
             "task_id": task_id,
             "problem_statement": task["problem_statement"],
             "repo": task["repo"],
+            "nonce": task["nonce"],
             "plan": "",
             "code": "",
             "debug_result": "",
@@ -165,7 +166,7 @@ class SWEBenchRunner:
 
     def run_batch_parallel(
         self,
-        dataset,
+        logical_tasks,
         start_index: int = 0,
         end_index: Optional[int] = None,
         request_rate_per_min: float = 60.0,
@@ -180,9 +181,9 @@ class SWEBenchRunner:
         print(f"[Info] Already completed tasks (from this CSV): {len(completed_tasks)}")
 
         if end_index is None:
-            end_index = len(dataset)
+            end_index = len(logical_tasks)
 
-        tasks_slice = dataset.select(range(start_index, end_index))
+        tasks_slice = logical_tasks[start_index:end_index]
         tasks_to_run = [t for t in tasks_slice if t["instance_id"] not in completed_tasks]
 
         stats = {
@@ -300,6 +301,28 @@ def _safe_tag(s: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in s).strip("_")
 
 
+def _build_logical_tasks(dataset, replay_count: int) -> List[dict]:
+    logical_tasks: List[dict] = []
+    base_size = len(dataset)
+    for replay_idx in range(replay_count):
+        replay_num = replay_idx + 1
+        for base_idx, task in enumerate(dataset):
+            base_task_id = task["instance_id"]
+            logical_instance_id = f"{base_task_id}__replay{replay_num:02d}"
+            logical_position = replay_idx * base_size + base_idx
+            nonce = f"replay{replay_num:02d}-idx{logical_position:04d}-{base_task_id}"
+
+            logical_task = dict(task)
+            logical_task["instance_id"] = logical_instance_id
+            logical_task["base_instance_id"] = base_task_id
+            logical_task["replay_index"] = replay_num
+            logical_task["logical_index"] = logical_position
+            logical_task["nonce"] = nonce
+            logical_tasks.append(logical_task)
+
+    return logical_tasks
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run SWE-bench Lite batch evaluation (parallel + rate-limited starts + multi-run)"
@@ -320,6 +343,12 @@ def main():
     parser.add_argument("--request-rate-per-min-list", type=str, default=None)
 
     parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument(
+        "--replay-count",
+        type=int,
+        default=1,
+        help="Replay the dataset this many times to build a longer logical request stream.",
+    )
     parser.add_argument("--run-id", type=str, default=None)
 
     parser.add_argument("--max-workers", type=int, default=None)
@@ -331,6 +360,9 @@ def main():
     print("Loading dataset...")
     dataset = load_dataset(args.dataset, split="test")
     print(f"Loaded {len(dataset)} tasks\n")
+
+    replay_count = max(1, args.replay_count)
+    logical_tasks = _build_logical_tasks(dataset, replay_count)
 
     # rate list
     if args.request_rate_per_min_list:
@@ -345,6 +377,9 @@ def main():
     print("SWE-BENCH LITE MULTI-RUN")
     print(f"{'='*60}")
     print(f"Dataset: {args.dataset}")
+    print(f"Base tasks: {len(dataset)}")
+    print(f"Replay count: {replay_count}")
+    print(f"Logical task stream size: {len(logical_tasks)}")
     print(f"Max iterations: {args.max_iterations}")
     print(f"Rates: {rate_list} /min")
     print(f"Repeat per rate: {repeat}")
@@ -389,7 +424,7 @@ def main():
 
             try:
                 runner.run_batch_parallel(
-                    dataset,
+                    logical_tasks,
                     start_index=args.start_index,
                     end_index=args.end_index,
                     request_rate_per_min=rate,

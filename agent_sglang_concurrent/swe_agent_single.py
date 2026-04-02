@@ -14,6 +14,7 @@ class AgentState(TypedDict):
     task_id: str
     problem_statement: str
     repo: str
+    nonce: str
     plan: str
     code: str
     debug_result: str
@@ -152,7 +153,9 @@ def planning_node(state: AgentState):
     if state.get("debug_result") and is_fail_verdict(state["debug_result"]):
         feedback = f"\n\nPrevious attempt failed:\n{state['debug_result']}\n\nPlease revise your plan."
 
-    prompt = f"""You are a senior software engineer analyzing a bug report.
+    prompt = f"""Experiment metadata: nonce={state['nonce']}
+
+You are a senior software engineer analyzing a bug report.
 
 Bug Report:
 {state['problem_statement']}
@@ -180,7 +183,9 @@ Plan:"""
 def coding_node(state: AgentState):
     print(f"[ITERATION {state['iteration']}] Coding...")
 
-    prompt = f"""You are an expert programmer. Implement the following fix.
+    prompt = f"""Experiment metadata: nonce={state['nonce']}
+
+You are an expert programmer. Implement the following fix.
 
 Plan:
 {state['plan']}
@@ -204,7 +209,9 @@ Code:"""
 def debugging_node(state: AgentState):
     print(f"[ITERATION {state['iteration']}] Debugging...")
 
-    prompt = f"""You are a senior code reviewer. Verify if this code correctly fixes the bug.
+    prompt = f"""Experiment metadata: nonce={state['nonce']}
+
+You are a senior code reviewer. Verify if this code correctly fixes the bug.
 
 Original Bug:
 {state['problem_statement']}
@@ -271,6 +278,7 @@ if __name__ == "__main__":
         "task_id": "demo",
         "problem_statement": "There is a bug in function foo() that crashes on empty input.",
         "repo": "demo-repo",
+        "nonce": "demo-0-planning",
         "plan": "",
         "code": "",
         "debug_result": "",
