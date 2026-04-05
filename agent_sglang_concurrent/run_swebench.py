@@ -19,7 +19,7 @@ from typing import Optional, List
 
 from datasets import load_dataset
 from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 
 # 로컬 모듈
 from swe_agent_single import agent, AgentState, make_llm, is_pass_verdict
@@ -40,16 +40,20 @@ class SWEBenchRunner:
         server_export_log_path: Optional[str] = None,
         server_base_url: str = "http://localhost:30000",
         max_iterations: int = 5,
+        log_level: str = "quiet",
     ):
         self.csv_path = csv_path
         self.error_log_path = error_log_path
         self.max_iterations = max_iterations
         self.server_base_url = server_base_url
+        self.log_level = log_level
+        self._console_lock = threading.Lock()
+        self._pbar: Optional[tqdm] = None
 
         # run별 agent log dir
         self.agent_log_dir = agent_log_root_dir
         os.makedirs(self.agent_log_dir, exist_ok=True)
-        print(f"[Info] Agent logs will be saved to: {self.agent_log_dir}")
+        self._console_write(f"[Info] Agent logs will be saved to: {self.agent_log_dir}")
 
         # 에러 로그 파일 초기화
         os.makedirs(os.path.dirname(error_log_path), exist_ok=True)
@@ -76,24 +80,55 @@ class SWEBenchRunner:
                 )
                 self.vllm_parser.start()
             except Exception as e:
-                print(f"[Warning] Failed to start VLLMLogParser: {e}")
+                self._console_write(f"[Warning] Failed to start VLLMLogParser: {e}")
                 self.vllm_parser = MockVLLMLogParser()
                 self.vllm_parser.start()
         else:
-            print("[Info] Server log parsing disabled (using client-side metrics only)")
+            self._console_write("[Info] Server log parsing disabled (using client-side metrics only)")
             self.vllm_parser = MockVLLMLogParser()
             self.vllm_parser.start()
+
+    def _console_write(self, message: str) -> None:
+        with self._console_lock:
+            if self._pbar is not None:
+                self._pbar.write(message)
+            else:
+                print(message)
+
+    def _should_log(self, level: str) -> bool:
+        order = {"quiet": 0, "info": 1, "debug": 2}
+        return order.get(self.log_level, 0) >= order.get(level, 0)
+
+    def _update_progress(self, stats: dict, last_time: Optional[float] = None, status: Optional[str] = None) -> None:
+        if self._pbar is None:
+            return
+
+        postfix = {
+            "submitted": stats["submitted"],
+            "in_flight": max(stats["submitted"] - stats["completed"], 0),
+            "success": stats["success"],
+            "failed": stats["failed"],
+        }
+        if last_time is not None and last_time >= 0:
+            postfix["last_time"] = f"{last_time:.1f}s"
+        if status:
+            postfix["status"] = status
+        self._pbar.set_postfix(postfix)
+        self._pbar.refresh()
 
     def _log_error(self, task_id: str, error_msg: str):
         with open(self.error_log_path, "a") as f:
             f.write(f"[{datetime.now().isoformat()}] {task_id}\n")
             f.write(f"  {error_msg}\n\n")
-        print(f"\n[ERROR] {task_id}: {error_msg}")
+        self._console_write(f"[ERROR] {task_id}: {error_msg}")
 
     def run_single_task(self, task: dict) -> dict:
         """단일 SWE-bench 문제 실행"""
         task_id = task["instance_id"]
-        print(f"[START] thread={threading.get_ident()} task_id={task_id}")
+        if self._should_log("debug"):
+            self._console_write(
+                f"[START] thread={threading.get_ident()} task_id={task_id}"
+            )
 
         # ✅ task 전용 MetricsTracker / AgentLogger 생성
         metrics_tracker = MetricsTracker(
@@ -118,6 +153,7 @@ class SWEBenchRunner:
             "problem_statement": task["problem_statement"],
             "repo": task["repo"],
             "nonce": task["nonce"],
+            "log_level": self.log_level,
             "plan": "",
             "code": "",
             "debug_result": "",
@@ -126,6 +162,7 @@ class SWEBenchRunner:
             "history": [],
             "metrics_tracker": metrics_tracker,
             "agent_logger": agent_logger,
+            "console_write": self._console_write,
             "llm": llm,  # ✅ 핵심
         }
 
@@ -178,7 +215,7 @@ class SWEBenchRunner:
         - in-flight 제한은 두지 않음(요구사항)
         """
         completed_tasks = MetricsTracker.load_completed_tasks(self.csv_path)
-        print(f"[Info] Already completed tasks (from this CSV): {len(completed_tasks)}")
+        self._console_write(f"[Info] Already completed tasks (from this CSV): {len(completed_tasks)}")
 
         if end_index is None:
             end_index = len(logical_tasks)
@@ -204,59 +241,74 @@ class SWEBenchRunner:
         if max_workers is None:
             max_workers = max(32, min(300, len(tasks_to_run) if len(tasks_to_run) > 0 else 32))
 
-        print(
+        self._console_write(
             f"[Info] Parallel run: request_rate={request_rate_per_min}/min (interval={interval:.3f}s), "
             f"max_workers={max_workers}, in_flight=UNLIMITED(queueing allowed)"
         )
 
-        pbar = tqdm(total=len(tasks_to_run), desc="Completed SWE-bench Lite", unit="task")
+        self._pbar = tqdm(total=len(tasks_to_run), desc="Completed SWE-bench Lite", unit="task")
+        self._update_progress(stats)
 
-        futures = []
+        pending = set()
         next_submit_time = time.monotonic()
+        next_task_idx = 0
 
         try:
             with ThreadPoolExecutor(max_workers=max_workers) as ex:
-                # 1) rate에 맞춰 submit
-                for task in tasks_to_run:
+                while next_task_idx < len(tasks_to_run) or pending:
                     now = time.monotonic()
-                    sleep_s = next_submit_time - now
-                    if sleep_s > 0:
-                        time.sleep(sleep_s)
 
-                    fut = ex.submit(self.run_single_task, task)
-                    futures.append(fut)
+                    while next_task_idx < len(tasks_to_run) and now >= next_submit_time:
+                        task = tasks_to_run[next_task_idx]
+                        fut = ex.submit(self.run_single_task, task)
+                        pending.add(fut)
+                        stats["submitted"] += 1
+                        next_task_idx += 1
+                        next_submit_time += interval
+                        now = time.monotonic()
 
-                    stats["submitted"] += 1
-                    next_submit_time += interval
+                    self._update_progress(stats)
 
-                # 2) 완료 수집
-                for fut in as_completed(futures):
-                    result = fut.result()
-                    stats["completed"] += 1
+                    if pending:
+                        timeout = None
+                        if next_task_idx < len(tasks_to_run):
+                            timeout = max(0.0, next_submit_time - time.monotonic())
 
-                    if result.get("error"):
-                        stats["failed"] += 1
-                        stats["error"] += 1
-                        status = "ERROR"
-                    elif result.get("success"):
-                        stats["success"] += 1
-                        status = "✓"
-                    else:
-                        stats["failed"] += 1
-                        status = "✗"
+                        done, pending = wait(
+                            pending,
+                            timeout=timeout,
+                            return_when=FIRST_COMPLETED,
+                        )
 
-                    pbar.update(1)
-                    pbar.set_postfix(
-                        {
-                            "success": stats["success"],
-                            "failed": stats["failed"],
-                            "submitted": stats["submitted"],
-                            "last_time": f"{result.get('total_time', -1):.1f}s",
-                            "status": status,
-                        }
-                    )
+                        for fut in done:
+                            result = fut.result()
+                            stats["completed"] += 1
+
+                            if result.get("error"):
+                                stats["failed"] += 1
+                                stats["error"] += 1
+                                status = "ERROR"
+                            elif result.get("success"):
+                                stats["success"] += 1
+                                status = "✓"
+                            else:
+                                stats["failed"] += 1
+                                status = "✗"
+
+                            self._pbar.update(1)
+                            self._update_progress(
+                                stats,
+                                last_time=result.get("total_time", -1),
+                                status=status,
+                            )
+                    elif next_task_idx < len(tasks_to_run):
+                        sleep_s = next_submit_time - time.monotonic()
+                        if sleep_s > 0:
+                            time.sleep(sleep_s)
         finally:
-            pbar.close()
+            if self._pbar is not None:
+                self._pbar.close()
+                self._pbar = None
             # parser stop
             if self.vllm_parser:
                 self.vllm_parser.stop()
@@ -353,6 +405,12 @@ def main():
 
     parser.add_argument("--max-workers", type=int, default=None)
     parser.add_argument("--server-base-url", type=str, default="http://localhost:30000")
+    parser.add_argument(
+        "--log-level",
+        choices=["quiet", "info", "debug"],
+        default="quiet",
+        help="Console logging verbosity. Task-level details stay in agent log files.",
+    )
 
     args = parser.parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
@@ -420,6 +478,7 @@ def main():
                 server_export_log_path=server_export_log_path,
                 server_base_url=args.server_base_url,
                 max_iterations=args.max_iterations,
+                log_level=args.log_level,
             )
 
             try:

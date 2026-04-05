@@ -15,6 +15,7 @@ class AgentState(TypedDict):
     problem_statement: str
     repo: str
     nonce: str
+    log_level: str
     plan: str
     code: str
     debug_result: str
@@ -25,6 +26,7 @@ class AgentState(TypedDict):
     # 메트릭 추적용
     metrics_tracker: Optional[object]
     agent_logger: Optional[object]  # Agent 입출력 로깅용
+    console_write: Optional[Any]
 
     # ✅ task 전용 LLM 인스턴스 (멀티스레딩에서 shared_llm 공유 금지)
     llm: Optional[Any]
@@ -72,6 +74,25 @@ def count_tokens(text: str) -> int:
         return int(len(text.split()) * 1.3)
 
 
+LOG_LEVEL_ORDER = {"quiet": 0, "info": 1, "debug": 2}
+
+
+def should_log(state: AgentState, level: str) -> bool:
+    current_level = state.get("log_level", "quiet")
+    return LOG_LEVEL_ORDER.get(current_level, 0) >= LOG_LEVEL_ORDER.get(level, 0)
+
+
+def emit_log(state: AgentState, message: str, level: str = "debug") -> None:
+    if not should_log(state, level):
+        return
+
+    writer = state.get("console_write")
+    if callable(writer):
+        writer(message)
+    else:
+        print(message)
+
+
 def invoke_with_tracking(messages, agent_name: str, state: AgentState):
     """
     LLM 호출 + 메트릭 추적 + 입출력 로깅
@@ -103,7 +124,11 @@ def invoke_with_tracking(messages, agent_name: str, state: AgentState):
 
     except Exception as e:
         # 스트리밍 실패시 일반 호출
-        print(f"Warning: Streaming failed, falling back to regular call: {e}")
+        emit_log(
+            state,
+            f"Warning: Streaming failed, falling back to regular call: {e}",
+            level="info",
+        )
         response = llm.invoke(messages)
         response_content = response.content
         first_token_time = start_time + (time.time() - start_time) * 0.1
@@ -143,7 +168,7 @@ def invoke_with_tracking(messages, agent_name: str, state: AgentState):
 
 
 def planning_node(state: AgentState):
-    print(f"\n[ITERATION {state['iteration']}] Planning...")
+    emit_log(state, f"[ITERATION {state['iteration']}] Planning...", level="debug")
 
     # Iteration 로깅 시작
     if state.get("agent_logger"):
@@ -181,7 +206,7 @@ Plan:"""
 
 
 def coding_node(state: AgentState):
-    print(f"[ITERATION {state['iteration']}] Coding...")
+    emit_log(state, f"[ITERATION {state['iteration']}] Coding...", level="debug")
 
     prompt = f"""Experiment metadata: nonce={state['nonce']}
 
@@ -207,7 +232,7 @@ Code:"""
 
 
 def debugging_node(state: AgentState):
-    print(f"[ITERATION {state['iteration']}] Debugging...")
+    emit_log(state, f"[ITERATION {state['iteration']}] Debugging...", level="debug")
 
     prompt = f"""Experiment metadata: nonce={state['nonce']}
 
@@ -244,16 +269,16 @@ Verdict:"""
 
 def should_continue(state: AgentState):
     if is_pass_verdict(state["debug_result"]):
-        print("✓ PASSED!")
+        emit_log(state, "✓ PASSED!", level="debug")
         return END
     if state["iteration"] >= state["max_iterations"]:
-        print("✗ Max iterations reached")
+        emit_log(state, "✗ Max iterations reached", level="debug")
         return END
 
     if state.get("metrics_tracker"):
         state["metrics_tracker"].next_iteration()
 
-    print("→ Retrying with feedback...")
+    emit_log(state, "→ Retrying with feedback...", level="debug")
     return "planning"
 
 
@@ -279,6 +304,7 @@ if __name__ == "__main__":
         "problem_statement": "There is a bug in function foo() that crashes on empty input.",
         "repo": "demo-repo",
         "nonce": "demo-0-planning",
+        "log_level": "debug",
         "plan": "",
         "code": "",
         "debug_result": "",
@@ -287,6 +313,7 @@ if __name__ == "__main__":
         "history": [],
         "metrics_tracker": None,
         "agent_logger": None,
+        "console_write": None,
         "llm": make_llm(seed=42, temperature=0),  # ✅ demo도 task 전용 llm
     }
 
