@@ -3,10 +3,15 @@
 각 agent call마다 latency, token 정보, GPU 메모리 등을 기록
 """
 import csv
+import json
 import os
-import time
+import queue
 import requests
 import re
+import statistics
+import threading
+import time
+import atexit
 from datetime import datetime
 from typing import Optional, Dict, Any
 try:
@@ -66,12 +71,17 @@ class KVCacheMonitor:
 
 class MetricsTracker:
     """Agent 실행 메트릭을 추적하고 CSV로 저장"""
+
+    _jsonl_writers: Dict[str, "AsyncJSONLWriter"] = {}
+    _jsonl_writers_lock = threading.Lock()
+    _atexit_registered = False
     
     def __init__(
         self,
         csv_path: str,
         server_base_url: str = "http://localhost:30000",
         enable_server_metrics: bool = False,
+        tbt_jsonl_path: Optional[str] = None,
     ):
         """
         Args:
@@ -83,6 +93,7 @@ class MetricsTracker:
         self.current_task_id = None
         self.current_iteration = 0
         self.last_agent_end_time = None
+        self.tbt_jsonl_path = tbt_jsonl_path
         
         # KV cache 모니터 초기화
         self.kv_monitor = KVCacheMonitor(server_base_url, enabled=enable_server_metrics)
@@ -102,6 +113,17 @@ class MetricsTracker:
             'gpu_memory_mb',
             'kv_cache_usage_pct',
             'transition_time',
+            'tokenizer_mode',
+            'stream_fallback_used',
+            'tbt_available',
+            'stream_chunks',
+            'streamed_output_tokens_est',
+            'first_chunk_tokens_est',
+            'tbt_mean_ms',
+            'tbt_median_ms',
+            'tbt_p95_ms',
+            'tbt_max_ms',
+            'tbt_sample_count',
             'success',
             'error_msg',
             'timestamp'
@@ -112,6 +134,33 @@ class MetricsTracker:
             with open(self.csv_path, 'w', newline='') as f:
                 writer = csv.DictWriter(f, fieldnames=self.fieldnames)
                 writer.writeheader()
+
+        self._register_atexit()
+        self.tbt_writer = self._get_jsonl_writer(self.tbt_jsonl_path) if self.tbt_jsonl_path else None
+
+    @classmethod
+    def _register_atexit(cls):
+        if cls._atexit_registered:
+            return
+        atexit.register(cls.shutdown_all_writers)
+        cls._atexit_registered = True
+
+    @classmethod
+    def _get_jsonl_writer(cls, path: str) -> "AsyncJSONLWriter":
+        with cls._jsonl_writers_lock:
+            writer = cls._jsonl_writers.get(path)
+            if writer is None:
+                writer = AsyncJSONLWriter(path)
+                cls._jsonl_writers[path] = writer
+            return writer
+
+    @classmethod
+    def shutdown_all_writers(cls):
+        with cls._jsonl_writers_lock:
+            writers = list(cls._jsonl_writers.values())
+            cls._jsonl_writers = {}
+        for writer in writers:
+            writer.close()
     
     def start_task(self, task_id: str):
         """새로운 task 시작"""
@@ -133,7 +182,11 @@ class MetricsTracker:
         output_tokens: int = 0,
         first_token_time: Optional[float] = None,
         success: Optional[bool] = None,
-        error_msg: str = ""
+        error_msg: str = "",
+        tokenizer_mode: Optional[str] = None,
+        stream_fallback_used: bool = False,
+        tbt_summary: Optional[Dict[str, Any]] = None,
+        tbt_detail: Optional[Dict[str, Any]] = None,
     ):
         """
         Agent 호출 메트릭 기록
@@ -177,6 +230,7 @@ class MetricsTracker:
         self.last_agent_end_time = end_time
         
         # 메트릭 레코드 생성
+        tbt_summary = tbt_summary or {}
         record = {
             'task_id': self.current_task_id,
             'iteration': self.current_iteration,
@@ -191,6 +245,17 @@ class MetricsTracker:
             'gpu_memory_mb': gpu_memory_mb,
             'kv_cache_usage_pct': round(kv_cache_usage_pct, 2) if kv_cache_usage_pct is not None else None,
             'transition_time': round(transition_time, 4) if transition_time else None,
+            'tokenizer_mode': tokenizer_mode,
+            'stream_fallback_used': stream_fallback_used,
+            'tbt_available': tbt_summary.get('available'),
+            'stream_chunks': tbt_summary.get('stream_chunks'),
+            'streamed_output_tokens_est': tbt_summary.get('streamed_output_tokens_est'),
+            'first_chunk_tokens_est': tbt_summary.get('first_chunk_tokens_est'),
+            'tbt_mean_ms': round(tbt_summary['mean_ms'], 4) if tbt_summary.get('mean_ms') is not None else None,
+            'tbt_median_ms': round(tbt_summary['median_ms'], 4) if tbt_summary.get('median_ms') is not None else None,
+            'tbt_p95_ms': round(tbt_summary['p95_ms'], 4) if tbt_summary.get('p95_ms') is not None else None,
+            'tbt_max_ms': round(tbt_summary['max_ms'], 4) if tbt_summary.get('max_ms') is not None else None,
+            'tbt_sample_count': tbt_summary.get('sample_count'),
             'success': success,
             'error_msg': error_msg,
             'timestamp': datetime.now().isoformat()
@@ -200,6 +265,18 @@ class MetricsTracker:
         with open(self.csv_path, 'a', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=self.fieldnames)
             writer.writerow(record)
+
+        if self.tbt_writer and tbt_detail is not None:
+            detail_record = {
+                'task_id': self.current_task_id,
+                'iteration': self.current_iteration,
+                'agent': agent_name,
+                'tokenizer_mode': tokenizer_mode,
+                'stream_fallback_used': stream_fallback_used,
+                'recorded_at': datetime.now().isoformat(),
+                **tbt_detail,
+            }
+            self.tbt_writer.write(detail_record)
         
         return record
     
@@ -259,22 +336,22 @@ class StreamingTokenTracker:
         self.first_token_time = None
         self.token_count = 0
         self.full_response = ""
-    
+
     def reset(self):
         """새로운 요청을 위해 리셋"""
         self.start_time = time.time()
         self.first_token_time = None
         self.token_count = 0
         self.full_response = ""
-    
+
     def on_token(self, token: str):
         """토큰 수신시 호출"""
         if self.first_token_time is None:
             self.first_token_time = time.time()
-        
+
         self.token_count += 1
         self.full_response += token
-    
+
     def get_metrics(self) -> Dict[str, Any]:
         """메트릭 반환"""
         return {
@@ -282,6 +359,59 @@ class StreamingTokenTracker:
             'tokens_generated': self.token_count,
             'full_response': self.full_response
         }
+
+
+class AsyncJSONLWriter:
+    """멀티스레드 환경에서 JSONL sidecar를 비동기적으로 저장한다."""
+
+    def __init__(self, path: str):
+        self.path = path
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        self._queue: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def write(self, record: Dict[str, Any]):
+        self._queue.put(record)
+
+    def _run(self):
+        with open(self.path, 'a', encoding='utf-8') as f:
+            while True:
+                item = self._queue.get()
+                if item is None:
+                    self._queue.task_done()
+                    break
+                f.write(json.dumps(item, ensure_ascii=False) + '\n')
+                f.flush()
+                self._queue.task_done()
+
+    def close(self):
+        self._queue.put(None)
+        self._queue.join()
+        self._thread.join()
+
+
+def summarize_tbt_ms(values_ms):
+    if not values_ms:
+        return {
+            'available': False,
+            'mean_ms': None,
+            'median_ms': None,
+            'p95_ms': None,
+            'max_ms': None,
+            'sample_count': 0,
+        }
+
+    sorted_vals = sorted(values_ms)
+    p95_idx = min(len(sorted_vals) - 1, max(0, int(0.95 * len(sorted_vals)) - 1))
+    return {
+        'available': True,
+        'mean_ms': statistics.fmean(sorted_vals),
+        'median_ms': statistics.median(sorted_vals),
+        'p95_ms': sorted_vals[p95_idx],
+        'max_ms': sorted_vals[-1],
+        'sample_count': len(sorted_vals),
+    }
 
 
 if __name__ == "__main__":

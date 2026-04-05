@@ -12,6 +12,7 @@ SWE-bench Lite 배치 실행 스크립트 (병렬 + request-rate 기반 시작 �
 import os
 import sys
 import time
+import json
 import argparse
 import threading
 from datetime import datetime
@@ -36,6 +37,7 @@ class SWEBenchRunner:
         csv_path: str,
         error_log_path: str,
         agent_log_root_dir: str,
+        tbt_jsonl_path: str,
         server_log_path: Optional[str] = None,
         server_export_log_path: Optional[str] = None,
         server_base_url: str = "http://localhost:30000",
@@ -47,6 +49,7 @@ class SWEBenchRunner:
         self.max_iterations = max_iterations
         self.server_base_url = server_base_url
         self.log_level = log_level
+        self.tbt_jsonl_path = tbt_jsonl_path
         self._console_lock = threading.Lock()
         self._pbar: Optional[tqdm] = None
 
@@ -54,6 +57,7 @@ class SWEBenchRunner:
         self.agent_log_dir = agent_log_root_dir
         os.makedirs(self.agent_log_dir, exist_ok=True)
         self._console_write(f"[Info] Agent logs will be saved to: {self.agent_log_dir}")
+        self._console_write(f"[Info] TBT events will be saved to: {self.tbt_jsonl_path}")
 
         # 에러 로그 파일 초기화
         os.makedirs(os.path.dirname(error_log_path), exist_ok=True)
@@ -67,6 +71,7 @@ class SWEBenchRunner:
             self.csv_path,
             server_base_url=self.server_base_url,
             enable_server_metrics=False,
+            tbt_jsonl_path=self.tbt_jsonl_path,
         )
 
         # vLLM 로그 파서 (optional) + export
@@ -135,6 +140,7 @@ class SWEBenchRunner:
             self.csv_path,
             server_base_url=self.server_base_url,
             enable_server_metrics=False,
+            tbt_jsonl_path=self.tbt_jsonl_path,
         )
 
         agent_logger = AgentLogger(self.agent_log_dir)
@@ -312,6 +318,7 @@ class SWEBenchRunner:
             # parser stop
             if self.vllm_parser:
                 self.vllm_parser.stop()
+            MetricsTracker.shutdown_all_writers()
 
         self._print_summary_parallel(stats, request_rate_per_min, max_workers)
 
@@ -336,6 +343,7 @@ class SWEBenchRunner:
         print(f"\nResults saved to: {self.csv_path}")
         print(f"Error log saved to: {self.error_log_path}")
         print(f"Agent logs saved to: {self.agent_log_dir}")
+        print(f"TBT events saved to: {self.tbt_jsonl_path}")
         print(f"{'='*60}\n")
 
 
@@ -351,6 +359,13 @@ def _parse_rate_list(s: str) -> List[float]:
 
 def _safe_tag(s: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in s).strip("_")
+
+
+def _write_run_config(run_dir: str, config: dict):
+    os.makedirs(run_dir, exist_ok=True)
+    config_path = os.path.join(run_dir, "run_config.json")
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
 
 
 def _build_logical_tasks(dataset, replay_count: int) -> List[dict]:
@@ -454,19 +469,46 @@ def main():
             if run_id:
                 tag_parts.append(run_id)
             tag = "_".join(tag_parts)
+            run_timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            run_dir = os.path.join(args.output_dir, f"{tag}_{run_timestamp}")
+            os.makedirs(run_dir, exist_ok=True)
 
-            csv_path = os.path.join(args.output_dir, f"metrics_{tag}.csv")
-            error_log_path = os.path.join(args.output_dir, f"errors_{tag}.log")
-            server_export_log_path = os.path.join(args.output_dir, f"server_{tag}.log")
-            agent_log_root_dir = os.path.join(args.output_dir, "agent_logs", tag)
+            csv_path = os.path.join(run_dir, "metrics.csv")
+            error_log_path = os.path.join(run_dir, "errors.log")
+            server_export_log_path = os.path.join(run_dir, "server.log")
+            tbt_jsonl_path = os.path.join(run_dir, "tbt_events.jsonl")
+            agent_log_root_dir = os.path.join(run_dir, "agent_logs")
+
+            _write_run_config(
+                run_dir,
+                {
+                    "dataset": args.dataset,
+                    "base_tasks": len(dataset),
+                    "replay_count": replay_count,
+                    "logical_task_stream_size": len(logical_tasks),
+                    "request_rate_per_min": rate,
+                    "repeat_index": rep,
+                    "run_id": run_id,
+                    "start_index": args.start_index,
+                    "end_index": args.end_index,
+                    "max_iterations": args.max_iterations,
+                    "max_workers": args.max_workers,
+                    "server_base_url": args.server_base_url,
+                    "server_log": args.server_log,
+                    "log_level": args.log_level,
+                    "created_at": datetime.now().isoformat(),
+                },
+            )
 
             print(f"\n{'='*60}")
             print(f"RUN: {tag}")
             print(f"{'='*60}")
             print(f"Request rate: {rate}/min")
+            print(f"Run dir: {run_dir}")
             print(f"CSV: {csv_path}")
             print(f"Error log: {error_log_path}")
             print(f"Server export log: {server_export_log_path}")
+            print(f"TBT events: {tbt_jsonl_path}")
             print(f"Agent log dir: {agent_log_root_dir}")
             print(f"{'='*60}\n")
 
@@ -474,6 +516,7 @@ def main():
                 csv_path=csv_path,
                 error_log_path=error_log_path,
                 agent_log_root_dir=agent_log_root_dir,
+                tbt_jsonl_path=tbt_jsonl_path,
                 server_log_path=args.server_log,
                 server_export_log_path=server_export_log_path,
                 server_base_url=args.server_base_url,
@@ -491,7 +534,7 @@ def main():
                 )
             except KeyboardInterrupt:
                 print("\n\n[!] Interrupted by user")
-                print(f"Partial results saved to: {csv_path}")
+                print(f"Partial results saved to: {run_dir}")
                 sys.exit(0)
 
 

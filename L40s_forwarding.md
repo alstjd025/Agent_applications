@@ -7,5 +7,6 @@ source .venv/bin/activate
 python run_swebench.py \
   --server-base-url http://localhost:30000 \
   --request-rate-per-min 120 \
-  --replay-count 3 \
-  --max-workers 300
+  --replay-count 1 \
+  --max-workers 300 \
+  --log-level quiet (info, debug)
