@@ -49,7 +49,8 @@ def make_llm(seed: int = 42, temperature: float = 0.7) -> ChatOpenAI:
         api_key="dummy",
         model=MODEL_ID,
         temperature=temperature,
-        timeout=120,
+        # timeout=120,
+        timeout=None,
         top_p=1.0,
         seed=seed,  # 재현성 seed (서버 쪽 --seed 42도 켜셨으니 함께 고정)
     )
@@ -215,7 +216,18 @@ def invoke_with_tracking(messages, agent_name: str, state: AgentState):
         "first_chunk_tokens_est": first_chunk_tokens_est,
         "chunk_count": len(chunk_events),
         "chunk_events": chunk_events,
-        "tbt_ms_est": [round(v, 4) for v in tbt_values_ms],
+        "tbt_summary": {
+            "available": tbt_summary.get("available"),
+            "mean_ms": round(tbt_summary["mean_ms"], 4) if tbt_summary.get("mean_ms") is not None else None,
+            "p50_ms": round(tbt_summary["p50_ms"], 4) if tbt_summary.get("p50_ms") is not None else None,
+            "p75_ms": round(tbt_summary["p75_ms"], 4) if tbt_summary.get("p75_ms") is not None else None,
+            "p80_ms": round(tbt_summary["p80_ms"], 4) if tbt_summary.get("p80_ms") is not None else None,
+            "p85_ms": round(tbt_summary["p85_ms"], 4) if tbt_summary.get("p85_ms") is not None else None,
+            "p90_ms": round(tbt_summary["p90_ms"], 4) if tbt_summary.get("p90_ms") is not None else None,
+            "p95_ms": round(tbt_summary["p95_ms"], 4) if tbt_summary.get("p95_ms") is not None else None,
+            "max_ms": round(tbt_summary["max_ms"], 4) if tbt_summary.get("max_ms") is not None else None,
+            "sample_count": tbt_summary.get("sample_count"),
+        },
     }
 
     # Agent 입출력 로깅

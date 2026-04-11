@@ -120,7 +120,11 @@ class MetricsTracker:
             'streamed_output_tokens_est',
             'first_chunk_tokens_est',
             'tbt_mean_ms',
-            'tbt_median_ms',
+            'tbt_p50_ms',
+            'tbt_p75_ms',
+            'tbt_p80_ms',
+            'tbt_p85_ms',
+            'tbt_p90_ms',
             'tbt_p95_ms',
             'tbt_max_ms',
             'tbt_sample_count',
@@ -252,7 +256,11 @@ class MetricsTracker:
             'streamed_output_tokens_est': tbt_summary.get('streamed_output_tokens_est'),
             'first_chunk_tokens_est': tbt_summary.get('first_chunk_tokens_est'),
             'tbt_mean_ms': round(tbt_summary['mean_ms'], 4) if tbt_summary.get('mean_ms') is not None else None,
-            'tbt_median_ms': round(tbt_summary['median_ms'], 4) if tbt_summary.get('median_ms') is not None else None,
+            'tbt_p50_ms': round(tbt_summary['p50_ms'], 4) if tbt_summary.get('p50_ms') is not None else None,
+            'tbt_p75_ms': round(tbt_summary['p75_ms'], 4) if tbt_summary.get('p75_ms') is not None else None,
+            'tbt_p80_ms': round(tbt_summary['p80_ms'], 4) if tbt_summary.get('p80_ms') is not None else None,
+            'tbt_p85_ms': round(tbt_summary['p85_ms'], 4) if tbt_summary.get('p85_ms') is not None else None,
+            'tbt_p90_ms': round(tbt_summary['p90_ms'], 4) if tbt_summary.get('p90_ms') is not None else None,
             'tbt_p95_ms': round(tbt_summary['p95_ms'], 4) if tbt_summary.get('p95_ms') is not None else None,
             'tbt_max_ms': round(tbt_summary['max_ms'], 4) if tbt_summary.get('max_ms') is not None else None,
             'tbt_sample_count': tbt_summary.get('sample_count'),
@@ -396,19 +404,38 @@ def summarize_tbt_ms(values_ms):
         return {
             'available': False,
             'mean_ms': None,
-            'median_ms': None,
+            'p50_ms': None,
+            'p75_ms': None,
+            'p80_ms': None,
+            'p85_ms': None,
+            'p90_ms': None,
             'p95_ms': None,
             'max_ms': None,
             'sample_count': 0,
         }
 
     sorted_vals = sorted(values_ms)
-    p95_idx = min(len(sorted_vals) - 1, max(0, int(0.95 * len(sorted_vals)) - 1))
+
+    def percentile_ms(pct: float):
+        if len(sorted_vals) == 1:
+            return sorted_vals[0]
+        position = (pct / 100.0) * (len(sorted_vals) - 1)
+        lower_idx = int(position)
+        upper_idx = min(lower_idx + 1, len(sorted_vals) - 1)
+        fraction = position - lower_idx
+        lower = sorted_vals[lower_idx]
+        upper = sorted_vals[upper_idx]
+        return lower + (upper - lower) * fraction
+
     return {
         'available': True,
         'mean_ms': statistics.fmean(sorted_vals),
-        'median_ms': statistics.median(sorted_vals),
-        'p95_ms': sorted_vals[p95_idx],
+        'p50_ms': percentile_ms(50),
+        'p75_ms': percentile_ms(75),
+        'p80_ms': percentile_ms(80),
+        'p85_ms': percentile_ms(85),
+        'p90_ms': percentile_ms(90),
+        'p95_ms': percentile_ms(95),
         'max_ms': sorted_vals[-1],
         'sample_count': len(sorted_vals),
     }
