@@ -149,12 +149,12 @@ def invoke_with_tracking(messages, agent_name: str, state: AgentState):
     try:
         for chunk in llm.stream(messages):
             chunk_arrival_time = time.time()
-            if first_token_time is None:
-                first_token_time = chunk_arrival_time
 
             if hasattr(chunk, "content") and chunk.content is not None:
                 chunk_text = chunk.content
                 if chunk_text:
+                    if first_token_time is None:
+                        first_token_time = chunk_arrival_time
                     response_chunks.append(chunk_text)
                     chunk_tokens_est = max(count_tokens(chunk_text), 1)
                     streamed_output_tokens_est += chunk_tokens_est
