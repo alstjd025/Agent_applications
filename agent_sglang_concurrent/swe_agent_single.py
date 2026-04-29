@@ -39,11 +39,11 @@ class AgentState(TypedDict):
 
 
 # === 단일 SGlang 서버/단일 모델 ===
-BASE_URL = "http://localhost:30000/v1"
+BASE_URL = "http://localhost:8080/v1"
 MODEL_ID = "meta-llama/Llama-3.1-8B-Instruct"
 
 # ✅ task별로 새 LLM 인스턴스를 만들기 위한 팩토리
-def make_llm(seed: int = 42, temperature: float = 0.7) -> ChatOpenAI:
+def make_llm(seed: int = 42, temperature: float = 0.0) -> ChatOpenAI:
     return ChatOpenAI(
         base_url=BASE_URL,
         api_key="dummy",
@@ -129,7 +129,7 @@ def invoke_with_tracking(messages, agent_name: str, state: AgentState):
     # ✅ task별 llm 사용 (없으면 생성해서 state에 박아둠)
     llm = state.get("llm")
     if llm is None:
-        llm = make_llm(seed=42, temperature=0.7)
+        llm = make_llm(seed=42, temperature=0.0)
         state["llm"] = llm
 
     start_time = time.time()

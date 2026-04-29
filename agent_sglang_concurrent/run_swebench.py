@@ -152,7 +152,7 @@ class SWEBenchRunner:
         )
 
         # ✅ task 전용 LLM 인스턴스 (shared_llm 제거)
-        llm = make_llm(seed=42, temperature=0.7)
+        llm = make_llm(seed=42, temperature=0.0)
 
         initial_state: AgentState = {
             "task_id": task_id,

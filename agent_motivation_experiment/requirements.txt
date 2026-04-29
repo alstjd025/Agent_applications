@@ -1,0 +1,10 @@
+langchain-openai
+langgraph
+datasets
+tqdm
+requests
+GPUtil
+tiktoken
+transformers
+pandas
+matplotlib
