@@ -6,7 +6,7 @@ Reads experiment results from CSV files and generates motivation figures
 illustrating the gap between throughput and goodput under load.
 
 Usage:
-    python analyze_motivation.py \
+    python analysis_scripts/analyze_motivation.py \
         --results-dir ./results \
         --baseline-dir ./results/baseline \
         --output-dir ./figures
@@ -49,16 +49,22 @@ def discover_runs(results_dir: str) -> list[dict]:
 
         concurrency_level = None
         rpm = None
+        lam = None
+        mode = None
         if config_json.is_file():
             with open(config_json) as f:
                 cfg = json.load(f)
-            concurrency_level = cfg.get("concurrency_level")
+            mode = cfg.get("mode")
+            concurrency_level = cfg.get("concurrency", cfg.get("concurrency_level"))
             rpm = cfg.get("request_rate_per_min")
+            lam = cfg.get("lambda")
 
         runs.append({
             "path": str(subdir),
+            "mode": mode,
             "concurrency_level": concurrency_level,
             "rpm": rpm,
+            "lambda": lam,
             "metrics_csv": str(metrics_csv),
             "config_json": str(config_json) if config_json.is_file() else None,
         })
@@ -67,11 +73,14 @@ def discover_runs(results_dir: str) -> list[dict]:
     def _sort_key(r):
         cl = r["concurrency_level"]
         rpm = r["rpm"]
+        lam = r["lambda"]
         if cl is not None:
             return (0, cl, 0, r["path"])
         if rpm is not None:
             return (1, 0, rpm, r["path"])
-        return (2, 0, 0, r["path"])
+        if lam is not None:
+            return (2, 0, lam, r["path"])
+        return (3, 0, 0, r["path"])
 
     runs.sort(key=_sort_key)
     return runs
@@ -83,6 +92,17 @@ def load_metrics(csv_path: str) -> pd.DataFrame:
         df = pd.read_csv(csv_path, skipinitialspace=True)
         # Strip whitespace from column names
         df.columns = df.columns.str.strip()
+        for col in [
+            "start_time", "end_time", "latency", "input_tokens", "output_tokens",
+            "first_token_latency", "tbt_p90_ms", "tbt_p95_ms", "call_index",
+            "total_calls_expected", "job_submit_time", "job_end_time",
+        ]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        for col in ["job_completed", "success", "is_timeout", "is_error",
+                    "is_job_timeout", "is_server_terminated"]:
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.lower().isin({"true", "1", "yes"})
         return df
     except pd.errors.EmptyDataError:
         return pd.DataFrame()
@@ -113,7 +133,7 @@ def compute_slo_thresholds(baseline_df: pd.DataFrame,
         ttft_slo, tbt_slo, baseline_jct: {chain_length: mean_jct},
         job_slo: {chain_length: T_SLO(n)}
     """
-    call_df = baseline_df[baseline_df["agent"] == "chain_call"].copy()
+    call_df = baseline_df[baseline_df["agent"].astype(str).str.startswith("chain_call")].copy()
     job_df = baseline_df[baseline_df["agent"] == "job_summary"].copy()
 
     # TTFT SLO: p95 of first_token_latency * alpha_call
@@ -151,7 +171,7 @@ def compute_run_metrics(df: pd.DataFrame, slo: dict) -> dict | None:
 
     Returns a dict of metric values or None if data is insufficient.
     """
-    call_df = df[df["agent"] == "chain_call"].copy()
+    call_df = df[df["agent"].astype(str).str.startswith("chain_call")].copy()
     job_df = df[df["agent"] == "job_summary"].copy()
 
     if call_df.empty and job_df.empty:
@@ -263,7 +283,7 @@ def compute_run_metrics(df: pd.DataFrame, slo: dict) -> dict | None:
         "throughput_total": throughput_total,
         "total_calls": total_calls,
         "total_jobs": total_jobs,
-        "completed_jobs": len(completed_jobs) if not isinstance(completed_jobs, type(pd.DataFrame())) else 0,
+        "completed_jobs": len(completed_jobs),
         "call_violation_by_index": call_violation_by_index,
     }
 
@@ -304,10 +324,13 @@ def _run_label(run_info: dict) -> str:
     """Human-readable label for a run."""
     cl = run_info.get("concurrency_level")
     rpm = run_info.get("rpm")
+    lam = run_info.get("lambda")
     if cl is not None:
         return str(cl)
     if rpm is not None:
         return f"{rpm} RPM"
+    if lam is not None:
+        return f"lambda={lam}"
     return Path(run_info["path"]).name
 
 
@@ -315,10 +338,13 @@ def _run_xvalue(run_info: dict) -> float:
     """Numeric x-axis value for a run (concurrency level or RPM)."""
     cl = run_info.get("concurrency_level")
     rpm = run_info.get("rpm")
+    lam = run_info.get("lambda")
     if cl is not None:
         return float(cl)
     if rpm is not None:
         return float(rpm)
+    if lam is not None:
+        return float(lam)
     return 0.0
 
 

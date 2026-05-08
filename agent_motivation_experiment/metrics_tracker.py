@@ -139,6 +139,8 @@ class MetricsTracker:
         'tbt_sample_count',
         'is_timeout',
         'is_error',
+        'is_rejected',
+        'rejection_reason',
         'is_job_timeout',
         'job_timeout_sec',
         'is_server_terminated',
@@ -315,6 +317,8 @@ class MetricsTracker:
         total_calls_expected: int = 0,
         is_timeout: Optional[bool] = None,
         is_error: Optional[bool] = None,
+        is_rejected: Optional[bool] = None,
+        rejection_reason: str = "",
         is_job_timeout: Optional[bool] = None,
         job_timeout_sec: Optional[float] = None,
         is_server_terminated: Optional[bool] = None,
@@ -418,6 +422,8 @@ class MetricsTracker:
             'tbt_sample_count': tbt_summary.get('sample_count'),
             'is_timeout': is_timeout,
             'is_error': is_error,
+            'is_rejected': is_rejected,
+            'rejection_reason': rejection_reason,
             'is_job_timeout': is_job_timeout,
             'job_timeout_sec': job_timeout_sec,
             'is_server_terminated': is_server_terminated,
@@ -472,6 +478,8 @@ class MetricsTracker:
         total_calls_expected: int = 0,
         is_timeout: Optional[bool] = None,
         is_error: Optional[bool] = None,
+        is_rejected: Optional[bool] = None,
+        rejection_reason: str = "",
         is_job_timeout: Optional[bool] = None,
         job_timeout_sec: Optional[float] = None,
         is_server_terminated: Optional[bool] = None,
@@ -496,6 +504,8 @@ class MetricsTracker:
             total_calls_expected=total_calls_expected,
             is_timeout=is_timeout,
             is_error=is_error,
+            is_rejected=is_rejected,
+            rejection_reason=rejection_reason,
             is_job_timeout=is_job_timeout,
             job_timeout_sec=job_timeout_sec,
             is_server_terminated=is_server_terminated,
@@ -529,9 +539,12 @@ class MetricsTracker:
         wasted_output_tokens: int = 0,
         concurrency_level: Optional[int] = None,
         error_msg: str = "",
+        is_rejected: Optional[bool] = None,
+        rejection_reason: str = "",
         is_job_timeout: Optional[bool] = None,
         job_timeout_sec: Optional[float] = None,
         is_server_terminated: Optional[bool] = None,
+        transition_time: Optional[float] = None,
     ):
         """Record a job-level summary row after a job completes or fails.
 
@@ -554,6 +567,7 @@ class MetricsTracker:
             is_job_timeout: True if the job was aborted due to τ timeout.
             job_timeout_sec: The τ-based job timeout in seconds.
             is_server_terminated: True if the job was aborted because the server was terminated.
+            transition_time: Application-side non-LLM transition time for the job.
         """
         jct = job_end_time - job_submit_time if job_end_time and job_submit_time else None
 
@@ -572,7 +586,7 @@ class MetricsTracker:
             'decode_speed_tps': None,
             'gpu_memory_mb': None,
             'kv_cache_usage_pct': None,
-            'transition_time': None,
+            'transition_time': round(transition_time, 4) if transition_time is not None else None,
             'tokenizer_mode': None,
             'stream_fallback_used': False,
             'tbt_available': None,
@@ -590,6 +604,8 @@ class MetricsTracker:
             'tbt_sample_count': None,
             'is_timeout': None,
             'is_error': None if job_completed else (not job_completed or None),
+            'is_rejected': is_rejected,
+            'rejection_reason': rejection_reason,
             'is_job_timeout': is_job_timeout,
             'job_timeout_sec': job_timeout_sec,
             'is_server_terminated': is_server_terminated,

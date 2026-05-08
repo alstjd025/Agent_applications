@@ -1,369 +1,356 @@
-# Motivation Experiment: "The Illusion of Efficiency"
+# Agent Motivation Experiment
 
-LLM 서버 throughput peak 시점에서 job-level goodput이 붕괴함을 실증.
+SGLang 서버에 multi-call coding agent workload를 부하로 넣고, server throughput이 좋아 보여도 application/job-level goodput이 무너지는 구간을 측정하는 실험 프로젝트입니다.
 
-핵심 메시지:
-1. **Throughput peak != useful work** — call-level goodput은 완만히 감소하나 job-level goodput은 급격히 collapse
-2. **Abandonment cost** — chain 후반 call일수록 SLO violation rate 높음
-3. **Wasted Compute** — throughput peak에서 wasted compute ratio도 peak
+현재 기본 workload는 SWE-bench Lite 문제를 입력으로 쓰는 synthetic coding agent입니다. 한 job은 여러 번의 LLM call로 구성되고, call-level latency goodput과 job-level end-to-end goodput을 함께 기록합니다.
 
----
+`swe_bench_coding_tool_delay` workload는 같은 agent chain을 사용하되, prompt에 `Tool result:`가 붙는 call boundary에서만 deterministic simulated tool-call interval을 넣습니다. Delay는 100ms-10s 범위, 평균 3s의 scaled beta 분포이고, task/replay/call boundary별 hash seed로 고정됩니다.
 
-## 파일 구조
+`swe_bench_coding_parallel_tool_delay` workload는 같은 call 수와 stage sequence를 유지하면서, 연속된 `Locate` call들을 하나의 `execution_round`에서 병렬로 실행합니다. Call별 latency/token/TBT는 계속 `metrics.csv`에 저장되고, round/dependency 구조는 `parallel_calls.csv`와 분석용 `application_parallel_calls.csv`에 따로 저장됩니다.
 
-```
-agent_motivation_experiment/
-├── run_experiment.py            # 메인 실행 스크립트 (all-in-one)
-├── synthetic_coding_agent.py   # Stage-based simulated coding agent
-├── metrics_tracker.py          # 메트릭 수집 (CSV + TBT JSONL)
-├── analyze_motivation.py       # Post-hoc 분석 + 4개 그래프 생성
-├── agent_logger.py             # 에이전트 call별 상세 로그
-├── prompts/
-│   ├── system_prompt.py        # ~14.5K token 코딩 에이전트 시스템 프롬프트
-│   ├── stage_prompts.py        # Stage별 instruction 프롬프트
-│   └── simulated_artifacts.py  # 도구 결과 시뮬레이션 (파일 내용, 테스트 출력)
-└── results/
-    ├── baseline_20260424-180204/
-    ├── poisson_0.005_20260426-HHMMSS/
-    ├── rpm_3_20260426-HHMMSS/
-    └── ...
-```
+## Quick Start
 
----
+아래 명령은 이 디렉터리(`Agent_applications/agent_motivation_experiment`)에서 실행하는 것을 기준으로 합니다.
 
-## 워크로드: Stage-Based Simulated Coding Agent
+실험 실행은 로컬 tmux의 `motivation` session에서 수행합니다. 세션이 없으면 먼저 만들고, 긴 run은 해당 세션 안에서 `run_experiment.py`로 실행합니다.
 
-실제 코딩 에이전트(Claude Code, Devin) 워크플로우 모방:
-
-```
-Understand(1) → Locate(1-4) → Plan(1) → Implement(1-3) → Verify(1)
-→ [실패 시 Debug → Implement → Verify 루프 반복]
-```
-
-| Stage | Call 수 | 도구 결과 (context growth) |
-|-------|---------|---------------------------|
-| Understand | 1 (고정) | 검색 결과 (~350 tokens) |
-| Locate | 1-4 (가변) | 파일 내용 (~640-1550 tokens/call) |
-| Plan | 1 (고정) | 없음 |
-| Implement | 1-3 (가변) | 없음 |
-| Verify | 1 (고정) | 테스트 출력 (~500-785 tokens) |
-| Debug | 0-N (잔여 call) | 파일 + 테스트 출력 |
-
-핵심 속성:
-- **Chain length**: `randint(5, 30)` — uniform 분포
-- **System prompt**: ~14.5K tokens, 모든 request에서 동일 (prefix KV cache 공유)
-- **Nonce**: user message에 `[Run ID: {nonce}]`로 주입 → non-prefix KV cache reuse 방지
-- **All-or-nothing**: 모든 call이 성공해야 job 완료
-- **재현성**: temperature=0.0, seed=42, SGLang `--random-seed 42`
-
----
-
-## 실험 구성
-
-### Phase 0: Baseline (완료)
-
-| 항목 | 값 |
-|------|-----|
-| Mode | `--mode single --concurrency 1` |
-| Jobs | 164개 (SWE-bench Lite, 300개 중 baseline latency 확보된 것) |
-| 결과 | 162 성공, 2 실패 |
-| Latency | min=70.5s, p50=484.5s, p90=1144.8s, max=2996.1s, mean=598.3s |
-| 결과 경로 | `results/baseline_20260424-180204/` |
-
-### Phase 1: Poisson Sweep
-
-λ값에 따른 Poisson 도착 프로세스로 job 제출, 60분간 실행.
-
-| λ | 평균 도착 간격 | 분당 도착 | 예상 동시 실행 |
-|---|-------------|---------|-------------|
-| 0.005 | 200초 | ~0.3/min | 1~2 |
-| 0.01 | 100초 | ~0.6/min | 2~4 |
-| 0.02 | 50초 | ~1.2/min | 4~8 |
-| 0.05 | 20초 | ~3/min | 10~20 |
-| 0.1 | 10초 | ~6/min | 20~40 |
-| 0.2 | 5초 | ~12/min | 40~80+ |
-
-동시 실행 예상은 baseline 평균 JCT ~598s 기준 추정.
-
-### Phase 2: Rate Sweep
-
-고정 간격 제출, 60분간 실행.
-
-| RPM | 제출 간격 | 예상 동시 실행 |
-|-----|---------|-------------|
-| 3 | 20초 | 3~5 |
-| 6 | 10초 | 6~10 |
-| 12 | 5초 | 12~20 |
-| 30 | 2초 | 30~50 |
-| 60 | 1초 | 60~100+ |
-
-### Phase 3: 분석
-
-`analyze_motivation.py`로 4개 motivation figure 생성:
-1. Throughput vs Job Goodput (call-level 대비)
-2. Call index별 SLO violation rate (abandonment)
-3. WCR vs Throughput (wasted compute)
-4. Alpha sensitivity (JSA 변화)
-
----
-
-## Timeout 정책
-
-| Level | 조건 | 기본값 |
-|-------|------|--------|
-| Call-level TTFT | 첫 토큰 도착 전 | 120초 |
-| Call-level idle | 토큰 간 간격 | 60초 |
-| Job-level τ | baseline_latency × τ | τ=2.0 |
-
-- τ timeout 초과 시 `is_job_timeout=True`, job 즉시 abort
-- 실험 duration 만료 시 `server_terminated_event` set → in-flight job abort
-- 서버 connection reset/broken pipe 감지 → `is_server_terminated=True`
-
----
-
-## SLO 정의
-
-### Call-level SLO
-```
-Call SLO = (TTFT ≤ TTFT_baseline_p95 × α) AND (TBT_p95 ≤ TBT_baseline_p95 × α)
-```
-- α 기본값: 1.5 (sensitivity: {1.0, 1.5, 2.0, 3.0})
-
-### Job-level SLO
-```
-T_SLO(n) = sum(baseline per-call latencies for n calls) × (1 + α_job)
-```
-- α_job 기본값: 1.0 (sensitivity: {0.5, 1.0, 2.0, 5.0})
-
-### 분석 지표
-
-| 메트릭 | 계산식 | 설명 |
-|--------|--------|------|
-| Throughput | sum(output_tokens) / wall_time | 서버 출력 처리량 |
-| JCR | completed_jobs / submitted_jobs | Job Completion Rate |
-| JSA | on_time_jobs / completed_jobs | Job SLO Attainment |
-| Job Goodput | JCR × JSA | Job-level useful work 비율 |
-| WCR | wasted_tokens / total_tokens | Wasted Compute Ratio |
-
----
-
-## 실행 방법
-
-### 전체 Poisson Sweep
 ```bash
-/home/nxc/mskim/agent/Agent_applications/agent_sglang_concurrent/.venv/bin/python \
-  run_experiment.py \
+tmux new -s motivation
+```
+
+### Baseline 만들기
+
+Baseline은 concurrency 1에서 task별 기준 latency를 수집합니다. 이후 `--tau` goodput threshold와 job timeout 계산에 사용됩니다.
+
+```bash
+python run_experiment.py \
+  --workload swe_bench_coding \
+  --mode baseline \
+  --end-index 300 \
+  --restart-server \
+  --session-name baseline_swe
+```
+
+### 단일 Poisson run
+
+```bash
+python run_experiment.py \
+  --workload swe_bench_coding \
+  --mode single \
+  --lambda-val 0.2 \
+  --baseline-dir results/baseline_20260424-180204 \
+  --duration-min 120 \
+  --tau 3.0 \
+  --restart-server \
+  --session-name lambda_0p2_test
+```
+
+Tool-call interval을 모사하는 workload를 쓰려면 workload 이름만 바꿉니다.
+
+```bash
+python run_experiment.py \
+  --workload swe_bench_coding_tool_delay \
+  --mode single \
+  --lambda-val 0.2 \
+  --baseline-dir results/baseline_20260424-180204 \
+  --duration-min 120 \
+  --tau 3.0 \
+  --restart-server \
+  --session-name lambda_0p2_tool_delay
+```
+
+Parallel agent round까지 모사하려면 다음 workload를 사용합니다.
+
+```bash
+python run_experiment.py \
+  --workload swe_bench_coding_parallel_tool_delay \
+  --mode single \
+  --lambda-val 0.2 \
+  --baseline-dir results/baseline_20260424-180204 \
+  --duration-min 120 \
+  --tau 3.0 \
+  --restart-server \
+  --session-name lambda_0p2_parallel_tool_delay
+```
+
+### Poisson sweep
+
+Sweep 모드는 기본적으로 각 λ condition마다 SGLang 서버를 stop/start합니다. `--session-name`을 주면 condition suffix가 자동으로 붙습니다.
+
+```bash
+python run_experiment.py \
+  --workload swe_bench_coding \
   --mode poisson-sweep \
   --baseline-dir results/baseline_20260424-180204 \
-  --duration-min 60 \
-  --tau 2.0
+  --lambda-list 0.01,0.02,0.05,0.1,0.2 \
+  --duration-min 120 \
+  --tau 3.0 \
+  --session-name hicache_sweep
 ```
 
-### 전체 Rate Sweep
+예를 들어 λ=0.2 condition은 원격 SGLang session name이 `hicache_sweep_lambda_0p2`가 되고, 로컬 결과 폴더는 `results/YYYYMMDD-HHMMSS_hicache_sweep_lambda_0p2/` 형태가 됩니다.
+
+### Fixed-rate sweep
+
 ```bash
-/home/nxc/mskim/agent/Agent_applications/agent_sglang_concurrent/.venv/bin/python \
-  run_experiment.py \
+python run_experiment.py \
+  --workload swe_bench_coding \
   --mode rate-sweep \
   --baseline-dir results/baseline_20260424-180204 \
+  --rate-list 3,6,12,30,60 \
   --duration-min 60 \
-  --tau 2.0
+  --tau 3.0 \
+  --session-name rpm_sweep
 ```
 
-### 개별 Poisson 테스트
+## Server Flow
+
+Application runner는 로컬에서 실행되고, SGLang 서버는 SSH host `NXC7`에서 tmux session을 통해 실행됩니다.
+
+기본 서버 시작 명령:
+
 ```bash
-python run_experiment.py \
-  --mode single --lambda-val 0.01 \
-  --baseline-dir results/baseline_20260424-180204 \
-  --duration-min 10 --tau 2.0 --no-server-restart
+cd /home/nxclab/sglang/ms_dev/expctl && python3 run_experiment.py --mode single --single-port 31000
 ```
 
-### 개별 Rate 테스트
-```bash
-python run_experiment.py \
-  --mode single --rpm 6 \
-  --baseline-dir results/baseline_20260424-180204 \
-  --duration-min 10 --tau 2.0 --no-server-restart
+`--session-name`을 주면 application runner가 서버 시작 명령에 `--session-name <name>`을 자동으로 붙입니다. 원격 서버는 아래 위치에 session folder를 만듭니다.
+
+```text
+/home/nxclab/sglang/ms_dev/runtime/sessions/<session-name>/
 ```
 
-### 분석
+각 condition이 끝나면 runner는 원격 session folder를 자동으로 가져옵니다.
+
+```text
+results/YYYYMMDD-HHMMSS_<session-name>/
+├── server_session/      # 원격 session folder 전체 rsync
+└── server.stderr.log    # 기존 parser가 바로 읽을 수 있게 root에도 복사
+```
+
+관련 옵션:
+
+| 옵션 | 기본값 | 설명 |
+|---|---|---|
+| `--session-name` | `None` | 원격 SGLang session base name |
+| `--remote-session-root` | `/home/nxclab/sglang/ms_dev/runtime/sessions` | 원격 session root |
+| `--server-session-subdir` | `server_session` | 로컬 run folder 안에 저장할 subdir |
+| `--server-fetch-timeout-sec` | `1800` | `rsync` timeout |
+| `--no-fetch-server-session` | off | 원격 server session 자동 fetch 비활성화 |
+| `--no-server-restart` | off | rate/poisson sweep에서 condition별 서버 재시작 생략 |
+| `--restart-server` | off | baseline/single/sweep 실행 전에 서버 재시작 |
+
+주의: `--no-server-restart`를 쓰면 runner가 새 서버 session을 시작하지 않으므로 condition별 `--session-name`도 원격 서버에 전달되지 않습니다.
+
+## Postprocessing
+
+분석 스크립트는 `analysis_scripts/` 아래에 있습니다.
+
+Application-side CSV와 figure:
+
 ```bash
-python analyze_motivation.py \
+python analysis_scripts/parse_application_metrics.py results/20260505-210642_hicache
+python analysis_scripts/plot_application_metrics.py results/20260505-210642_hicache
+```
+
+Server-side CSV와 figure:
+
+```bash
+python analysis_scripts/parse_server_logs.py results/20260505-210642_hicache
+python analysis_scripts/plot_server_metrics.py results/20260505-210642_hicache
+```
+
+λ sweep 전체 비교:
+
+```bash
+python analysis_scripts/plot_lambda_slowdown_goodput.py \
   --results-dir results \
-  --baseline-dir results/baseline_20260424-180204
+  --output-dir results/aggregate_analysis/lambda_slowdown_goodput
 ```
 
----
+Job release time 기준 slowdown 분석:
 
-## CLI 인자 전체 목록
-
-| 인자 | 기본값 | 설명 |
-|------|--------|------|
-| `--mode` | (필수) | `baseline`, `sweep`, `rate-sweep`, `poisson-sweep`, `single` |
-| `--baseline-dir` | None | Baseline metrics.csv 경로 (sweep/rate/poisson 필수) |
-| `--duration-min` | 60 | 실험 지속 시간 (분) |
-| `--tau` | 2.0 | Job timeout 배수 (baseline_latency × τ) |
-| `--lambda-list` | "0.005,0.01,0.02,0.05,0.1,0.2" | Poisson sweep λ값 목록 |
-| `--lambda-val` | None | Single Poisson λ값 |
-| `--rate-list` | "3,6,12,30,60" | Rate sweep RPM 목록 |
-| `--rpm` | None | Single rate RPM값 |
-| `--concurrency` | 8 | 동시 실행 job 수 (baseline/sweep) |
-| `--dataset` | "princeton-nlp/SWE-bench_Lite" | HuggingFace dataset |
-| `--server-base-url` | "http://localhost:8080" | SGLang 서버 URL |
-| `--seed` | 42 | 재현성 seed |
-| `--chain-min` | 5 | 최소 chain length |
-| `--chain-max` | 30 | 최대 chain length |
-| `--output-dir` | "results" | 결과 출력 디렉토리 |
-| `--sglang-ssh-host` | None | SGLang 서버 SSH host (예: NXC7) |
-| `--sglang-start-cmd` | (기본값 있음) | 서버 시작 명령어 |
-| `--sglang-stop-cmd` | (기본값 있음) | 서버 중지 명령어 |
-| `--sglang-tmux-session` | "sglang" | 원격 tmux 세션명 |
-| `--no-server-restart` | False | 실험 간 서버 리스타트 스킵 |
-| `--resume-dir` | None | Baseline 재개용 디렉토리 |
-| `--log-level` | "quiet" | `quiet`, `info`, `debug` |
-
----
-
-## 결과 디렉토리 구조
-
-각 실험 실행 시 태그+타임스탬프로 디렉토리 자동 생성:
-
-```
-results/
-├── baseline_20260424-180204/          # Baseline
-├── poisson_0.005_20260426-040840/     # Poisson λ=0.005
-├── poisson_0.01_20260426-XXXXXX/      # Poisson λ=0.01
-├── ...
-├── rpm_3_20260426-XXXXXX/             # Rate 3 RPM
-├── rpm_6_20260426-XXXXXX/             # Rate 6 RPM
-├── ...
-└── single_20260426-XXXXXX/            # 개별 테스트
+```bash
+python analysis_scripts/analyze_job_call_slowdown_by_release.py \
+  --baseline-dir results/baseline_20260424-180204 \
+  --run 0.1=results/20260430-173659 \
+  --run 0.2=results/20260430-193949
 ```
 
-### 각 실험 디렉토리 내용
+## Result Directory
 
-```
-poisson_0.01_20260426-XXXXXX/
-├── run_config.json        # 실험 설정 (mode, lambda, tau, duration 등)
-├── metrics.csv            # 핵심 메트릭 (chain_call + job_summary 혼합)
-├── errors.log             # 에러 로그
-├── tbt_events.jsonl       # TBT 상세 이벤트 (per-chunk timestamps)
-└── agent_logs/            # 에이전트 call별 상세 로그
-    ├── <task_id>_call_001.json
-    ├── <task_id>_call_002.json
-    └── ...
-```
+`results/`는 두 종류의 산출물을 담습니다.
 
-### run_config.json 예시
+- `results/YYYYMMDD-HHMMSS[_session-name]/`: 단일 실험 run
+- `results/aggregate_analysis/`: 여러 run을 묶어 만든 cross-run 분석 산출물
 
-```json
-{
-  "mode": "poisson-sweep",
-  "lambda": 0.01,
-  "duration_min": 60.0,
-  "tau": 2.0,
-  "chain_range": [5, 30],
-  "dataset": "princeton-nlp/SWE-bench_Lite",
-  "server_base_url": "http://localhost:8080",
-  "seed": 42,
-  "baseline_dir": "results/baseline_20260424-180204",
-  "created_at": "2026-04-26T04:08:40.123456"
-}
+현재 aggregate output 예시:
+
+```text
+results/aggregate_analysis/
+├── job_call_slowdown_by_release_time/
+└── lambda_slowdown_goodput_20260430_sweep/
 ```
 
----
+새 run의 기본 구조:
 
-## metrics.csv 스키마
+```text
+results/YYYYMMDD-HHMMSS_<session-name>/
+├── run_config.json
+├── metrics.csv
+├── errors.log
+├── tbt_events.jsonl
+├── parallel_calls.csv
+├── server.stderr.log
+├── agent_logs/
+├── server_session/
+├── analysis/
+│   ├── application_calls.csv
+│   ├── application_jobs.csv
+│   ├── application_summary.csv
+│   ├── application_timeseries.csv
+│   ├── application_call_job_goodput.csv
+│   ├── application_call_job_goodput_summary.csv
+│   ├── application_job_call_goodput_summary.csv
+│   ├── application_job_transition_adjusted.csv
+│   ├── application_job_transition_adjusted_summary.csv
+│   ├── application_parallel_calls.csv
+│   ├── application_parallel_rounds.csv
+│   └── server_metrics.csv
+└── figures/
+    ├── application_throughput_goodput.png
+    ├── wcr.png
+    ├── call_job_goodput_breakdown.png
+    ├── job_call_goodput_breakdown.png
+    └── server_metrics_*.png
+```
 
-모든 실험 결과가 동일한 CSV 스키마를 공유. `agent` 컬럼으로 row 타입 구분.
+`metrics.csv`는 `agent` 컬럼으로 row type을 구분합니다.
 
-### Row 타입 구분
+Admission control reject는 call row에서 명시적으로 표시됩니다.
 
-| agent 값 | 의미 |
-|----------|------|
+```text
+is_rejected=True
+rejection_reason=TBT_RATIO | TTFT_RATIO | ADMISSION_REJECTED | ...
+success=False
+is_error=True
+error_msg=Call <n>: admission rejected (...)
+```
+
+`parse_application_metrics.py`는 이 값을 `application_calls.csv`, `application_summary.csv`, `application_timeseries.csv`에 전달하고, `plot_application_metrics.py`의 throughput/goodput figure에는 cumulative admission rejection rate도 함께 그립니다.
+
+| `agent` 값 | 의미 |
+|---|---|
 | `chain_call_understand` | Understand stage LLM call |
 | `chain_call_locate` | Locate stage LLM call |
 | `chain_call_plan` | Plan stage LLM call |
 | `chain_call_implement` | Implement stage LLM call |
 | `chain_call_verify` | Verify stage LLM call |
 | `chain_call_debug` | Debug stage LLM call |
-| `job_summary` | Job 단위 요약 |
+| `job_summary` | job 단위 요약 |
 
-### 전체 컬럼
+## Goodput Definitions
 
-| 컬럼 | 타입 | chain_call | job_summary | 설명 |
-|------|------|:----------:|:-----------:|------|
-| `task_id` | string | O | O | Job ID (예: `astropy__astropy-14365__replay01`) |
-| `iteration` | int | O | O | 반복 번호 |
-| `agent` | string | O | O | Row 타입 (위 테이블 참조) |
-| `call_index` | int | 1-based | calls_completed | call 번호 / 완료 call 수 |
-| `total_calls_expected` | int | O | chain_length | 예상 총 call 수 |
-| `start_time` | float | O | O | 시작 epoch (call/job) |
-| `end_time` | float | O | O | 종료 epoch (call/job) |
-| `latency` | float | O | O | 소요 시간 (초) |
-| `input_tokens` | int | O | O | 입력 토큰 수 |
-| `output_tokens` | int | O | O | 출력 토큰 수 |
-| `first_token_latency` | float | O | null | TTFT (초) |
-| `decode_speed_tps` | float | O | null | 디코딩 속도 |
-| `gpu_memory_mb` | float | O | null | GPU 메모리 사용량 |
-| `kv_cache_usage_pct` | float | O | null | KV cache 사용률 |
-| `transition_time` | float | O | null | Stage 전환 시간 |
-| `tokenizer_mode` | string | O | null | 토크나이저 모드 |
-| `stream_fallback_used` | bool | O | false | 스트리밍 폴백 여부 |
-| `tbt_available` | bool | O | null | TBT 데이터 가용성 |
-| `stream_chunks` | int | O | null | 스트리밍 청크 수 |
-| `streamed_output_tokens_est` | int | O | null | 스트리밍 출력 토큰 추정 |
-| `first_chunk_tokens_est` | int | O | null | 첫 청크 토큰 수 |
-| `tbt_mean_ms` | float | O | null | 평균 TBT |
-| `tbt_p50_ms` | float | O | null | p50 TBT |
-| `tbt_p75_ms`~`tbt_p95_ms` | float | O | null | TBT 백분위수 |
-| `tbt_max_ms` | float | O | null | 최대 TBT |
-| `tbt_sample_count` | int | O | null | TBT 샘플 수 |
-| `is_timeout` | bool | O | null | Call-level timeout |
-| `is_error` | bool | O | null/bool | Call-level error |
-| `is_job_timeout` | bool | O | O | Job τ timeout |
-| `job_timeout_sec` | float | O | O | τ timeout 한계 (초) |
-| `is_server_terminated` | bool | O | O | 서버 종료로 abort |
-| `job_submit_time` | float | O | O | Job 제출 epoch |
-| `job_end_time` | float | O | O | Job 종료 epoch |
-| `job_completed` | bool | null | O | Job 전체 완료 여부 |
-| `concurrency_level` | int | O | O | 관측 동시성 |
-| `success` | bool | O | null | Call 성공 여부 |
-| `error_msg` | string | O | O | 에러 메시지 |
-| `timestamp` | string | O | O | 기록 시각 (ISO) |
+Baseline run에서 각 task/call의 기준 latency를 만든 뒤, 실험 run에서는 `tau` 배수 threshold를 적용합니다.
 
----
+```text
+call_goodput = call_latency < baseline_call_latency * tau
+job_goodput  = job_latency  < baseline_job_latency  * tau
+job_timeout  = baseline_job_latency * tau
+```
 
-## 서버 환경
+`application_call_job_goodput_summary.csv`는 call row를 parent job의 goodput 여부와 cross-tab으로 나눕니다.
 
-| 항목 | 설정 |
-|------|------|
-| Model | meta-llama/Llama-3.3-70B-Instruct |
-| GPU | 4×B200 (NXC7) |
-| Access | SSH tunnel localhost:8080 → NXC7:31000 |
-| SGLang flags | `--random-seed 42` |
-| Max context | 131,072 tokens |
-| System prefix | ~14.5K tokens |
-| Server start | `ssh NXC7` → `cd /home/nxclab/sglang/ms_dev/expctl && python3 run_pd_experiment.py --mode single --single-port 31000` |
-| Server stop | `ssh NXC7` → `bash /home/nxclab/sglang/ms_dev/stop_servers.sh` |
+| bucket | 의미 |
+|---|---|
+| `call_goodput__job_not_goodput` | 개별 call은 threshold 안이지만 job 전체는 goodput 실패 |
+| `call_not_goodput__job_not_goodput` | call과 job 모두 goodput 실패 |
+| `call_goodput__job_goodput` | call과 job 모두 goodput |
+| `call_not_goodput__job_goodput` | 일부 call은 느렸지만 job 전체는 goodput |
+| `unclassified` | baseline 매칭 부족 등으로 goodput 판정 불가 |
 
-### 서버 자동 제어 (--sglang-ssh-host)
+Tool-delay workload에서는 `job_summary` row의 `transition_time`이 job 안에서 실제로 sleep한 simulated tool-call interval 총합입니다. 기존 `application_jobs.csv`와 `application_summary.csv`는 그대로 두고, tool delay 포함/제외 job timing 비교는 별도 CSV에 저장합니다.
 
-`--sglang-ssh-host NXC7` 지정 시:
-- 실험 간 SSH로 서버 stop/start 자동 실행
-- KV cache 초기화 보장
-- `--no-server-restart` 시 스킵 (서버 이미 실행 중인 경우)
+| 파일 | 의미 |
+|---|---|
+| `application_job_transition_adjusted.csv` | job별 `latency_with_transition_s`, `transition_time_s`, `latency_without_transition_s`, with/without transition slowdown/goodput |
+| `application_job_transition_adjusted_summary.csv` | transition 포함/제외 job goodput rate와 slowdown 요약 |
 
----
+Parallel workload에서는 call별 상세 metric은 `metrics.csv`와 `application_calls.csv`를 그대로 사용합니다. 병렬 구조만 별도 CSV에 저장합니다.
 
-## 진행 상태 확인
+| 파일 | 의미 |
+|---|---|
+| `parallel_calls.csv` | runtime에서 기록한 call별 `execution_round`, dependency, round size, tool delay 구조 |
+| `application_parallel_calls.csv` | `parallel_calls.csv`에 call latency/goodput metric을 join한 분석 CSV |
+| `application_parallel_rounds.csv` | round별 wall time, call latency 합, overlap saving, token 합계 |
 
-```bash
-# tmux 세션 접속
-tmux a -t motivation
+## Project Layout
 
-# 완료된 job 수
-for d in results/*/; do echo "$d: $(grep -c job_summary ${d}metrics.csv 2>/dev/null || echo 0) jobs"; done
+| 경로 | 역할 |
+|---|---|
+| `run_experiment.py` | 실험 CLI, workload 실행, SGLang stop/start/fetch orchestration |
+| `metrics_tracker.py` | `metrics.csv`, `tbt_events.jsonl` 기록 |
+| `agent_logger.py` | job별 prompt/response 로그 기록 |
+| `workloads/` | workload adapter 구현 |
+| `workloads/swe_bench_coding/` | SWE-bench Lite synthetic coding agent |
+| `workloads/swe_bench_coding_tool_delay/` | `Tool result:` boundary에 deterministic interval을 넣는 SWE-bench workload |
+| `workloads/swe_bench_coding_parallel_tool_delay/` | 연속 Locate call을 같은 `execution_round`에서 병렬 실행하는 workload |
+| `analysis_scripts/` | metric parsing, aggregation, plotting scripts |
+| `results/` | 실험 결과 |
+| `results/aggregate_analysis/` | 여러 run을 묶은 분석 산출물 |
+| `figures/` | 수동/공통 figure output |
+| `data_backups/` | 과거 결과 backup |
+| `legacy/` | 현재 메인 경로에서 쓰지 않는 이전 분석 스크립트 |
 
-# 특정 실험 설정 확인
-cat results/poisson_0.01_*/run_config.json
+## Analysis Scripts
+
+| 스크립트 | 역할 |
+|---|---|
+| `analysis_scripts/parse_application_metrics.py` | `metrics.csv`를 application analysis CSV로 정규화 |
+| `analysis_scripts/parse_server_logs.py` | `server.stderr*`를 `server_metrics.csv`로 파싱 |
+| `analysis_scripts/plot_application_metrics.py` | throughput/goodput/WCR/call-job breakdown 그림 생성 |
+| `analysis_scripts/plot_server_metrics.py` | server decode/prefill/request stats 그림 생성 |
+| `analysis_scripts/plot_lambda_slowdown_goodput.py` | λ별 call slowdown과 goodput 비교 |
+| `analysis_scripts/plot_latency_slowdown_cdf.py` | latency slowdown CDF 생성 |
+| `analysis_scripts/analyze_job_call_slowdown_by_release.py` | release time 기준 job/call slowdown 분석 |
+| `analysis_scripts/analyze_motivation.py` | 여러 run을 묶은 motivation summary figure 생성 |
+
+## Workload Model
+
+`swe_bench_coding`은 SWE-bench Lite 문제를 입력으로 쓰는 synthetic multi-call agent입니다.
+
+```text
+Understand -> Locate(1-4) -> Plan -> Implement(1-3) -> Verify
+-> Debug -> Implement -> Verify ...
+```
+
+각 job은 `chain_min`부터 `chain_max` 사이의 call chain length를 갖습니다. System prompt는 모든 call에서 동일하고, replay별 nonce는 첫 user message에 들어갑니다.
+
+`swe_bench_coding_tool_delay`는 같은 chain/stage/prompt를 쓰며, 현재 call prompt에 `Tool result:`가 붙는 경우에만 call 시작 전에 sleep합니다. Delay는 `sha256(tool_delay_beta_v1|base_instance_id|replay_index|boundary_call_index)`로 seed를 만들기 때문에 같은 SWE-bench task/replay/boundary는 모든 실험에서 같은 interval을 갖습니다.
+
+`swe_bench_coding_parallel_tool_delay`는 `swe_bench_coding_tool_delay`를 기반으로 하며, 총 call 수는 바꾸지 않습니다. `Understand` 이후 연속된 `Locate` stage들을 하나의 `execution_round`로 묶어 동시에 요청하고, 이후 `Plan`은 그 round의 모든 결과에 의존합니다. Round에 여러 tool-result call이 있으면 round delay는 해당 call들의 deterministic delay 중 `max`를 사용합니다.
+
+## Reproducibility
+
+- `--seed`는 workload RNG, task replay generation, Poisson arrival sampling, LLM request seed에 사용됩니다.
+- rate/poisson sweep은 각 condition마다 같은 seed로 fresh task pool을 만듭니다.
+- `swe_bench_coding` LLM 요청은 `temperature=0.0`, `top_p=1.0`, `seed=<--seed>`를 사용합니다.
+- `swe_bench_coding_tool_delay`의 tool interval은 workload RNG와 별개로 task/replay/call boundary hash에서 결정됩니다.
+- `swe_bench_coding_parallel_tool_delay`의 parallel round 구조는 stage sequence에서 deterministic하게 결정되며 별도 RNG를 쓰지 않습니다.
+- `run_config.json`에 workload metadata와 reproducibility 설정을 저장합니다.
+- 서버까지 bitwise 동일하게 만들려면 SGLang의 model, parallelism, scheduler, random seed도 고정해야 합니다.
+
+## Adding A Workload
+
+새 workload는 `workloads/<name>/workload.py`로 추가합니다. `run_experiment.py`는 `--workload <name>`으로 adapter를 로드합니다.
+
+Workload adapter가 제공해야 하는 주요 메서드:
+
+```text
+load_dataset(args, workload_config)
+build_baseline_tasks(dataset, replay_count, rng, args, workload_config)
+create_task_pool(dataset, baseline_latencies, rng, args, workload_config)
+run_job(task, context)
+task_log_info(task)
+metadata(args, workload_config)
+reproducibility_config(args, workload_config)
 ```

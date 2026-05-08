@@ -30,9 +30,9 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
 
 from metrics_tracker import summarize_tbt_ms
-from prompts.system_prompt import SYSTEM_PROMPT
-from prompts.stage_prompts import AgentStage, STAGE_PROMPTS
-from prompts.simulated_artifacts import (
+from workloads.swe_bench_coding.prompts.system_prompt import SYSTEM_PROMPT
+from workloads.swe_bench_coding.prompts.stage_prompts import AgentStage, STAGE_PROMPTS
+from workloads.swe_bench_coding.prompts.simulated_artifacts import (
     SIMULATED_SEARCH_RESULT,
     SIMULATED_FILE_CONTENTS,
     SIMULATED_TEST_OUTPUT_PASS,
@@ -72,7 +72,11 @@ def count_tokens(text: str) -> int:
 # ---------------------------------------------------------------------------
 # LLM factory
 # ---------------------------------------------------------------------------
-def make_llm(base_url: str = BASE_URL, model_id: str = MODEL_ID) -> ChatOpenAI:
+def make_llm(
+    base_url: str = BASE_URL,
+    model_id: str = MODEL_ID,
+    seed: int = 42,
+) -> ChatOpenAI:
     """Create a ChatOpenAI instance with proper timeout settings."""
     return ChatOpenAI(
         base_url=base_url,
@@ -81,7 +85,7 @@ def make_llm(base_url: str = BASE_URL, model_id: str = MODEL_ID) -> ChatOpenAI:
         temperature=0.0,
         timeout=PER_CALL_TIMEOUT,
         top_p=1.0,
-        seed=42,
+        seed=seed,
     )
 
 
@@ -237,14 +241,106 @@ class ChainState(TypedDict):
     job_timeout_sec: float          # baseline_latency × τ
     is_job_timeout: bool            # True if job exceeded τ timeout
     is_server_terminated: bool      # True if server was terminated mid-job
+    is_rejected: bool               # True if SGLang admission control rejected a call
+    rejection_reason: str           # Admission rejection reason, e.g. TBT_RATIO
+    last_call_error_msg: str        # Client-visible failure for the latest call
     total_input_tokens: int         # cumulative input tokens across calls
     total_output_tokens: int        # cumulative output tokens across calls
     server_terminated_event: Optional[threading.Event]  # set when server is killed
+    tool_call_delays: List[float]   # delay before each call, indexed by call_index - 1
+    tool_delay_total_s: float       # cumulative application-side tool delay
 
 
 # ---------------------------------------------------------------------------
 # Streaming invocation with TBT measurement and per-call timeout
 # ---------------------------------------------------------------------------
+def _metadata_dict(obj: Any) -> dict:
+    """Collect LangChain/OpenAI metadata without assuming one provider shape."""
+    metadata = {}
+    for attr in ("response_metadata", "additional_kwargs", "generation_info"):
+        value = getattr(obj, attr, None)
+        if isinstance(value, dict):
+            metadata.update(value)
+    return metadata
+
+
+def _detect_admission_rejection(obj: Any) -> tuple[bool, str]:
+    metadata = _metadata_dict(obj)
+    finish_reason = metadata.get("finish_reason") or metadata.get("finish_details")
+    reason = metadata.get("admission_reason") or metadata.get("reason") or ""
+    message = metadata.get("message") or ""
+    status_code = metadata.get("status_code")
+
+    if isinstance(finish_reason, dict):
+        status_code = finish_reason.get("status_code", status_code)
+        reason = finish_reason.get("admission_reason", reason)
+        message = finish_reason.get("message", message)
+        finish_type = str(finish_reason.get("type", "")).lower()
+    else:
+        finish_type = str(finish_reason or "").lower()
+
+    text = " ".join(
+        str(part)
+        for part in (finish_reason, reason, message, metadata)
+        if part is not None
+    ).lower()
+
+    rejected = (
+        "admission rejected" in text
+        or "admission_reason" in text
+        or (str(status_code) == "429" and "abort" in finish_type)
+    )
+    if not rejected:
+        return False, ""
+
+    if not reason and isinstance(message, str) and "Admission rejected:" in message:
+        reason = message.split("Admission rejected:", 1)[1].split("(", 1)[0].strip()
+    return True, str(reason or "ADMISSION_REJECTED")
+
+
+def sleep_with_abort_checks(state: ChainState, delay_s: float, call_index: int) -> Optional[dict]:
+    """Sleep in small chunks while honoring job timeout and server termination."""
+    if delay_s <= 0:
+        return None
+
+    last_time = time.time()
+    deadline = time.time() + delay_s
+    while True:
+        now = time.time()
+        state["tool_delay_total_s"] = state.get("tool_delay_total_s", 0.0) + max(0.0, now - last_time)
+        last_time = now
+        if now >= deadline:
+            return None
+
+        job_timeout_sec = state.get("job_timeout_sec", 0)
+        job_start_time = state.get("job_start_time", 0)
+        if job_timeout_sec > 0 and job_start_time > 0 and now - job_start_time > job_timeout_sec:
+            state["is_job_timeout"] = True
+            return {
+                "job_completed": False,
+                "error_msg": f"Job exceeded {job_timeout_sec:.0f}s (τ timeout) during tool delay before call {call_index}",
+                "call_index": call_index,
+                "is_job_timeout": True,
+                "is_server_terminated": state.get("is_server_terminated", False),
+                "tool_delay_total_s": state.get("tool_delay_total_s", 0.0),
+            }
+
+        server_event = state.get("server_terminated_event")
+        if server_event is not None and server_event.is_set():
+            state["is_server_terminated"] = True
+            return {
+                "job_completed": False,
+                "error_msg": f"Server terminated during tool delay before call {call_index}",
+                "call_index": call_index,
+                "is_job_timeout": state.get("is_job_timeout", False),
+                "is_server_terminated": True,
+                "tool_delay_total_s": state.get("tool_delay_total_s", 0.0),
+            }
+
+        sleep_s = min(0.1, deadline - now)
+        time.sleep(sleep_s)
+
+
 def invoke_with_tracking(
     messages: list,
     call_index: int,
@@ -286,9 +382,11 @@ def invoke_with_tracking(
     content_chunk_idx = 0
     is_timeout = False
     is_error = False
+    is_rejected = False
     is_job_timeout = False
     is_server_terminated = False
     error_msg = ""
+    rejection_reason = ""
     response_content = ""
 
     job_timeout_sec = state.get("job_timeout_sec", 0)
@@ -297,6 +395,17 @@ def invoke_with_tracking(
     try:
         for chunk in llm.stream(messages):
             chunk_arrival_time = time.time()
+
+            rejected, detected_reason = _detect_admission_rejection(chunk)
+            if rejected:
+                is_rejected = True
+                is_error = True
+                rejection_reason = detected_reason
+                error_msg = f"Call {call_index}: admission rejected ({rejection_reason})"
+                state["is_rejected"] = True
+                state["rejection_reason"] = rejection_reason
+                state["last_call_error_msg"] = error_msg
+                break
 
             # Job-level τ timeout check
             if job_timeout_sec > 0 and job_start_time > 0:
@@ -359,9 +468,18 @@ def invoke_with_tracking(
 
     except Exception as e:
         err_str = str(e).lower()
+        rejected, detected_reason = _detect_admission_rejection(e)
+        if rejected or "admission rejected" in err_str or "429" in err_str:
+            is_rejected = True
+            is_error = True
+            rejection_reason = detected_reason or "ADMISSION_REJECTED"
+            error_msg = f"Call {call_index}: admission rejected ({rejection_reason})"
+            state["is_rejected"] = True
+            state["rejection_reason"] = rejection_reason
+            state["last_call_error_msg"] = error_msg
         # Detect server termination (connection reset, broken pipe, etc.)
-        if any(kw in err_str for kw in ["connectionreset", "brokenpipe", "connectionaborted",
-                                         "connection refused", "eof occurred", "server disconnected"]):
+        elif any(kw in err_str for kw in ["connectionreset", "brokenpipe", "connectionaborted",
+                                           "connection refused", "eof occurred", "server disconnected"]):
             is_server_terminated = True
             error_msg = f"Call {call_index}: server terminated ({type(e).__name__})"
             # Propagate to state so call_chain_node can see it
@@ -370,13 +488,35 @@ def invoke_with_tracking(
             stream_fallback_used = True
             try:
                 response = llm.invoke(messages)
-                response_content = response.content
-                first_token_time = start_time + (time.time() - start_time) * 0.1
+                rejected, detected_reason = _detect_admission_rejection(response)
+                if rejected:
+                    is_rejected = True
+                    is_error = True
+                    rejection_reason = detected_reason
+                    error_msg = f"Call {call_index}: admission rejected ({rejection_reason})"
+                    state["is_rejected"] = True
+                    state["rejection_reason"] = rejection_reason
+                    state["last_call_error_msg"] = error_msg
+                else:
+                    response_content = response.content
+                    first_token_time = start_time + (time.time() - start_time) * 0.1
             except Exception as e2:
+                rejected, detected_reason = _detect_admission_rejection(e2)
                 is_error = True
-                error_msg = f"Call {call_index} error: {e2}"
+                if rejected or "admission rejected" in str(e2).lower() or "429" in str(e2).lower():
+                    is_rejected = True
+                    rejection_reason = detected_reason or "ADMISSION_REJECTED"
+                    error_msg = f"Call {call_index}: admission rejected ({rejection_reason})"
+                    state["is_rejected"] = True
+                    state["rejection_reason"] = rejection_reason
+                else:
+                    error_msg = f"Call {call_index} error: {e2}"
+                state["last_call_error_msg"] = error_msg
 
     end_time = time.time()
+
+    if error_msg:
+        state["last_call_error_msg"] = error_msg
 
     if not is_timeout and not is_error and not response_content:
         response_content = "".join(response_chunks)
@@ -415,6 +555,8 @@ def invoke_with_tracking(
             total_calls_expected=state["chain_length"],
             is_timeout=is_timeout,
             is_error=is_error,
+            is_rejected=is_rejected,
+            rejection_reason=rejection_reason,
             is_job_timeout=is_job_timeout,
             job_timeout_sec=job_timeout_sec if job_timeout_sec > 0 else None,
             is_server_terminated=is_server_terminated,
@@ -442,7 +584,7 @@ def invoke_with_tracking(
 
     # ---- Console output ----
     if state.get("console_write"):
-        status = "TIMEOUT" if is_timeout else ("ERROR" if is_error else "OK")
+        status = "REJECTED" if is_rejected else ("TIMEOUT" if is_timeout else ("ERROR" if is_error else "OK"))
         state["console_write"](
             f"  [Call {call_index}/{state['chain_length']}] "
             f"status={status} in_tokens={input_tokens} out_tokens={output_tokens} "
@@ -478,6 +620,7 @@ def call_chain_node(state: ChainState) -> dict:
     accumulated = state.get("accumulated_context", "")
     stage_sequence = state.get("stage_sequence", [])
     tool_results = state.get("tool_results", [])
+    tool_call_delays = state.get("tool_call_delays", [])
     job_start_time = state.get("job_start_time", 0)
     job_timeout_sec = state.get("job_timeout_sec", 0)
 
@@ -495,6 +638,7 @@ def call_chain_node(state: ChainState) -> dict:
                 "call_index": call_index,
                 "is_job_timeout": True,
                 "is_server_terminated": state.get("is_server_terminated", False),
+                "tool_delay_total_s": state.get("tool_delay_total_s", 0.0),
             }
 
     # -- Pre-check: server terminated --
@@ -510,11 +654,26 @@ def call_chain_node(state: ChainState) -> dict:
             "call_index": call_index,
             "is_job_timeout": state.get("is_job_timeout", False),
             "is_server_terminated": True,
+            "tool_delay_total_s": state.get("tool_delay_total_s", 0.0),
         }
 
     # Determine the current stage
     stage_idx = call_index - 1  # 0-based index into stage_sequence
     current_stage = stage_sequence[stage_idx] if stage_idx < len(stage_sequence) else AgentStage.DEBUG
+    tool_result = tool_results[stage_idx] if stage_idx < len(tool_results) else None
+    tool_delay_s = (
+        float(tool_call_delays[stage_idx])
+        if call_index > 1 and tool_result and stage_idx < len(tool_call_delays)
+        else 0.0
+    )
+    if tool_delay_s > 0:
+        if state.get("console_write"):
+            state["console_write"](
+                f"[Job {state['job_id']}] Simulated tool delay before call {call_index}: {tool_delay_s:.3f}s"
+            )
+        abort_result = sleep_with_abort_checks(state, tool_delay_s, call_index)
+        if abort_result is not None:
+            return abort_result
 
     # -- Build messages --
     # 1) System message (~15K tokens, IDENTICAL across ALL jobs and calls)
@@ -561,7 +720,6 @@ def call_chain_node(state: ChainState) -> dict:
         context_parts = [f"Previous step output:\n{last_output}"]
 
         # Inject pre-computed tool result for this stage (KEY for context growth)
-        tool_result = tool_results[stage_idx] if stage_idx < len(tool_results) else None
         if tool_result:
             context_parts.append(f"\nTool result:\n{tool_result}")
 
@@ -585,12 +743,16 @@ def call_chain_node(state: ChainState) -> dict:
     if response is None:
         is_job_timeout = state.get("is_job_timeout", False)
         is_server_terminated = state.get("is_server_terminated", False)
+        error_msg = state.get("last_call_error_msg") or f"Call {call_index} failed or timed out"
         return {
             "job_completed": False,
-            "error_msg": f"Call {call_index} failed or timed out",
+            "error_msg": error_msg,
             "call_index": call_index,  # do NOT increment
             "is_job_timeout": is_job_timeout,
             "is_server_terminated": is_server_terminated,
+            "is_rejected": state.get("is_rejected", False),
+            "rejection_reason": state.get("rejection_reason", ""),
+            "tool_delay_total_s": state.get("tool_delay_total_s", 0.0),
         }
 
     # -- Success: update state --
@@ -616,6 +778,10 @@ def call_chain_node(state: ChainState) -> dict:
         "total_output_tokens": new_total_output,
         "is_job_timeout": False,
         "is_server_terminated": False,
+        "is_rejected": False,
+        "rejection_reason": "",
+        "last_call_error_msg": "",
+        "tool_delay_total_s": state.get("tool_delay_total_s", 0.0),
     }
 
 
@@ -690,6 +856,7 @@ def create_chain_state(
     log_level: str = "INFO",
     job_timeout_sec: float = 0,
     job_start_time: float = 0,
+    tool_call_delays: Optional[List[float]] = None,
 ) -> ChainState:
     """
     Create the initial ChainState for a synthetic chain job.
@@ -711,6 +878,7 @@ def create_chain_state(
         job_timeout_sec: Per-job timeout in seconds (baseline_latency × τ).
                          0 means no job-level timeout.
         job_start_time: Epoch seconds when the job started. 0 means not set.
+        tool_call_delays: Optional delay before each call, indexed by call_index - 1.
 
     Returns:
         Initial ChainState dict ready for agent.invoke().
@@ -725,6 +893,8 @@ def create_chain_state(
     # Build stage sequence and tool results
     stage_sequence = build_stage_sequence(chain_length, rng)
     tool_results = build_tool_results(stage_sequence, rng)
+    if tool_call_delays is None:
+        tool_call_delays = [0.0] * chain_length
 
     return ChainState(
         job_id=job_id,
@@ -748,9 +918,14 @@ def create_chain_state(
         job_timeout_sec=job_timeout_sec,
         is_job_timeout=False,
         is_server_terminated=False,
+        is_rejected=False,
+        rejection_reason="",
+        last_call_error_msg="",
         total_input_tokens=0,
         total_output_tokens=0,
         server_terminated_event=None,
+        tool_call_delays=tool_call_delays,
+        tool_delay_total_s=0.0,
     )
 
 
