@@ -88,7 +88,7 @@ python run_experiment.py \
   --session-name hicache_sweep
 ```
 
-예를 들어 λ=0.2 condition은 원격 SGLang session name이 `hicache_sweep_lambda_0p2`가 되고, 로컬 결과 폴더는 `results/YYYYMMDD-HHMMSS_hicache_sweep_lambda_0p2/` 형태가 됩니다.
+예를 들어 λ=0.2 condition은 원격 SGLang session name이 `hicache_sweep_lambda_0p2`가 되고, 로컬 결과 폴더는 `results/YYMMDD_HHMM_hicache_sweep_lambda_0p2/` 형태가 됩니다.
 
 ### Fixed-rate sweep
 
@@ -122,7 +122,7 @@ cd /home/nxclab/sglang/ms_dev/expctl && python3 run_experiment.py --mode single 
 각 condition이 끝나면 runner는 원격 session folder를 자동으로 가져옵니다.
 
 ```text
-results/YYYYMMDD-HHMMSS_<session-name>/
+results/YYMMDD_HHMM_<session-name>/
 ├── server_session/      # 원격 session folder 전체 rsync
 └── server.stderr.log    # 기존 parser가 바로 읽을 수 있게 root에도 복사
 ```
@@ -180,7 +180,7 @@ python analysis_scripts/analyze_job_call_slowdown_by_release.py \
 
 `results/`는 두 종류의 산출물을 담습니다.
 
-- `results/YYYYMMDD-HHMMSS[_session-name]/`: 단일 실험 run
+- `results/YYMMDD_HHMM[_session-name]/`: 단일 실험 run
 - `results/aggregate_analysis/`: 여러 run을 묶어 만든 cross-run 분석 산출물
 
 현재 aggregate output 예시:
@@ -194,7 +194,7 @@ results/aggregate_analysis/
 새 run의 기본 구조:
 
 ```text
-results/YYYYMMDD-HHMMSS_<session-name>/
+results/YYMMDD_HHMM_<session-name>/
 ├── run_config.json
 ├── metrics.csv
 ├── errors.log

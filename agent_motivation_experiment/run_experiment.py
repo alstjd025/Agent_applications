@@ -641,30 +641,56 @@ def value_name(value) -> str:
     return f"{value:g}".replace("-", "m").replace(".", "p")
 
 
+_SESSION_TS_PREFIX_RE = re.compile(r"^\d{6}_\d{4}_")
+
+
 def condition_session_name(base_session_name: Optional[str], tag: Optional[str]) -> Optional[str]:
+    """Build the session name shared with the remote sglang server.
+
+    Adds a YYMMDD_HHMM_ prefix from the local clock (idempotent: skipped if
+    the supplied base already starts with that pattern). The remote sglang
+    side does the same idempotent prefix, so whichever clock fires first
+    wins and the two sides agree on the resolved name for fetch/rsync.
+    """
     base = safe_name(base_session_name)
     if not base:
         return None
     suffix = safe_name(tag)
-    if base and suffix:
-        return safe_name(f"{base}_{suffix}")
-    return base
+    combined = safe_name(f"{base}_{suffix}") if suffix else base
+    if combined and not _SESSION_TS_PREFIX_RE.match(combined):
+        ts = datetime.now().strftime("%y%m%d_%H%M")
+        combined = f"{ts}_{combined}"
+    return combined
 
 
 def setup_run_dir(base_dir: str, tag: str = None, resume_dir: str = None) -> dict:
-    """Create a run directory with standard subdirectories."""
+    """Create a run directory with standard subdirectories.
+
+    Directory name format matches the remote sglang session: YYMMDD_HHMM_<tag>.
+    If `tag` already starts with that prefix (because it came from
+    `condition_session_name`), it is used as-is and not prefixed twice.
+    On collision we append _v2, _v3, ... since minute resolution would
+    otherwise spin for up to a minute.
+    """
     if resume_dir:
         run_dir = resume_dir
         print(f"Resuming from existing directory: {run_dir}")
     else:
+        suffix = safe_name(tag)
+        if suffix and _SESSION_TS_PREFIX_RE.match(suffix):
+            base_name = suffix
+        else:
+            ts = datetime.now().strftime("%y%m%d_%H%M")
+            base_name = f"{ts}_{suffix}" if suffix else ts
+        n = 0
         while True:
-            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            suffix = safe_name(tag)
-            dirname = f"{timestamp}_{suffix}" if suffix else timestamp
-            run_dir = os.path.join(base_dir, dirname)
+            name = base_name if n == 0 else f"{base_name}_v{n+1}"
+            run_dir = os.path.join(base_dir, name)
             if not os.path.exists(run_dir):
                 break
-            time.sleep(1)
+            n += 1
+            if n > 99:
+                raise RuntimeError(f"too many run-dir collisions for {base_name}")
     os.makedirs(run_dir, exist_ok=True)
 
     return {

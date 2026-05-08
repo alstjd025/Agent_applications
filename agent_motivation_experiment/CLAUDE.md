@@ -7,8 +7,17 @@ This project measures how application-level goodput collapses under load even wh
 0. Read `README.md` first before running or modifying experiments. Follow the README command flow unless the user explicitly asks for a different low-level path.
 1. `run_experiment.py` runs local application workloads against an OpenAI-compatible SGLang endpoint.
 2. The SGLang server runs remotely on SSH host `NXC7` and is controlled by this runner through tmux.
-3. Results go under `results/YYYYMMDD-HHMMSS[_session-name]/`.
-4. If `--session-name` is provided, the runner passes it to the remote server, fetches the remote runtime session with `rsync`, stores it in `server_session/`, and copies `server.stderr*` to the run root.
+3. Results go under `results/<YYMMDD_HHMM>_<session-name>/` (e.g.
+   `results/260509_1214_admission_lambda_0p2/`); same `YYMMDD_HHMM_` prefix the
+   remote sglang session folder uses. On collision within the same minute the
+   runner appends `_v2`, `_v3`, ... With no `--session-name` the dir is just
+   `<YYMMDD_HHMM>`.
+4. If `--session-name` is provided, the runner builds the prefixed name in
+   `condition_session_name()` and passes it to the remote server with
+   `--session-name`. The remote sglang prefix-pass is idempotent (sees the
+   prefix and uses the name as-is), so both sides agree on the resolved name.
+   The runner then fetches the remote runtime session with `rsync`, stores it
+   in `server_session/`, and copies `server.stderr*` to the run root.
 5. Analysis scripts live in `analysis_scripts/`.
 6. Run long experiments from the local tmux `motivation` session.
 
