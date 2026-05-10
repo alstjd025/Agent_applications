@@ -123,7 +123,11 @@ class SGLangServerController:
                 start_cmd = f"{start_cmd} --session-name {shlex.quote(session_name)}"
             print(f"[SGLangServer] Remote session: {session_name}")
         try:
+            # Clear any leftover characters in the tmux pane's input line
+            # before appending our command, so a stray 'd' (or anything else)
+            # cannot turn `cd ...` into `dcd ...`.
             self._ssh(
+                f"tmux send-keys -t {shlex.quote(self.tmux_session)} C-u && "
                 f"tmux send-keys -t {shlex.quote(self.tmux_session)} "
                 f"{shlex.quote(start_cmd)} Enter",
                 timeout=15,
