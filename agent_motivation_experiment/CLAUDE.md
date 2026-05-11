@@ -54,6 +54,11 @@ When testing admission-control rejection behavior:
 | `analysis_scripts/plot_application_metrics.py` | Builds application figures |
 | `analysis_scripts/parse_server_logs.py` | Parses `server.stderr*` into `server_metrics.csv` |
 | `analysis_scripts/plot_server_metrics.py` | Builds server-side figures |
+| `analysis_scripts/plot_lambda_slowdown_goodput.py` | Cross-run λ→slowdown/goodput summary CSVs and plots |
+| `analysis_scripts/plot_latency_slowdown_cdf.py` | Latency slowdown CDF figure across runs |
+| `analysis_scripts/analyze_job_call_slowdown_by_release.py` | Per-λ release-time job/call slowdown analysis |
+| `analysis_scripts/analyze_motivation.py` | Motivation summary figure across runs |
+| `analysis_scripts/summarize_sweep_window.py` | Re-aggregates `application_summary.csv` columns over a `[start_min, end_min]` time window across runs (skips warmup/saturation) |
 | `results/` | Run outputs |
 | `results/aggregate_analysis/` | Cross-run analysis outputs |
 | `workloads/AGENTS.md` | Workload adapter notes |
@@ -95,6 +100,19 @@ python analysis_scripts/analyze_job_call_slowdown_by_release.py \
   --output-dir results/aggregate_analysis/job_call_slowdown_by_release_time
 ```
 
+Re-aggregate summary over a steady-state window (e.g. drop the first 20 min of warmup):
+
+```bash
+python analysis_scripts/summarize_sweep_window.py \
+  --run-dirs results/260510_*tau5_lambda_* \
+  --window-min 20 80 \
+  --output-csv results/aggregate_analysis/sweep_window_summary_tau5_20to80min.csv \
+  --print-markdown \
+  --plot-png results/aggregate_analysis/sweep_window_goodput_vs_lambda_tau5_20to80min.png
+```
+
+Filters: calls by `start_time`, jobs by `job_submit_time`, both relative to each run's first call. Uses the same `build_summary` as the per-run parser so columns stay in lockstep with `application_summary.csv`. `--plot-png` produces a `λ → call/job goodput rate` line plot (SLO attainment view) over the same window.
+
 ## Goodput
 
 Baseline latencies are loaded from `--baseline-dir`.
@@ -130,6 +148,108 @@ analysis/application_parallel_rounds.csv
 ```
 
 Use `execution_round`, not `wave`, for the group of calls that start after the same dependency barrier.
+
+### Run-boundary cutoffs (unclassified jobs)
+
+Jobs that did not complete because the run ended (`is_server_terminated=True`)
+and that were not also admission-rejected or `is_job_timeout=True` have an
+**unknown outcome** — they were neither verified to meet the SLO nor verified
+to violate it. The parser treats these as **unclassified**:
+
+- `parse_application_metrics.py` `add_tau_goodput()` sets `job_goodput_bool = NaN` for such jobs (run-boundary cutoff condition: `is_server_terminated & ~is_rejected & ~is_job_timeout`).
+- All downstream goodput rates use `classifiable_jobs = job_goodput_bool.notna()` as the denominator, so unclassified jobs drop out instead of counting as SLO misses.
+- `wasted_tokens` only sums tokens from jobs **explicitly** classified as not-goodput. Unclassified-job tokens are excluded from `wasted_compute_ratio`.
+- `summarize_sweep_window.py` records `output_goodput_tokens_per_s`, `output_wasted_tokens_per_s`, and `output_unclassified_tokens_per_s` separately, and looks up the classification from the **full** jobs table (not the windowed slice) so a call whose `start_time` is in the analysis window but whose parent job's `submit_time` is just before the window still gets attributed correctly.
+- The token-throughput stacked-bar plot uses **classified throughput only** (goodput + wasted) as the bar height, so the two segments sum to 100% within each bar. The unclassified bucket stays in the CSV for inspection but is omitted from the figure.
+
+**Why excluded, not counted as a miss:** A job cut off by run end may well have been on track for goodput. Counting it as "not goodput" systematically penalizes low-λ runs (where chain duration exceeds inter-arrival, so jobs released near the run end can't finish before termination). The classified-only rate isolates real SLO behavior.
+
+If you change the run duration or window, the unclassified count shifts accordingly; report it alongside the goodput rate when the share is non-trivial.
+
+## Confirmation Before Reporting Results
+
+When the user asks to **show / summarize / build / compare** experiment results
+("보여줘 / 정리해줘 / 결과 만들어줘 / 비교해줘"), restate the measurement
+choices before producing tables or figures, and ask for confirmation:
+
+1. **Metric**: call goodput rate, job goodput rate, rejection rate, slowdown distribution, throughput, wasted tokens, etc.
+2. **Definition**: denominator (e.g. classified jobs only vs all jobs), tau threshold, baseline source, window range (warmup / drain handling).
+3. **Run scope**: which runs are in / out, baseline location.
+
+Restate even when the user is following up on a prior measurement — call out
+the inherited choices in one or two lines so the user can correct them.
+Do not silently reuse defaults from earlier in the conversation if the new
+ask might want different ones (e.g. switching from per-run summary to a
+windowed steady-state summary).
+
+If a metric definition has recently changed (see "Run-boundary cutoffs"
+above for the current definition of `job_goodput_rate`), note that in the
+restatement so the user knows which version is being used.
+
+## Figure Styling (paper figures)
+
+Project-wide defaults for paper-grade figures. Apply these to every new plot
+intended for the paper so the whole paper looks consistent. Figure size and
+inner axes box can vary per figure; the items below should stay fixed unless
+explicitly relaxed.
+
+Reference implementation: [analysis_scripts/summarize_sweep_window.py](analysis_scripts/summarize_sweep_window.py)
+(`plot_goodput_vs_lambda`).
+
+### rcParams (apply via `plt.rc_context`)
+
+```python
+PAPER_STYLE = {
+    "font.family": "serif",
+    "font.serif": ["DejaVu Serif", "Times New Roman", "Liberation Serif"],
+    "font.size": 8,
+    "axes.labelsize": 9,
+    "axes.titlesize": 9,
+    "axes.linewidth": 0.75,
+    "legend.fontsize": 8,
+    "legend.frameon": False,
+    "xtick.labelsize": 8,
+    "ytick.labelsize": 8,
+    "xtick.direction": "in",
+    "ytick.direction": "in",
+    "xtick.major.size": 3.0,
+    "ytick.major.size": 3.0,
+    "xtick.major.width": 0.7,
+    "ytick.major.width": 0.7,
+    "lines.linewidth": 1.4,
+    "lines.markersize": 4.5,
+}
+```
+
+### Layout
+
+- All four spines visible (full frame).
+- y-axis dotted grid only: `linestyle=":"`, `linewidth=0.7`, `alpha=0.6`. No x-axis grid.
+- Legend frameless, placed above the axes: `loc="lower center"`, `bbox_to_anchor=(0.5, 1.02)`, `ncol=N` (horizontal).
+- Marker edge: white, 0.5 pt (helps when markers overlap).
+- Save with `dpi=300`. Do **not** use `bbox_inches="tight"` when the inner axes box must hit a target physical size; pin it with `ax.set_position()` instead.
+- For ACM 2-column (`acmart` `sigconf`): single-column max width is 3.33 in. If the inner axes box plus margins exceed that, let LaTeX scale via `\includegraphics[width=\columnwidth]`.
+
+### Color palette
+
+Use matplotlib `tab10` in this order so colors stay tied to roles across figures.
+
+| Role | Hex |
+|---|---|
+| Request/call-level metric (primary) | `#1f77b4` (blue) |
+| Job-level metric (secondary) | `#d62728` (red) |
+| Third series | `#2ca02c` (green) |
+| Fourth series | `#9467bd` (purple) |
+
+If colorblind-safe output is required for a venue, swap to the Wong palette: `#0072B2`, `#D55E00`, `#009E73`, `#CC79A7`.
+
+### Naming
+
+- For latency-SLO attainment **rates** (the goodput rate metrics): use **"Request-level SLO attainment"** and **"Job-level SLO attainment"** in legends and prose. y-axis label: `"SLO attainment (%)"`.
+- For token-level throughput plots (stacked-area, total tokens generated in the analysis window): use **"Goodput tokens"** for the SLO-meeting portion and **"Wasted tokens"** for the rest. The stack total = throughput. y-axis label: `"Output tokens (M)"` with values in millions.
+- Avoid "call goodput" / "job goodput" in legends.
+- Arrival-rate x-axis label: `r"Arrival rate $\lambda$ (jobs/sec)"`. On dense log-axis ticks, rotate labels 45°, `ha="right"`, `rotation_mode="anchor"`. Invert the axis so higher load is on the left.
+- For rejection rate plotted alongside goodput, use a **twin y-axis** on the right labeled `"Rejection rate (%)"`. Keep tick/label/spine colors at the default (black) — only the rejection line itself carries its color (orange dashed).
 
 ## Editing Guidance
 

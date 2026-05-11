@@ -260,6 +260,28 @@ def add_tau_goodput(
         jobs["job_latency_threshold"] = jobs["baseline_job_latency"] * tau
         jobs["job_slowdown"] = jobs["latency"] / jobs["baseline_job_latency"]
         classifiable = jobs["baseline_job_latency"].notna() & (jobs["baseline_job_latency"] > 0)
+        # Run-boundary cutoffs are not SLO violations: a job that the runner
+        # terminated when the run ended (is_server_terminated=True) and was
+        # neither rejected at admission nor timed out by tau has an unknown
+        # outcome. Treat such jobs as unclassified so they drop out of the
+        # goodput-rate denominator instead of being counted as SLO misses.
+        server_term = (
+            _as_bool(jobs["is_server_terminated"])
+            if "is_server_terminated" in jobs.columns
+            else pd.Series(False, index=jobs.index)
+        )
+        job_timeout = (
+            _as_bool(jobs["is_job_timeout"])
+            if "is_job_timeout" in jobs.columns
+            else pd.Series(False, index=jobs.index)
+        )
+        rejected = (
+            jobs["is_rejected_bool"].astype(bool)
+            if "is_rejected_bool" in jobs.columns
+            else pd.Series(False, index=jobs.index)
+        )
+        boundary_cutoff = server_term & ~rejected & ~job_timeout
+        classifiable = classifiable & ~boundary_cutoff
         ok = (
             jobs["job_completed_bool"]
             & classifiable

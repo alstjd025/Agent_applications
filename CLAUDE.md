@@ -67,13 +67,14 @@ synthetic coding agent workload로 측정합니다.
   새 분석은 새 CSV을 추가하는 방향으로.
 - 분석 스크립트를 옮기거나 편집한 뒤에는
   `python -m py_compile analysis_scripts/*.py run_experiment.py` 로 syntax sanity check.
+- **실험 결과를 보여주거나 정리/요약/비교/플롯을 만드는 요청**("보여줘/정리해줘/결과 만들어줘/비교해줘")이 들어오면, 표·그림을 만들기 전에 **어떤 metric을 / 어떤 정의로 / 어떤 run 범위에서** 측정하는지 한두 줄로 다시 적어 사용자 확인을 받는다. 이전 대화의 default를 자동으로 재사용하지 말고 명시적으로 inherit/변경할지 묻는다. 상세 규칙은 [`agent_motivation_experiment/CLAUDE.md`](agent_motivation_experiment/CLAUDE.md) 의 "Confirmation Before Reporting Results" 참고.
 
 ---
 
 ## Quick Glossary
 
 - **call goodput** — `call_latency < baseline_call_latency * tau` 인 LLM call 비율
-- **job goodput** — `job_latency < baseline_job_latency * tau` 인 multi-call job 비율
+- **job goodput** — `job_latency < baseline_job_latency * tau` 인 multi-call job 비율. **분모는 classifiable jobs만** — run 끝에서 잘린(`is_server_terminated=True`이고 reject/timeout 아닌) job은 outcome 미정으로 분모에서 제외 (자세한 정의는 [`agent_motivation_experiment/CLAUDE.md`](agent_motivation_experiment/CLAUDE.md) 의 "Run-boundary cutoffs" 참고)
 - **tau (`--tau`)** — goodput 임계 배수 (보통 3.0)
 - **baseline** — concurrency 1로 task별 기준 latency 수집한 run. `--baseline-dir` 로 다른 run에 주입
 - **session-name (`--session-name`)** — 로컬 결과 디렉토리 suffix이자, 원격 SGLang 서버의 runtime session 이름. 로컬/원격 로그 매칭 키
