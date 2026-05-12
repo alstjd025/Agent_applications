@@ -293,6 +293,10 @@ def _detect_admission_rejection(obj: Any) -> tuple[bool, str]:
 
     Returns (rejected, reason). reason is the upstream reason string
     when available, or "ADMISSION_REJECTED" / "HALO_REJECTED" fallback.
+
+    For exceptions raised by langchain/openai SDK on HTTP 4xx, the
+    relevant info is usually only in `str(exception)` (the response
+    metadata fields are empty), so we also scan that as a fallback.
     """
     metadata = _metadata_dict(obj)
     finish_reason = metadata.get("finish_reason") or metadata.get("finish_details")
@@ -317,9 +321,15 @@ def _detect_admission_rejection(obj: Any) -> tuple[bool, str]:
     else:
         finish_type = str(finish_reason or "").lower()
 
+    # Include str(obj) so exception messages from openai SDK (e.g.
+    # `openai.BadRequestError`) — which don't surface fields via
+    # _metadata_dict — still expose 'halo rejected' / 'halo_reason' /
+    # 'HALO_*' tokens. Without this the HTTP 400 rejection path is
+    # invisible to the client and metrics.csv never marks the call as
+    # is_rejected.
     text = " ".join(
         str(part)
-        for part in (finish_reason, reason, message, metadata)
+        for part in (finish_reason, reason, message, metadata, obj)
         if part is not None
     ).lower()
 
@@ -523,9 +533,27 @@ def invoke_with_tracking(
     except Exception as e:
         err_str = str(e).lower()
         rejected, detected_reason = _detect_admission_rejection(e)
-        if rejected or "admission rejected" in err_str or "429" in err_str:
+        # HALO path: server returns HTTP 400 with body
+        #   {"error":{"message":"Halo rejected: ...","halo_reason":"HALO_*"}}
+        # langchain/openai wraps that into an exception whose str()
+        # contains those tokens. We catch them here in addition to the
+        # admission_control 429 path.
+        halo_text_hit = (
+            "halo rejected" in err_str
+            or "halo_reason" in err_str
+            or "halo_no_job_id" in err_str
+            or "halo_program_not_registered" in err_str
+        )
+        if (
+            rejected
+            or "admission rejected" in err_str
+            or "429" in err_str
+            or halo_text_hit
+        ):
             is_rejected = True
             is_error = True
+            if not detected_reason and halo_text_hit:
+                detected_reason = "HALO_REJECTED"
             rejection_reason = detected_reason or "ADMISSION_REJECTED"
             error_msg = f"Call {call_index}: admission rejected ({rejection_reason})"
             state["is_rejected"] = True
@@ -557,8 +585,22 @@ def invoke_with_tracking(
             except Exception as e2:
                 rejected, detected_reason = _detect_admission_rejection(e2)
                 is_error = True
-                if rejected or "admission rejected" in str(e2).lower() or "429" in str(e2).lower():
+                err2 = str(e2).lower()
+                halo_hit2 = (
+                    "halo rejected" in err2
+                    or "halo_reason" in err2
+                    or "halo_no_job_id" in err2
+                    or "halo_program_not_registered" in err2
+                )
+                if (
+                    rejected
+                    or "admission rejected" in err2
+                    or "429" in err2
+                    or halo_hit2
+                ):
                     is_rejected = True
+                    if not detected_reason and halo_hit2:
+                        detected_reason = "HALO_REJECTED"
                     rejection_reason = detected_reason or "ADMISSION_REJECTED"
                     error_msg = f"Call {call_index}: admission rejected ({rejection_reason})"
                     state["is_rejected"] = True
