@@ -7,9 +7,20 @@ from that run's first call, and rebuilds the same columns as
 `application_summary.csv` over the slice. Useful for excluding warmup/saturation
 tails when comparing runs.
 
-Filter rules:
-- calls: `start_time` in [t0 + start_min*60, t0 + end_min*60)
-- jobs:  `job_submit_time` in the same window (release-time filter)
+Filter rules (steady-state goodput definition):
+- jobs:  `job_submit_time` in [t0 + start_min*60, t0 + end_min*60) — the
+  release-time filter. Models "jobs that entered the system during
+  steady-state load".
+- calls: every call whose parent job is in the windowed job set
+  (tied to parent submit time). Do NOT filter calls independently by
+  `start_time`; that mixes populations and can invert call/job goodput
+  ordering at high load.
+
+Run-boundary cutoffs (jobs submitted near `end_min` whose chain doesn't
+finish before the run terminates) are surfaced as `job_goodput_bool = NaN`
+by `parse_application_metrics.py` and drop out of the denominator
+automatically. See CLAUDE.md `Goodput > Window filtering` / `Goodput >
+Run-boundary cutoffs` for the full rationale.
 
 Outputs one CSV row per run with the existing summary columns plus
 `run`, `lambda`, `tau`, `window_start_min`, `window_end_min`,
@@ -83,9 +94,11 @@ def summarize_run(run_dir: Path, window_min) -> dict:
     start_s = t0 + float(window_min[0]) * 60.0
     end_s = t0 + float(window_min[1]) * 60.0
 
-    calls_w = calls[
-        (calls["start_time"] >= start_s) & (calls["start_time"] < end_s)
-    ].copy()
+    # Window the jobs first, then tie calls to those jobs' task_ids. This keeps
+    # call-rate and job-rate metrics on the same population (the chain whose
+    # parent job was submitted in the window), so chain-amplification orderings
+    # such as call_goodput < job_goodput don't get inverted by independent
+    # call/job filters.
     if "job_submit_time" in jobs.columns:
         jobs_w = jobs[
             (jobs["job_submit_time"] >= start_s)
@@ -93,6 +106,11 @@ def summarize_run(run_dir: Path, window_min) -> dict:
         ].copy()
     else:
         jobs_w = jobs.iloc[0:0].copy()
+    if "task_id" in jobs_w.columns and "task_id" in calls.columns:
+        window_task_ids = set(jobs_w["task_id"])
+        calls_w = calls[calls["task_id"].isin(window_task_ids)].copy()
+    else:
+        calls_w = calls.iloc[0:0].copy()
 
     summary = build_summary(calls_w, jobs_w).iloc[0].to_dict()
 
@@ -106,18 +124,15 @@ def summarize_run(run_dir: Path, window_min) -> dict:
     # submit_time is just before the window still gets attributed correctly.
     # Sum of the three equals output_tokens_per_s (from build_summary).
     duration_s = summary.get("duration_s")
-    output_goodput_tps = float("nan")
-    output_wasted_tps = float("nan")
-    output_unclassified_tps = float("nan")
-    if (
-        duration_s is not None
-        and not pd.isna(duration_s)
-        and float(duration_s) > 0
-        and not jobs.empty
-        and "task_id" in jobs.columns
-        and "task_id" in calls_w.columns
-        and "output_tokens" in calls_w.columns
-    ):
+
+    # Job classification IDs (shared by the 3-bucket and 4-bucket token splits).
+    # Uses the *full* jobs DataFrame so a call whose start_time is in the
+    # window but whose parent job's submit_time is just before the window
+    # still gets attributed correctly.
+    good_ids: set = set()
+    bad_ids: set = set()
+    unclassified_ids: set = set()
+    if not jobs.empty and "task_id" in jobs.columns and "job_goodput_bool" in jobs.columns:
         gp_bool_all = jobs["job_goodput_bool"]
         good_ids = set(jobs.loc[gp_bool_all.fillna(False).astype(bool), "task_id"])
         bad_ids = set(
@@ -127,10 +142,23 @@ def summarize_run(run_dir: Path, window_min) -> dict:
             ]
         )
         unclassified_ids = set(jobs.loc[gp_bool_all.isna(), "task_id"])
+
+    # Three-bucket output-token split by parent-job classification.
+    # Sum equals output_tokens_per_s (from build_summary).
+    output_goodput_tps = float("nan")
+    output_wasted_tps = float("nan")
+    output_unclassified_tps = float("nan")
+    if (
+        duration_s is not None
+        and not pd.isna(duration_s)
+        and float(duration_s) > 0
+        and "task_id" in calls_w.columns
+        and "output_tokens" in calls_w.columns
+    ):
+        d = float(duration_s)
         good_calls = calls_w[calls_w["task_id"].isin(good_ids)]
         bad_calls = calls_w[calls_w["task_id"].isin(bad_ids)]
         unclassified_calls = calls_w[calls_w["task_id"].isin(unclassified_ids)]
-        d = float(duration_s)
         output_goodput_tps = float(good_calls["output_tokens"].sum()) / d
         output_wasted_tps = float(bad_calls["output_tokens"].sum()) / d
         output_unclassified_tps = (
@@ -139,6 +167,40 @@ def summarize_run(run_dir: Path, window_min) -> dict:
     summary["output_goodput_tokens_per_s"] = output_goodput_tps
     summary["output_wasted_tokens_per_s"] = output_wasted_tps
     summary["output_unclassified_tokens_per_s"] = output_unclassified_tps
+
+    # Four-way breakdown by (call_goodput, job_goodput). Calls whose
+    # call_goodput_bool is NA (no per-call baseline match — the workload's
+    # chain length can differ between baseline and replay for the same task)
+    # are absorbed into the *default* segment of their parent job's status
+    # (segment 1 if job goodput, segment 4 if wasted), so the four buckets
+    # always sum to goodput_tokens + wasted_tokens.
+    out_s1 = float("nan")  # call ∈ {T, NA} & job T -> pure goodput
+    out_s2 = float("nan")  # call F & job T          -> slow call, goodput job
+    out_s3 = float("nan")  # call T & job F          -> good call, wasted job
+    out_s4 = float("nan")  # call ∈ {F, NA} & job F  -> pure wasted
+    if (
+        duration_s is not None
+        and not pd.isna(duration_s)
+        and float(duration_s) > 0
+        and not calls_w.empty
+        and "call_goodput_bool" in calls_w.columns
+        and "task_id" in calls_w.columns
+        and "output_tokens" in calls_w.columns
+    ):
+        d = float(duration_s)
+        cgp = calls_w["call_goodput_bool"]
+        is_T = (cgp == True).fillna(False).astype(bool)
+        is_F = (cgp == False).fillna(False).astype(bool)
+        in_good = calls_w["task_id"].isin(good_ids)
+        in_bad = calls_w["task_id"].isin(bad_ids)
+        out_s1 = float(calls_w.loc[in_good & ~is_F, "output_tokens"].sum()) / d
+        out_s2 = float(calls_w.loc[in_good & is_F, "output_tokens"].sum()) / d
+        out_s3 = float(calls_w.loc[in_bad & is_T, "output_tokens"].sum()) / d
+        out_s4 = float(calls_w.loc[in_bad & ~is_T, "output_tokens"].sum()) / d
+    summary["output_pure_goodput_tokens_per_s"] = out_s1
+    summary["output_slow_call_in_goodput_job_tokens_per_s"] = out_s2
+    summary["output_good_call_in_wasted_job_tokens_per_s"] = out_s3
+    summary["output_pure_wasted_tokens_per_s"] = out_s4
 
     lam = None
     tau = None
@@ -296,6 +358,120 @@ def plot_token_throughput_vs_goodput(df: pd.DataFrame, output_png: Path) -> None
         ax.set_xlim(-0.5, len(lams) - 0.5)
         ax.set_xlabel(r"Arrival rate $\lambda$ (jobs/sec)")
         ax.set_ylabel("Output tokens (M)")
+        ax.set_ylim(0, ymax * 1.08)
+
+        for side in ("top", "right", "bottom", "left"):
+            ax.spines[side].set_visible(True)
+        ax.yaxis.grid(True, linestyle=":", linewidth=0.7, alpha=0.6)
+        ax.xaxis.grid(False)
+        ax.set_axisbelow(True)
+
+        ax.legend(
+            loc="lower center",
+            bbox_to_anchor=(0.5, 1.02),
+            ncol=2,
+            handlelength=2.2,
+            borderpad=0.4,
+            columnspacing=1.4,
+            labelspacing=0.3,
+        )
+
+        output_png.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_png, dpi=300)
+        plt.close(fig)
+    print(f"Saved: {output_png}")
+
+
+def plot_token_throughput_call_job_breakdown(df: pd.DataFrame, output_png: Path) -> None:
+    """Variant of `plot_token_throughput_vs_goodput` with 4 sub-segments per
+    bar, splitting the goodput and wasted regions by individual call_goodput
+    status:
+      - Pure goodput      (call T or NA, job T): solid blue
+      - Slow call, good job (call F, job T):     blue with diagonal hatch
+      - Good call, wasted job (call T, job F):   red with diagonal hatch
+      - Pure wasted       (call F or NA, job F): solid red
+    The 1+2 height equals the simple "goodput tokens" segment of the
+    2-segment plot; 3+4 equals the simple "wasted tokens" segment.
+    """
+    cols = [
+        "lambda",
+        "output_pure_goodput_tokens_per_s",
+        "output_slow_call_in_goodput_job_tokens_per_s",
+        "output_good_call_in_wasted_job_tokens_per_s",
+        "output_pure_wasted_tokens_per_s",
+        "duration_s",
+    ]
+    plot_df = df.dropna(subset=cols).sort_values("lambda")
+    if plot_df.empty:
+        print(f"[skip plot] no rows with required columns; nothing for {output_png}")
+        return
+    plot_df = plot_df.iloc[::-1].reset_index(drop=True)
+    lams = plot_df["lambda"].astype(float).to_numpy()
+    duration_s = plot_df["duration_s"].astype(float).to_numpy()
+    s1 = (
+        plot_df["output_pure_goodput_tokens_per_s"]
+        .astype(float).clip(lower=0).to_numpy() * duration_s
+    )
+    s2 = (
+        plot_df["output_slow_call_in_goodput_job_tokens_per_s"]
+        .astype(float).clip(lower=0).to_numpy() * duration_s
+    )
+    s3 = (
+        plot_df["output_good_call_in_wasted_job_tokens_per_s"]
+        .astype(float).clip(lower=0).to_numpy() * duration_s
+    )
+    s4 = (
+        plot_df["output_pure_wasted_tokens_per_s"]
+        .astype(float).clip(lower=0).to_numpy() * duration_s
+    )
+    total = s1 + s2 + s3 + s4
+    s1_m, s2_m, s3_m, s4_m = s1/1e6, s2/1e6, s3/1e6, s4/1e6
+    total_m = total / 1e6
+
+    AX_W, AX_H = 3.0, 1.95
+    LEFT_IN, BOTTOM_IN = 0.55, 0.7
+    # Slightly taller top pad because the legend now has 4 items (2 rows).
+    RIGHT_PAD_IN, TOP_PAD_IN = 0.15, 0.65
+    fig_w = LEFT_IN + AX_W + RIGHT_PAD_IN
+    fig_h = BOTTOM_IN + AX_H + TOP_PAD_IN
+
+    with plt.rc_context(_paper_style()):
+        fig = plt.figure(figsize=(fig_w, fig_h))
+        ax = fig.add_axes((
+            LEFT_IN / fig_w,
+            BOTTOM_IN / fig_h,
+            AX_W / fig_w,
+            AX_H / fig_h,
+        ))
+
+        idx = np.arange(len(lams))
+        bar_w = 0.72
+        blue, red = "#1f77b4", "#d62728"
+        # Bottom to top: pure goodput -> slow-call-in-good-job ->
+        # good-call-in-wasted-job -> pure wasted.
+        ax.bar(idx, s1_m, width=bar_w, color=blue, alpha=0.55,
+               edgecolor="black", linewidth=0.5,
+               label="Pure goodput")
+        ax.bar(idx, s2_m, width=bar_w, bottom=s1_m, color=blue, alpha=0.55,
+               edgecolor="black", linewidth=0.5, hatch="///",
+               label="Slow call, goodput job")
+        ax.bar(idx, s3_m, width=bar_w, bottom=s1_m + s2_m, color=red, alpha=0.55,
+               edgecolor="black", linewidth=0.5, hatch="\\\\\\",
+               label="Good call, wasted job")
+        ax.bar(idx, s4_m, width=bar_w, bottom=s1_m + s2_m + s3_m, color=red, alpha=0.55,
+               edgecolor="black", linewidth=0.5,
+               label="Pure wasted")
+
+        ax.set_xticks(idx)
+        ax.set_xticklabels([f"{v:g}" for v in lams])
+        for lbl in ax.get_xticklabels():
+            lbl.set_rotation(45)
+            lbl.set_horizontalalignment("right")
+            lbl.set_rotation_mode("anchor")
+        ax.set_xlim(-0.5, len(lams) - 0.5)
+        ax.set_xlabel(r"Arrival rate $\lambda$ (jobs/sec)")
+        ax.set_ylabel("Output tokens (M)")
+        ymax = float(max(total_m)) if len(total_m) else 1.0
         ax.set_ylim(0, ymax * 1.08)
 
         for side in ("top", "right", "bottom", "left"):
@@ -724,6 +900,12 @@ def main():
         default=None,
         help="If set, save the throughput stacked-bar plot with an output-throughput (tokens/sec) line overlaid on the right twin axis.",
     )
+    p.add_argument(
+        "--plot-throughput-call-job-png",
+        type=str,
+        default=None,
+        help="If set, save the 4-sub-segment token plot splitting goodput/wasted by individual call_goodput status (pure / slow-call-in-good-job / good-call-in-wasted-job / pure-wasted).",
+    )
     args = p.parse_args()
 
     if args.window_min[1] <= args.window_min[0]:
@@ -799,6 +981,8 @@ def main():
         plot_goodput_with_throughput_vs_lambda(df, Path(args.plot_png_v2))
     if args.plot_throughput_with_rate_png:
         plot_token_throughput_with_rate_line(df, Path(args.plot_throughput_with_rate_png))
+    if args.plot_throughput_call_job_png:
+        plot_token_throughput_call_job_breakdown(df, Path(args.plot_throughput_call_job_png))
 
 
 if __name__ == "__main__":

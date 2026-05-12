@@ -149,6 +149,21 @@ analysis/application_parallel_rounds.csv
 
 Use `execution_round`, not `wave`, for the group of calls that start after the same dependency barrier.
 
+### Window filtering (steady-state goodput)
+
+When measuring goodput over a `[start, end]` minute window (e.g. to skip
+warmup), filter **jobs by `job_submit_time ∈ window`** and then derive
+`calls` as the calls whose parent job is in that windowed job set
+(i.e. tied to the parent job's submit time). Do **not** filter calls
+independently by `start_time ∈ window`.
+
+- Semantic: "of the jobs released into the system during steady-state load, what fraction met the SLO?" — the queueing-theory standard for goodput.
+- Why submit-tied: the job's outcome is determined by the load it sees from the moment it arrives; the call-level rate should be computed over the same chains so call/job comparisons stay on a single population.
+- What can go wrong with independent filters: at high load, calls of jobs submitted *before* the window may extend into the window (long chains hitting saturation), while jobs submitted *in* the window may have calls extending past it. Filtering each by their own timestamp mixes these populations and can make `call_goodput < job_goodput` even when chain amplification should make the opposite true.
+- Run-boundary cutoffs at the window end (jobs submitted near `end` whose chain doesn't finish before the run terminates) are handled separately via the "Run-boundary cutoffs" rules below — they become `job_goodput_bool = NaN` and drop out of the denominator.
+
+`summarize_sweep_window.py` implements this filter; `parse_application_metrics.py`'s per-run `application_summary.csv` is computed over the whole run with no windowing.
+
 ### Run-boundary cutoffs (unclassified jobs)
 
 Jobs that did not complete because the run ended (`is_server_terminated=True`)
