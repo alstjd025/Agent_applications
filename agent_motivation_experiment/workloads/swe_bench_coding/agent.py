@@ -76,9 +76,21 @@ def make_llm(
     base_url: str = BASE_URL,
     model_id: str = MODEL_ID,
     seed: int = 42,
+    *,
+    halo_job_id: Optional[str] = None,
+    halo_slo: Optional[float] = None,
 ) -> ChatOpenAI:
-    """Create a ChatOpenAI instance with proper timeout settings."""
-    return ChatOpenAI(
+    """Create a ChatOpenAI instance with proper timeout settings.
+
+    HALO: when `halo_job_id` is set (run_job in halo-enabled mode), the
+    ChatOpenAI is configured with `extra_body={...}` so every downstream
+    chat.completions request carries `halo_job_id` + `halo_slo` in its
+    body. The sglang server's Halo admission gate uses them to admit the
+    request into the pre-registered job (see halo_api_reference.md).
+    When `halo_job_id is None`, no extra_body is injected — the same
+    ChatOpenAI works against a non-Halo server unchanged.
+    """
+    kwargs: dict = dict(
         base_url=base_url,
         api_key="dummy",
         model=model_id,
@@ -87,6 +99,12 @@ def make_llm(
         top_p=1.0,
         seed=seed,
     )
+    if halo_job_id is not None:
+        extra: dict = {"halo_job_id": halo_job_id}
+        if halo_slo is not None:
+            extra["halo_slo"] = halo_slo
+        kwargs["extra_body"] = extra
+    return ChatOpenAI(**kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -265,15 +283,35 @@ def _metadata_dict(obj: Any) -> dict:
 
 
 def _detect_admission_rejection(obj: Any) -> tuple[bool, str]:
+    """Detect server-side rejection in a chunk / exception / response.
+
+    Handles both:
+      - admission_control (Mooncake-style predictive): HTTP 429 +
+        `admission_reason` in finish_reason ("TTFT_PREDICTED", etc.)
+      - HALO job-level gate: HTTP 400 + `halo_reason` in finish_reason
+        ("HALO_NO_JOB_ID" / "HALO_PROGRAM_NOT_REGISTERED").
+
+    Returns (rejected, reason). reason is the upstream reason string
+    when available, or "ADMISSION_REJECTED" / "HALO_REJECTED" fallback.
+    """
     metadata = _metadata_dict(obj)
     finish_reason = metadata.get("finish_reason") or metadata.get("finish_details")
-    reason = metadata.get("admission_reason") or metadata.get("reason") or ""
+    reason = (
+        metadata.get("admission_reason")
+        or metadata.get("halo_reason")
+        or metadata.get("reason")
+        or ""
+    )
     message = metadata.get("message") or ""
     status_code = metadata.get("status_code")
 
     if isinstance(finish_reason, dict):
         status_code = finish_reason.get("status_code", status_code)
-        reason = finish_reason.get("admission_reason", reason)
+        reason = (
+            finish_reason.get("admission_reason")
+            or finish_reason.get("halo_reason")
+            or reason
+        )
         message = finish_reason.get("message", message)
         finish_type = str(finish_reason.get("type", "")).lower()
     else:
@@ -285,17 +323,33 @@ def _detect_admission_rejection(obj: Any) -> tuple[bool, str]:
         if part is not None
     ).lower()
 
-    rejected = (
+    # admission_control path: 429 + "admission rejected" phrasing.
+    admission_rejected = (
         "admission rejected" in text
         or "admission_reason" in text
         or (str(status_code) == "429" and "abort" in finish_type)
     )
-    if not rejected:
+    # HALO path: 400 + "halo rejected" phrasing, or any HALO_* reason.
+    halo_rejected = (
+        "halo rejected" in text
+        or "halo_reason" in text
+        or "halo_no_job_id" in text
+        or "halo_program_not_registered" in text
+        or (str(status_code) == "400" and "halo" in text)
+    )
+
+    if not (admission_rejected or halo_rejected):
         return False, ""
 
-    if not reason and isinstance(message, str) and "Admission rejected:" in message:
-        reason = message.split("Admission rejected:", 1)[1].split("(", 1)[0].strip()
-    return True, str(reason or "ADMISSION_REJECTED")
+    if not reason and isinstance(message, str):
+        if "Admission rejected:" in message:
+            reason = message.split("Admission rejected:", 1)[1].split("(", 1)[0].strip()
+        elif "Halo rejected:" in message:
+            reason = message.split("Halo rejected:", 1)[1].strip()[:64]
+
+    if not reason:
+        reason = "HALO_REJECTED" if halo_rejected else "ADMISSION_REJECTED"
+    return True, str(reason)
 
 
 def sleep_with_abort_checks(state: ChainState, delay_s: float, call_index: int) -> Optional[dict]:

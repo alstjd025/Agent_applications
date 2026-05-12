@@ -36,6 +36,19 @@ The protocol is defined in `workloads/base.py`.
 | `server_terminated_event` | Set when runner ends a duration run |
 | `job_start_time` | Used for job-level timeout checks |
 | `parallel_calls_path` | Optional raw CSV path for workloads that record dependency/round structure |
+| `halo_enabled` | True when `--halo-enabled` was on CLI. Gates Halo pre-register + extra_body wiring |
+| `halo_slo` | Slowdown SLO sent to `POST /halo/programs` and on every chat.completions body. Defaults to `--tau` |
+
+## Halo (Project Halo Phase 1) wiring summary
+
+When `context.halo_enabled is True`, each workload's `run_job` must
+call `workloads.halo_helpers.register_halo_program(...)` at chain
+start and pass `halo_job_id` + `halo_slo` into `make_llm(...)`. The
+rejection-detector in `swe_bench_coding/agent.py::_detect_admission_rejection`
+already recognizes the HTTP 400 `HALO_*` reject path. Full design +
+new-workload guide: [AGENTS.md](AGENTS.md) §"Halo-compatible Workloads".
+Server-side API reference: `ms_dev/halo_dev/halo_api_reference.md` in
+the sglang repo.
 
 ## Task Dictionaries
 

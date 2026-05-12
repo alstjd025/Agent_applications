@@ -36,6 +36,8 @@ The protocol is defined in `workloads/base.py`.
 | `server_terminated_event` | Set when runner ends a duration run |
 | `job_start_time` | Used for job-level timeout checks |
 | `parallel_calls_path` | Optional raw CSV path for workloads that record dependency/round structure |
+| `halo_enabled` | True when client runs with `--halo-enabled`. Gates the Halo pre-register call + extra_body wiring. Defaults to False |
+| `halo_slo` | Slowdown SLO sent to `POST /halo/programs` and along every chat.completions body. Defaults to `--tau` value when CLI omits `--halo-slo` |
 
 ## Task Dictionaries
 
@@ -68,6 +70,7 @@ Important invariants:
 - SGLang admission-control rejects must be recorded explicitly as `is_rejected=True`, `rejection_reason=<reason>`, `success=False`, and `is_error=True` in call rows.
 - Job results that stop because of a rejected call must propagate `is_rejected` and `rejection_reason` to the `job_summary` row.
 - Prefer the shared invocation path in `swe_bench_coding.agent.invoke_with_tracking()` for OpenAI-compatible LLM calls so rejection handling stays consistent across workloads.
+- HALO rejects (HTTP 400 with `halo_reason` in `HALO_NO_JOB_ID` / `HALO_PROGRAM_NOT_REGISTERED`) follow the same path as admission_control rejects: `_detect_admission_rejection()` in `agent.py` recognizes both. `is_rejected=True` + `rejection_reason=<HALO_*>` should be propagated to call rows and `job_summary`.
 
 ## Default Workload
 
@@ -106,6 +109,35 @@ Key invariants:
 - If multiple tool-result calls are in one round, the round sleeps for `max(call_tool_delays)`, modeling parallel tool work.
 - `Plan` and later singleton calls depend on all calls from the previous execution round.
 
+## Halo-compatible Workloads
+
+Project Halo Phase 1 adds a job-level admission gate on the SGLang side.
+When a client runs `run_experiment.py --halo-enabled`, every workload's
+`run_job(task, context)` must do two things at chain start:
+
+1. **Pre-register the job** by calling `register_halo_program(...)`
+   from `workloads/halo_helpers.py`. Required fields: `job_id`, `slo`,
+   `total_calls`. Optional, send if available: `stage_sequence`,
+   `expected_input_lens`, `expected_output_lens`, `dag` (free-form
+   JSON-able, ≤16 KiB). Failures (network error, 400, 409) raise and
+   abort the run — the policy is strict by design.
+
+2. **Pass `halo_job_id` and `halo_slo` to `make_llm(...)`**. The base
+   `swe_bench_coding.agent.make_llm` supports `halo_job_id=` and
+   `halo_slo=` keyword args; when both are set it wires
+   `extra_body={...}` so LangChain forwards them on every
+   `chat.completions` request.
+
+When `context.halo_enabled is False`, do not call either helper — the
+workload should behave exactly as if Halo doesn't exist. The shared
+`_detect_admission_rejection()` recognizes Halo's HTTP 400 reject path
+the same way it recognizes admission_control's HTTP 429 path, so
+rejection handling is automatic.
+
+See [halo_helpers.py](halo_helpers.py) for the helper signatures and
+[ms_dev/halo_dev/halo_api_reference.md](../../../../halo_dev/halo_api_reference.md)
+in the sglang repo for the full server-side API spec.
+
 ## Adding A Workload
 
 1. Create `workloads/<name>/workload.py`.
@@ -113,3 +145,9 @@ Key invariants:
 3. Ensure `workloads/__init__.py` can load the name.
 4. Add metadata and reproducibility fields so `run_config.json` explains the run.
 5. Verify with a tiny baseline or single run before launching sweeps.
+6. **Halo support** (when the new workload also has a meaningful concept
+   of multi-call jobs): inside `run_job(task, context)` mirror the
+   pattern from `swe_bench_coding/workload.py` — guard on
+   `context.halo_enabled`, call `register_halo_program(...)`, then
+   pass `halo_job_id`/`halo_slo` into `make_llm(...)`. See
+   "Halo-compatible Workloads" above.

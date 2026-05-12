@@ -236,6 +236,27 @@ class Workload(BaseSWEBenchWorkload):
         tool_call_delays = build_tool_call_delays(task)
         rounds = build_execution_rounds(stage_sequence, max_parallel_width)
 
+        # HALO: pre-register the job. Parallel workload knows its full
+        # stage_sequence + an execution-round structure, so we can pass
+        # richer optional info to the server. Phase 1 stores it without
+        # using it; Phase 2 admission will look at total_calls.
+        if context.halo_enabled:
+            from workloads.halo_helpers import register_halo_program
+
+            register_halo_program(
+                context.server_base_url,
+                job_id=job_id,
+                slo=context.halo_slo,
+                total_calls=chain_length,
+                stage_sequence=list(stage_sequence),
+                dag={
+                    "type": "parallel_rounds",
+                    "rounds": [
+                        {"leader": r[0], "members": list(r)} for r in rounds
+                    ],
+                },
+            )
+
         accumulated_context = ""
         outputs_by_call: dict[int, str] = {}
         user_content_by_call: dict[int, str] = {}
@@ -290,6 +311,8 @@ class Workload(BaseSWEBenchWorkload):
                     base_url=f"{context.server_base_url}/v1",
                     model_id=MODEL_ID,
                     seed=context.seed,
+                    halo_job_id=job_id if context.halo_enabled else None,
+                    halo_slo=context.halo_slo if context.halo_enabled else None,
                 ),
                 "job_timeout_sec": job_timeout_sec,
                 "job_start_time": job_submit_time,

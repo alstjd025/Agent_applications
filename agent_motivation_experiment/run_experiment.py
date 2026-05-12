@@ -184,6 +184,8 @@ class MotivationExperimentRunner:
         seed: int = 42,
         log_level: str = "quiet",
         workload=None,
+        halo_enabled: bool = False,
+        halo_slo: Optional[float] = None,
     ):
         self.csv_path = csv_path
         self.error_log_path = error_log_path
@@ -194,6 +196,34 @@ class MotivationExperimentRunner:
         self.workload = workload
         self.tbt_jsonl_path = tbt_jsonl_path
         self.parallel_calls_path = parallel_calls_path
+        # HALO Phase 1 client wiring; see workloads/halo_helpers.py.
+        self.halo_enabled = halo_enabled
+        self.halo_slo = halo_slo
+
+        # HALO: probe the server once at construction. Server is assumed
+        # to be up by the time main() instantiates the runner (every
+        # mode brings sglang up via sglang_ctrl before this point), so a
+        # mismatch between client --halo-enabled and server's state is
+        # surfaced before any LLM traffic. Raises HaloConfigError; the
+        # uncaught exception aborts main() — which is what we want
+        # (per ms_dev/halo_dev/CLAUDE.md §13 Q7/Q12 strict policy).
+        try:
+            from workloads.halo_helpers import assert_halo_mode_matches
+
+            self._halo_server_status = assert_halo_mode_matches(
+                self.server_base_url, self.halo_enabled
+            )
+            if self.halo_enabled:
+                print(
+                    f"[halo] client wiring on — server status: "
+                    f"enabled={self._halo_server_status.get('enabled')} "
+                    f"default_slo={self._halo_server_status.get('default_slo')} "
+                    f"tick_ms={self._halo_server_status.get('tick_interval_ms')}"
+                )
+        except ImportError:
+            # Older checkout of workloads/ without halo_helpers — skip
+            # probe, behave as if Halo wasn't requested.
+            self._halo_server_status = None
         self._console_lock = threading.Lock()
         self._pbar: Optional[tqdm] = None
         self._server_terminated = threading.Event()
@@ -260,6 +290,8 @@ class MotivationExperimentRunner:
                 server_terminated_event=self._server_terminated,
                 job_start_time=job_submit_time,
                 parallel_calls_path=self.parallel_calls_path,
+                halo_enabled=self.halo_enabled,
+                halo_slo=self.halo_slo,
             )
             result = self.workload.run_job(task, context)
             job_end_time = time.time()
@@ -878,6 +910,30 @@ def main():
         help="Job timeout multiplier: job_timeout = baseline_latency × τ",
     )
 
+    # HALO: Project Halo Phase 1 client wiring. See
+    # workloads/halo_helpers.py and ms_dev/halo_dev/halo_api_reference.md.
+    parser.add_argument(
+        "--halo-enabled",
+        action="store_true",
+        help=(
+            "Enable client-side Halo wiring: pre-register each job via "
+            "POST /halo/programs and pass halo_job_id/halo_slo on every "
+            "chat.completions. Server must also have --halo-enabled "
+            "(client checks via GET /halo/status at startup, aborts on "
+            "mismatch)."
+        ),
+    )
+    parser.add_argument(
+        "--halo-slo",
+        type=float,
+        default=None,
+        help=(
+            "Halo slowdown SLO sent at job registration. Defaults to "
+            "--tau (the existing job-timeout multiplier has the same "
+            "semantics: 'job e2e latency ≤ baseline × τ')."
+        ),
+    )
+
     # Baseline directory (for loading baseline latencies)
     parser.add_argument(
         "--baseline-dir",
@@ -1091,6 +1147,8 @@ def main():
             seed=args.seed,
             log_level=args.log_level,
             workload=workload,
+            halo_enabled=args.halo_enabled,
+            halo_slo=args.halo_slo if args.halo_slo is not None else args.tau,
         )
         runner.run_baseline(tasks)
         finish_server_session(
@@ -1151,6 +1209,8 @@ def main():
                 seed=args.seed,
                 log_level=args.log_level,
                 workload=workload,
+                halo_enabled=args.halo_enabled,
+                halo_slo=args.halo_slo if args.halo_slo is not None else args.tau,
             )
             runner._run_with_concurrency(tasks, concurrency=level)
             finish_server_session(
@@ -1224,6 +1284,8 @@ def main():
                 seed=args.seed,
                 log_level=args.log_level,
                 workload=workload,
+                halo_enabled=args.halo_enabled,
+                halo_slo=args.halo_slo if args.halo_slo is not None else args.tau,
             )
             runner.run_rate_sweep_duration(
                 task_pool=task_pool,
@@ -1303,6 +1365,8 @@ def main():
                 seed=args.seed,
                 log_level=args.log_level,
                 workload=workload,
+                halo_enabled=args.halo_enabled,
+                halo_slo=args.halo_slo if args.halo_slo is not None else args.tau,
             )
             runner.run_poisson_sweep_duration(
                 task_pool=task_pool,
@@ -1366,6 +1430,8 @@ def main():
                 seed=args.seed,
                 log_level=args.log_level,
                 workload=workload,
+                halo_enabled=args.halo_enabled,
+                halo_slo=args.halo_slo if args.halo_slo is not None else args.tau,
             )
             runner._run_with_poisson_duration(task_pool, args.lambda_val, args.duration_min)
             finish_server_session(
@@ -1417,6 +1483,8 @@ def main():
                 seed=args.seed,
                 log_level=args.log_level,
                 workload=workload,
+                halo_enabled=args.halo_enabled,
+                halo_slo=args.halo_slo if args.halo_slo is not None else args.tau,
             )
             runner._run_with_rate_duration(task_pool, args.rpm, args.duration_min)
             finish_server_session(
@@ -1470,6 +1538,8 @@ def main():
                 seed=args.seed,
                 log_level=args.log_level,
                 workload=workload,
+                halo_enabled=args.halo_enabled,
+                halo_slo=args.halo_slo if args.halo_slo is not None else args.tau,
             )
             runner._run_with_concurrency(tasks, concurrency=args.concurrency)
             finish_server_session(

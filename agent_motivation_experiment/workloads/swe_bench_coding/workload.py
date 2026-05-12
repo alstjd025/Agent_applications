@@ -144,10 +144,27 @@ class Workload:
         job_submit_time = context.job_start_time
         job_timeout_sec = task.get("job_timeout_sec", 0)
 
+        # HALO: Pre-register the job before the first LLM call (Option A).
+        # When --halo-enabled is on, server strict mode rejects every
+        # chat.completions whose halo_job_id wasn't previously registered.
+        # Failure here is a misconfiguration → abort the whole run
+        # (workloads/halo_helpers.py raises HaloRegisterError).
+        if context.halo_enabled:
+            from workloads.halo_helpers import register_halo_program
+
+            register_halo_program(
+                context.server_base_url,
+                job_id=job_id,
+                slo=context.halo_slo,
+                total_calls=task["chain_length"],
+            )
+
         llm = make_llm(
             base_url=f"{context.server_base_url}/v1",
             model_id=MODEL_ID,
             seed=context.seed,
+            halo_job_id=job_id if context.halo_enabled else None,
+            halo_slo=context.halo_slo if context.halo_enabled else None,
         )
         initial_state = create_chain_state(
             job_id=job_id,

@@ -29,6 +29,25 @@ This project measures how application-level goodput collapses under load even wh
 - Use the default restart behavior for `rate-sweep` and `poisson-sweep`; only use `--no-server-restart` when the user explicitly wants to reuse a running server.
 - If a custom admission-control server configuration is needed, pass it through `--sglang-start-cmd` so the runner still owns start/stop/fetch.
 
+## Halo (Project Halo Phase 1)
+
+Pass `--halo-enabled` to `run_experiment.py` to enable Halo job-level
+admission/tracking. The runner probes `GET /halo/status` once at startup
+and aborts if the server's Halo state doesn't match (strict policy).
+When on, every job pre-registers via `POST /halo/programs` and every
+LLM call body carries `halo_job_id`/`halo_slo`. `--halo-slo` defaults
+to `--tau` (the existing job-timeout multiplier has the same
+"slowdown-vs-baseline" semantics).
+
+Server side must also be launched with `--halo-enabled` (or
+`source ms_dev/experiments/halo_observe_only.sh` before
+`run_experiment.py --mode single` in the sglang repo).
+
+Details + new-workload guide: [workloads/AGENTS.md](workloads/AGENTS.md)
+§"Halo-compatible Workloads". Client-side helper module:
+[workloads/halo_helpers.py](workloads/halo_helpers.py). Server-side API
+reference: `ms_dev/halo_dev/halo_api_reference.md` in the sglang repo.
+
 ## Admission Control Checks
 
 When testing admission-control rejection behavior:

@@ -71,6 +71,17 @@ synthetic coding agent workload로 측정합니다.
 
 ---
 
+## Project Halo (client wiring)
+
+`run_experiment.py --halo-enabled` activates the client side of Project
+Halo (job-level admission/tracking on the sglang server). Requires the
+server to also have `--halo-enabled`; the runner probes
+`GET /halo/status` at startup and aborts on mismatch. Full guide:
+[`agent_motivation_experiment/CLAUDE.md`](agent_motivation_experiment/CLAUDE.md)
+§"Halo". New-workload integration:
+[`agent_motivation_experiment/workloads/AGENTS.md`](agent_motivation_experiment/workloads/AGENTS.md)
+§"Halo-compatible Workloads".
+
 ## Quick Glossary
 
 - **call goodput** — `call_latency < baseline_call_latency * tau` 인 LLM call 비율
