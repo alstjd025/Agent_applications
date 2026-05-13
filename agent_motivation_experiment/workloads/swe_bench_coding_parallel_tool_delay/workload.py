@@ -300,6 +300,28 @@ class Workload(BaseSWEBenchWorkload):
             )
             call_tracker.start_task(job_id)
             call_tracker.current_iteration = call_index - 1
+            # HALO: build the normal "llm" + an optional "halo_done_llm"
+            # used by invoke_with_tracking for the chain's final call.
+            # In parallel_tool_delay the final stage is always a
+            # singleton round, so identifying "call_index == chain_length"
+            # works the same as in the linear workloads.
+            llm = make_llm(
+                base_url=f"{context.server_base_url}/v1",
+                model_id=MODEL_ID,
+                seed=context.seed,
+                halo_job_id=job_id if context.halo_enabled else None,
+                halo_slo=context.halo_slo if context.halo_enabled else None,
+            )
+            halo_done_llm = None
+            if context.halo_enabled:
+                halo_done_llm = make_llm(
+                    base_url=f"{context.server_base_url}/v1",
+                    model_id=MODEL_ID,
+                    seed=context.seed,
+                    halo_job_id=job_id,
+                    halo_slo=context.halo_slo,
+                    halo_job_done=True,
+                )
             state = {
                 "job_id": job_id,
                 "chain_length": chain_length,
@@ -307,13 +329,8 @@ class Workload(BaseSWEBenchWorkload):
                 "metrics_tracker": call_tracker,
                 "agent_logger": context.agent_logger,
                 "console_write": context.console_write,
-                "llm": make_llm(
-                    base_url=f"{context.server_base_url}/v1",
-                    model_id=MODEL_ID,
-                    seed=context.seed,
-                    halo_job_id=job_id if context.halo_enabled else None,
-                    halo_slo=context.halo_slo if context.halo_enabled else None,
-                ),
+                "llm": llm,
+                "halo_done_llm": halo_done_llm,
                 "job_timeout_sec": job_timeout_sec,
                 "job_start_time": job_submit_time,
                 "server_terminated_event": context.server_terminated_event,

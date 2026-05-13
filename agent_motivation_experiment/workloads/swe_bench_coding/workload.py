@@ -166,6 +166,19 @@ class Workload:
             halo_job_id=job_id if context.halo_enabled else None,
             halo_slo=context.halo_slo if context.halo_enabled else None,
         )
+        # HALO: second instance only differs by halo_job_done=True. Used
+        # by invoke_with_tracking for the chain's last call so the
+        # server marks the Halo job COMPLETE on that request's finish.
+        halo_done_llm = None
+        if context.halo_enabled:
+            halo_done_llm = make_llm(
+                base_url=f"{context.server_base_url}/v1",
+                model_id=MODEL_ID,
+                seed=context.seed,
+                halo_job_id=job_id,
+                halo_slo=context.halo_slo,
+                halo_job_done=True,
+            )
         initial_state = create_chain_state(
             job_id=job_id,
             problem_statement=task["problem_statement"],
@@ -175,6 +188,7 @@ class Workload:
             agent_logger=context.agent_logger,
             console_write=context.console_write,
             llm=llm,
+            halo_done_llm=halo_done_llm,
             log_level=context.log_level,
             job_timeout_sec=job_timeout_sec,
             job_start_time=job_submit_time,

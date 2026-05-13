@@ -79,16 +79,22 @@ def make_llm(
     *,
     halo_job_id: Optional[str] = None,
     halo_slo: Optional[float] = None,
+    halo_job_done: bool = False,
 ) -> ChatOpenAI:
     """Create a ChatOpenAI instance with proper timeout settings.
 
-    HALO: when `halo_job_id` is set (run_job in halo-enabled mode), the
-    ChatOpenAI is configured with `extra_body={...}` so every downstream
-    chat.completions request carries `halo_job_id` + `halo_slo` in its
-    body. The sglang server's Halo admission gate uses them to admit the
-    request into the pre-registered job (see halo_api_reference.md).
-    When `halo_job_id is None`, no extra_body is injected — the same
-    ChatOpenAI works against a non-Halo server unchanged.
+    HALO wiring (see halo_api_reference.md):
+      - halo_job_id / halo_slo: when set, attached to every chat.completions
+        request via `extra_body` so the server's Halo admission gate can
+        match the request to a pre-registered job.
+      - halo_job_done: when True, also tells the server "this is the last
+        LLM call of the job" → mark the job COMPLETE on this request's
+        finish. Pattern: workload creates two ChatOpenAI instances per job
+        — the regular one for all chain calls except the last, and a
+        "halo_done" instance with halo_job_done=True for the final call.
+
+    When `halo_job_id is None`, no extra_body is injected — works against
+    a non-Halo server unchanged.
     """
     kwargs: dict = dict(
         base_url=base_url,
@@ -103,6 +109,8 @@ def make_llm(
         extra: dict = {"halo_job_id": halo_job_id}
         if halo_slo is not None:
             extra["halo_slo"] = halo_slo
+        if halo_job_done:
+            extra["halo_job_done"] = True
         kwargs["extra_body"] = extra
     return ChatOpenAI(**kwargs)
 
@@ -251,6 +259,10 @@ class ChainState(TypedDict):
     agent_logger: Optional[object]
     console_write: Optional[Callable]
     llm: Optional[Any]              # per-job ChatOpenAI instance
+    # HALO: optional second ChatOpenAI instance with halo_job_done=True in
+    # extra_body. invoke_with_tracking swaps to this for the chain's last
+    # call so the server marks the Halo job COMPLETE. None when Halo is off.
+    halo_done_llm: Optional[Any]
     last_call_output: str           # output from the previous call
     job_completed: bool             # True only if ALL N calls succeed
     error_msg: str                  # non-empty if job failed
@@ -426,6 +438,18 @@ def invoke_with_tracking(
     if llm is None:
         llm = make_llm()
         state["llm"] = llm
+    # HALO: if this is the last call of the chain and the workload set
+    # state["halo_done_llm"], use that LLM instance instead. Its only
+    # difference from `llm` is `extra_body["halo_job_done"] = true`,
+    # which tells the server to mark the owning Halo job COMPLETE on
+    # this request's finish. See halo_api_reference.md.
+    chain_length = state.get("chain_length", 0)
+    if (
+        chain_length
+        and call_index == chain_length
+        and state.get("halo_done_llm") is not None
+    ):
+        llm = state["halo_done_llm"]
 
     start_time = time.time()
     first_token_time = None
@@ -953,6 +977,7 @@ def create_chain_state(
     job_timeout_sec: float = 0,
     job_start_time: float = 0,
     tool_call_delays: Optional[List[float]] = None,
+    halo_done_llm: Optional[ChatOpenAI] = None,
 ) -> ChainState:
     """
     Create the initial ChainState for a synthetic chain job.
@@ -1006,6 +1031,7 @@ def create_chain_state(
         agent_logger=agent_logger,
         console_write=console_write or print,
         llm=llm,
+        halo_done_llm=halo_done_llm,
         last_call_output="",
         job_completed=False,
         error_msg="",
