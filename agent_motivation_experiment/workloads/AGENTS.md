@@ -113,30 +113,50 @@ Key invariants:
 
 Project Halo Phase 1 adds a job-level admission gate on the SGLang side.
 When a client runs `run_experiment.py --halo-enabled`, every workload's
-`run_job(task, context)` must do two things at chain start:
+`run_job(task, context)` must do **three** things over a chain's
+lifetime:
 
-1. **Pre-register the job** by calling `register_halo_program(...)`
-   from `workloads/halo_helpers.py`. Required fields: `job_id`, `slo`,
-   `total_calls`. Optional, send if available: `stage_sequence`,
-   `expected_input_lens`, `expected_output_lens`, `dag` (free-form
-   JSON-able, ≤16 KiB). Failures (network error, 400, 409) raise and
-   abort the run — the policy is strict by design.
+1. **Pre-register the job** at chain start, by calling
+   `register_halo_program(...)` from `workloads/halo_helpers.py`.
+   Required fields: `job_id`, `slo`, `total_calls`. Optional, send if
+   available: `stage_sequence`, `expected_input_lens`,
+   `expected_output_lens`, `dag` (free-form JSON-able, ≤16 KiB).
+   Failures (network error, 400, 409) raise and abort the run — the
+   policy is strict by design.
 
-2. **Pass `halo_job_id` and `halo_slo` to `make_llm(...)`**. The base
-   `swe_bench_coding.agent.make_llm` supports `halo_job_id=` and
-   `halo_slo=` keyword args; when both are set it wires
-   `extra_body={...}` so LangChain forwards them on every
-   `chat.completions` request.
+2. **Build two LLM instances** with `make_llm(...)`:
+   - `llm` — used for every call except the last. Pass `halo_job_id=`
+     and `halo_slo=`; `make_llm` wires `extra_body={...}` so LangChain
+     forwards them on every `chat.completions`.
+   - `halo_done_llm` — used **only for the chain's last call**. Same
+     args plus `halo_job_done=True`. The server treats that call's
+     finish as the explicit termination signal: it marks the owning
+     Job COMPLETE, which makes `gc_completed` drop the registry entry
+     after `retain_seconds`. Without this, the job sits RUNNING until
+     the server's quiescent safety net trips (default 5 min).
 
-When `context.halo_enabled is False`, do not call either helper — the
-workload should behave exactly as if Halo doesn't exist. The shared
-`_detect_admission_rejection()` recognizes Halo's HTTP 400 reject path
-the same way it recognizes admission_control's HTTP 429 path, so
-rejection handling is automatic.
+   Store both on `ChainState` (`state["llm"]`, `state["halo_done_llm"]`);
+   `swe_bench_coding.agent.invoke_with_tracking` automatically swaps to
+   `halo_done_llm` when `call_index == state["chain_length"]`. Set
+   `halo_done_llm=None` when Halo is off — the swap is no-op.
+
+3. **Propagate rejections to metrics**. `_detect_admission_rejection`
+   in `swe_bench_coding/agent.py` recognizes BOTH admission_control's
+   429 path AND Halo's 400 path (`halo_reason` in
+   `HALO_NO_JOB_ID`/`HALO_PROGRAM_NOT_REGISTERED`). The shared exception
+   handlers in `invoke_with_tracking` also scan `str(exception)` for
+   the same tokens because the openai SDK wraps the response into a
+   `BadRequestError` whose `.response_metadata` is empty — without that
+   the client would silently miss Halo rejects. New workloads that
+   reuse `invoke_with_tracking` get this for free.
+
+When `context.halo_enabled is False`, do not call any of the helpers
+— the workload should behave exactly as if Halo doesn't exist.
 
 See [halo_helpers.py](halo_helpers.py) for the helper signatures and
 [ms_dev/halo_dev/halo_api_reference.md](../../../../halo_dev/halo_api_reference.md)
-in the sglang repo for the full server-side API spec.
+in the sglang repo for the full server-side API spec (request fields,
+status codes, `event=job_complete` jsonl rows, etc.).
 
 ## Adding A Workload
 
@@ -148,6 +168,9 @@ in the sglang repo for the full server-side API spec.
 6. **Halo support** (when the new workload also has a meaningful concept
    of multi-call jobs): inside `run_job(task, context)` mirror the
    pattern from `swe_bench_coding/workload.py` — guard on
-   `context.halo_enabled`, call `register_halo_program(...)`, then
-   pass `halo_job_id`/`halo_slo` into `make_llm(...)`. See
-   "Halo-compatible Workloads" above.
+   `context.halo_enabled`, call `register_halo_program(...)`, build
+   `llm` + `halo_done_llm` (the second one with `halo_job_done=True`),
+   thread both through `ChainState`. The shared
+   `invoke_with_tracking` handles the last-call swap and the
+   rejection-detection wiring automatically. See "Halo-compatible
+   Workloads" above for the three required steps.

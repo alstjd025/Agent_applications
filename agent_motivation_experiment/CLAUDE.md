@@ -34,19 +34,32 @@ This project measures how application-level goodput collapses under load even wh
 Pass `--halo-enabled` to `run_experiment.py` to enable Halo job-level
 admission/tracking. The runner probes `GET /halo/status` once at startup
 and aborts if the server's Halo state doesn't match (strict policy).
-When on, every job pre-registers via `POST /halo/programs` and every
-LLM call body carries `halo_job_id`/`halo_slo`. `--halo-slo` defaults
-to `--tau` (the existing job-timeout multiplier has the same
-"slowdown-vs-baseline" semantics).
 
-Server side must also be launched with `--halo-enabled` (or
-`source ms_dev/experiments/halo_observe_only.sh` before
-`run_experiment.py --mode single` in the sglang repo).
+When on, each `run_job`:
+1. **registers the job** via `POST /halo/programs` at chain start;
+2. **carries `halo_job_id` / `halo_slo`** on every chat.completions via
+   ChatOpenAI `extra_body`;
+3. **signals termination** with `halo_job_done=true` on the chain's
+   final call so the server marks the Halo job COMPLETE immediately
+   (instead of waiting for the 5-minute quiescent safety net to trip).
+
+`--halo-slo` defaults to `--tau` — both have the same "slowdown-vs-
+baseline" semantics.
+
+**Server side must also be launched with `--halo-enabled`** (e.g.,
+`source ms_dev/experiments/halo_observe_only.sh` then
+`run_experiment.py --mode single` in the sglang repo). Client-side
+client_on/server_off mismatch is detected at runner startup and aborts.
+
+Reject handling: HTTP 400 `HALO_*` rejects propagate to `metrics.csv`
+as `is_rejected=True, rejection_reason=HALO_*` the same way as the
+existing admission_control 429 path. No analysis code needs updating.
 
 Details + new-workload guide: [workloads/AGENTS.md](workloads/AGENTS.md)
 §"Halo-compatible Workloads". Client-side helper module:
 [workloads/halo_helpers.py](workloads/halo_helpers.py). Server-side API
-reference: `ms_dev/halo_dev/halo_api_reference.md` in the sglang repo.
+reference (request fields, endpoint schemas, `event=job_complete` jsonl
+rows): `ms_dev/halo_dev/halo_api_reference.md` in the sglang repo.
 
 ## Admission Control Checks
 

@@ -41,14 +41,23 @@ The protocol is defined in `workloads/base.py`.
 
 ## Halo (Project Halo Phase 1) wiring summary
 
-When `context.halo_enabled is True`, each workload's `run_job` must
-call `workloads.halo_helpers.register_halo_program(...)` at chain
-start and pass `halo_job_id` + `halo_slo` into `make_llm(...)`. The
-rejection-detector in `swe_bench_coding/agent.py::_detect_admission_rejection`
-already recognizes the HTTP 400 `HALO_*` reject path. Full design +
-new-workload guide: [AGENTS.md](AGENTS.md) §"Halo-compatible Workloads".
-Server-side API reference: `ms_dev/halo_dev/halo_api_reference.md` in
-the sglang repo.
+When `context.halo_enabled is True`, each workload's `run_job` must do
+three things:
+
+1. Call `workloads.halo_helpers.register_halo_program(...)` at chain start.
+2. Build two LLM instances: `llm` (regular) + `halo_done_llm` (with
+   `halo_job_done=True`). Thread both through `ChainState`;
+   `invoke_with_tracking` swaps to `halo_done_llm` for the chain's last
+   call so the server marks the job COMPLETE on its finish.
+3. (Free.) `_detect_admission_rejection` already recognizes HTTP 400
+   `HALO_*` rejects in addition to admission_control's 429 path. Reuse
+   the shared `invoke_with_tracking` and rejections propagate to
+   `metrics.csv` as `is_rejected=True, rejection_reason=HALO_*`
+   automatically.
+
+Full design + new-workload guide: [AGENTS.md](AGENTS.md) §"Halo-compatible
+Workloads". Server-side API reference:
+`ms_dev/halo_dev/halo_api_reference.md` in the sglang repo.
 
 ## Task Dictionaries
 
