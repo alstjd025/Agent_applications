@@ -16,13 +16,20 @@ class RunContext:
     server_terminated_event: threading.Event
     job_start_time: float
     parallel_calls_path: Optional[str] = None
-    # HALO: Project Halo Phase 1 client wiring. Off by default.
-    # When True, run_job is expected to call register_halo_program(...)
-    # at chain start and pass halo_job_id/halo_slo into make_llm so every
-    # downstream LLM request carries them. See workloads/halo_helpers.py
-    # and workloads/AGENTS.md "Halo-compatible workloads".
+    # HALO: Project Halo request-level client wiring. Off by default.
+    # When True, run_job passes the per-request halo_*_slo fields into
+    # make_llm so every chat.completions request carries them in
+    # extra_body. There is NO job pre-registration (the 2026-05-19
+    # request-level refactor removed POST /halo/programs). See
+    # workloads/halo_helpers.py and workloads/AGENTS.md.
     halo_enabled: bool = False
-    halo_slo: Optional[float] = None
+    halo_ttft_slo: Optional[float] = None
+    halo_tbt_slo: Optional[float] = None
+    halo_e2e_slo: Optional[float] = None
+    # Transcript recording (literal-replay capture). When set, every LLM
+    # call's full prompt + solo timings are appended to this JSONL so the
+    # codingagent_request_level_poisson workload can replay them verbatim.
+    transcript_record_path: Optional[str] = None
 
 
 @dataclass

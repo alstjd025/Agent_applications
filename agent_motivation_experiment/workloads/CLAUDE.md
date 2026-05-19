@@ -36,28 +36,26 @@ The protocol is defined in `workloads/base.py`.
 | `server_terminated_event` | Set when runner ends a duration run |
 | `job_start_time` | Used for job-level timeout checks |
 | `parallel_calls_path` | Optional raw CSV path for workloads that record dependency/round structure |
-| `halo_enabled` | True when `--halo-enabled` was on CLI. Gates Halo pre-register + extra_body wiring |
-| `halo_slo` | Slowdown SLO sent to `POST /halo/programs` and on every chat.completions body. Defaults to `--tau` |
+| `halo_enabled` | True when `--halo-enabled` was on CLI. Gates the per-request SLO `extra_body` wiring |
+| `halo_ttft_slo` / `halo_tbt_slo` / `halo_e2e_slo` | Per-request Halo SLO values on every chat.completions body. Each defaults to `--tau` |
+| `transcript_record_path` | When set, each LLM call's full prompt + solo timings are appended to this JSONL (literal-replay capture) |
 
-## Halo (Project Halo Phase 1) wiring summary
+## Halo (request-level) wiring summary
 
-When `context.halo_enabled is True`, each workload's `run_job` must do
-three things:
+Halo is request-level since 2026-05-19 — no job pre-registration. When
+`context.halo_enabled is True`, a workload's `run_job` only needs to:
 
-1. Call `workloads.halo_helpers.register_halo_program(...)` at chain start.
-2. Build two LLM instances: `llm` (regular) + `halo_done_llm` (with
-   `halo_job_done=True`). Thread both through `ChainState`;
-   `invoke_with_tracking` swaps to `halo_done_llm` for the chain's last
-   call so the server marks the job COMPLETE on its finish.
-3. (Free.) `_detect_admission_rejection` already recognizes HTTP 400
-   `HALO_*` rejects in addition to admission_control's 429 path. Reuse
-   the shared `invoke_with_tracking` and rejections propagate to
-   `metrics.csv` as `is_rejected=True, rejection_reason=HALO_*`
-   automatically.
+1. Build the LLM with `make_llm(..., halo_ttft_slo=, halo_tbt_slo=,
+   halo_e2e_slo=)` so every request carries the per-request SLO fields
+   in `extra_body`. Pass `None` for all three when Halo is off.
+2. Reuse `invoke_with_tracking` — `_detect_admission_rejection`
+   recognizes the HTTP-400 Halo reject and propagates it to
+   `metrics.csv` as `is_rejected=True, rejection_reason=HALO_*`.
 
-Full design + new-workload guide: [AGENTS.md](AGENTS.md) §"Halo-compatible
-Workloads". Server-side API reference:
-`ms_dev/halo_dev/halo_api_reference.md` in the sglang repo.
+There is no `register_halo_program` / `halo_done_llm` / `halo_job_id`.
+
+Full guide: [AGENTS.md](AGENTS.md) §"Halo-compatible Workloads".
+Server-side API: `ms_dev/halo_dev/halo_api_reference.md` in the sglang repo.
 
 ## Task Dictionaries
 

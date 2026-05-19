@@ -74,13 +74,27 @@ synthetic coding agent workload로 측정합니다.
 ## Project Halo (client wiring)
 
 `run_experiment.py --halo-enabled` activates the client side of Project
-Halo (job-level admission/tracking on the sglang server). Requires the
-server to also have `--halo-enabled`; the runner probes
-`GET /halo/status` at startup and aborts on mismatch. Full guide:
+Halo — **request-level** admission control on the sglang server (the
+2026-05-19 refactor moved Halo from job-level to request-level: no job
+pre-registration, no `halo_job_id`). Every request carries per-request
+`halo_ttft_slo` / `halo_tbt_slo` / `halo_e2e_slo` fields. Requires the
+server to also have `--halo-enabled`; the runner probes `GET /halo/status`
+at startup and aborts on mismatch. Full guide:
 [`agent_motivation_experiment/CLAUDE.md`](agent_motivation_experiment/CLAUDE.md)
 §"Halo". New-workload integration:
 [`agent_motivation_experiment/workloads/AGENTS.md`](agent_motivation_experiment/workloads/AGENTS.md)
 §"Halo-compatible Workloads".
+
+## Multi-node + request-level experiments
+
+Experiments now run against **2 SGLang instances** (B200×2 each).
+`run_experiment.py --node {nxc7-1,nxc7-2}` selects one per run (ssh host,
+base URL, remote tmux). The `codingagent_request_level_poisson` workload
+sends a flat Poisson stream of independent requests (replayed verbatim
+from a recorded transcript) instead of multi-call jobs; parse it with
+`analysis_scripts/parse_request_metrics.py`. See
+[`agent_motivation_experiment/CLAUDE.md`](agent_motivation_experiment/CLAUDE.md)
+§"GPU nodes" and §"Request-level workload".
 
 ## Quick Glossary
 
@@ -91,7 +105,9 @@ server to also have `--halo-enabled`; the runner probes
 - **session-name (`--session-name`)** — 로컬 결과 디렉토리 suffix이자, 원격 SGLang 서버의 runtime session 이름. 로컬/원격 로그 매칭 키
 - **execution_round** — `swe_bench_coding_parallel_tool_delay` 에서 같은 dependency barrier 뒤에 동시에 출발하는 call 그룹 (`wave` 아님)
 - **transition_time** — `tool_delay` workload의 job summary 필드. 그 job에서 application-side로 simulate한 tool call interval 총합
-- **NXC7** — 원격 SGLang 서버 SSH host alias
+- **NXC7 / NXC7-1 / NXC7-2** — 원격 SGLang 서버 SSH host alias. `NXC7-1`/`NXC7-2`는 B200×2 instance 2개이고 `--node {nxc7-1,nxc7-2}`로 선택
+- **request-level Poisson** — `codingagent_request_level_poisson` workload. job/chain이 아니라 개별 LLM request가 Poisson(λ = requests/sec)으로 도착. transcript를 literal replay
+- **transcript** — concurrency-1 `swe_bench_coding` run을 `--record-transcript`로 녹화한 JSONL. 각 줄 = agent call 1개의 full prompt + solo TTFT/TBT/e2e baseline
 
 ---
 

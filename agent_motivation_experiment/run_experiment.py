@@ -44,6 +44,38 @@ from workloads.base import RunContext
 
 
 # ---------------------------------------------------------------------------
+# GPU node profiles
+# ---------------------------------------------------------------------------
+# Each profile bundles the connection + remote-control settings for one
+# SGLang server instance. `--node <name>` selects one; only one node is
+# used per run (extend this dict when more instances come online).
+# The remote side of both nodes is configured identically (tmux session
+# "sglang", same start command differing only by ssh host).
+NODE_PROFILES: Dict[str, Dict[str, object]] = {
+    "nxc7-1": {
+        "ssh_host": "NXC7-1",
+        "base_url": "http://localhost:8080",
+        "tmux_session": "sglang",
+    },
+    "nxc7-2": {
+        "ssh_host": "NXC7-2",
+        "base_url": "http://localhost:8081",
+        "tmux_session": "sglang",
+    },
+}
+
+# Workloads whose per-request baseline lives in a transcript file, so they
+# do NOT require --baseline-dir.
+TRANSCRIPT_WORKLOADS = {"codingagent_request_level_poisson"}
+
+
+def local_port_from_url(base_url: str, default: int = 8080) -> int:
+    """Extract the local port from a server base URL."""
+    m = re.search(r":(\d+)", base_url or "")
+    return int(m.group(1)) if m else default
+
+
+# ---------------------------------------------------------------------------
 # Baseline latency loading
 # ---------------------------------------------------------------------------
 def load_baseline_latencies(baseline_dir: str) -> Dict[str, float]:
@@ -185,7 +217,10 @@ class MotivationExperimentRunner:
         log_level: str = "quiet",
         workload=None,
         halo_enabled: bool = False,
-        halo_slo: Optional[float] = None,
+        halo_ttft_slo: Optional[float] = None,
+        halo_tbt_slo: Optional[float] = None,
+        halo_e2e_slo: Optional[float] = None,
+        transcript_record_path: Optional[str] = None,
     ):
         self.csv_path = csv_path
         self.error_log_path = error_log_path
@@ -196,9 +231,13 @@ class MotivationExperimentRunner:
         self.workload = workload
         self.tbt_jsonl_path = tbt_jsonl_path
         self.parallel_calls_path = parallel_calls_path
-        # HALO Phase 1 client wiring; see workloads/halo_helpers.py.
+        # HALO request-level client wiring; see workloads/halo_helpers.py.
         self.halo_enabled = halo_enabled
-        self.halo_slo = halo_slo
+        self.halo_ttft_slo = halo_ttft_slo
+        self.halo_tbt_slo = halo_tbt_slo
+        self.halo_e2e_slo = halo_e2e_slo
+        # Transcript recording (literal-replay capture). See agent.py.
+        self.transcript_record_path = transcript_record_path
 
         # HALO: probe the server once at construction. Server is assumed
         # to be up by the time main() instantiates the runner (every
@@ -217,7 +256,9 @@ class MotivationExperimentRunner:
                 print(
                     f"[halo] client wiring on — server status: "
                     f"enabled={self._halo_server_status.get('enabled')} "
-                    f"default_slo={self._halo_server_status.get('default_slo')} "
+                    f"admission_policy={self._halo_server_status.get('admission_policy')} "
+                    f"slo_mode={self._halo_server_status.get('slo_mode')} "
+                    f"kv_cap_ratio={self._halo_server_status.get('kv_cap_ratio')} "
                     f"tick_ms={self._halo_server_status.get('tick_interval_ms')}"
                 )
         except ImportError:
@@ -291,7 +332,10 @@ class MotivationExperimentRunner:
                 job_start_time=job_submit_time,
                 parallel_calls_path=self.parallel_calls_path,
                 halo_enabled=self.halo_enabled,
-                halo_slo=self.halo_slo,
+                halo_ttft_slo=self.halo_ttft_slo,
+                halo_tbt_slo=self.halo_tbt_slo,
+                halo_e2e_slo=self.halo_e2e_slo,
+                transcript_record_path=self.transcript_record_path,
             )
             result = self.workload.run_job(task, context)
             job_end_time = time.time()
@@ -761,7 +805,22 @@ def make_run_config(args, workload, workload_config: dict, **extra) -> dict:
         "workload_config": workload_config,
         "workload_metadata": workload.metadata(args, workload_config),
         "server_base_url": args.server_base_url,
+        "node": args.node,
         "seed": args.seed,
+        "halo": {
+            "enabled": args.halo_enabled,
+            "ttft_slo": (
+                args.halo_ttft_slo if args.halo_ttft_slo is not None else args.tau
+            ),
+            "tbt_slo": (
+                args.halo_tbt_slo if args.halo_tbt_slo is not None else args.tau
+            ),
+            "e2e_slo": (
+                args.halo_e2e_slo if args.halo_e2e_slo is not None else args.tau
+            ),
+        },
+        "transcript_file": args.transcript_file,
+        "record_transcript": args.record_transcript,
         "reproducibility": workload.reproducibility_config(args, workload_config),
         "created_at": datetime.now().isoformat(),
     }
@@ -886,13 +945,41 @@ def main():
     parser.add_argument("--replay-count", type=int, default=1)
     parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--end-index", type=int, default=None)
+    parser.add_argument(
+        "--transcript-file",
+        type=str,
+        default=None,
+        help=(
+            "Transcript JSONL for the codingagent_request_level_poisson "
+            "workload (produced by a swe_bench_coding baseline run with "
+            "--record-transcript)."
+        ),
+    )
+    parser.add_argument(
+        "--record-transcript",
+        type=str,
+        default=None,
+        help=(
+            "When set, append every LLM call's full prompt + solo timings "
+            "to this JSONL. Use on a concurrency-1 baseline run to capture "
+            "a transcript for the request-level workload to replay."
+        ),
+    )
 
     # Chain configuration
     parser.add_argument("--chain-min", type=int, default=5)
     parser.add_argument("--chain-max", type=int, default=30)
 
     # Server
-    parser.add_argument("--server-base-url", type=str, default="http://localhost:8080")
+    parser.add_argument(
+        "--server-base-url",
+        type=str,
+        default=None,
+        help=(
+            "OpenAI-compatible SGLang endpoint. Defaults from --node when "
+            "given, else http://localhost:8080."
+        ),
+    )
 
     # Duration (for sweep/rate-sweep/poisson-sweep)
     parser.add_argument(
@@ -910,27 +997,45 @@ def main():
         help="Job timeout multiplier: job_timeout = baseline_latency × τ",
     )
 
-    # HALO: Project Halo Phase 1 client wiring. See
+    # HALO: Project Halo request-level client wiring. See
     # workloads/halo_helpers.py and ms_dev/halo_dev/halo_api_reference.md.
     parser.add_argument(
         "--halo-enabled",
         action="store_true",
         help=(
-            "Enable client-side Halo wiring: pre-register each job via "
-            "POST /halo/programs and pass halo_job_id/halo_slo on every "
-            "chat.completions. Server must also have --halo-enabled "
-            "(client checks via GET /halo/status at startup, aborts on "
-            "mismatch)."
+            "Enable client-side Halo wiring: attach the per-request "
+            "halo_ttft_slo/halo_tbt_slo/halo_e2e_slo fields on every "
+            "chat.completions request (no job pre-registration). Server "
+            "must also have --halo-enabled (client checks GET /halo/status "
+            "at startup, aborts on mismatch)."
         ),
     )
     parser.add_argument(
-        "--halo-slo",
+        "--halo-ttft-slo",
         type=float,
         default=None,
         help=(
-            "Halo slowdown SLO sent at job registration. Defaults to "
-            "--tau (the existing job-timeout multiplier has the same "
-            "semantics: 'job e2e latency ≤ baseline × τ')."
+            "Per-request TTFT SLO sent on every request (extra_body "
+            "halo_ttft_slo). With server slo_mode=ratio this is a "
+            "slowdown ratio vs the solo baseline. Defaults to --tau."
+        ),
+    )
+    parser.add_argument(
+        "--halo-tbt-slo",
+        type=float,
+        default=None,
+        help=(
+            "Per-request TBT SLO sent on every request (extra_body "
+            "halo_tbt_slo). Same units as --halo-ttft-slo. Defaults to --tau."
+        ),
+    )
+    parser.add_argument(
+        "--halo-e2e-slo",
+        type=float,
+        default=None,
+        help=(
+            "Per-request end-to-end SLO sent on every request (extra_body "
+            "halo_e2e_slo). Always a slowdown ratio. Defaults to --tau."
         ),
     )
 
@@ -968,10 +1073,22 @@ def main():
 
     # SGLang server control
     parser.add_argument(
+        "--node",
+        type=str,
+        choices=sorted(NODE_PROFILES.keys()),
+        default=None,
+        help=(
+            "GPU node profile: selects ssh host, server base URL, and "
+            "remote tmux session for one SGLang instance. One node per "
+            "run. Explicit --server-base-url / --sglang-ssh-host / "
+            "--sglang-tmux-session still override the profile."
+        ),
+    )
+    parser.add_argument(
         "--sglang-ssh-host",
         type=str,
-        default="NXC7",
-        help="SSH host alias for SGLang server",
+        default=None,
+        help="SSH host alias for SGLang server (default: from --node, else NXC7)",
     )
     parser.add_argument(
         "--sglang-start-cmd",
@@ -988,8 +1105,8 @@ def main():
     parser.add_argument(
         "--sglang-tmux-session",
         type=str,
-        default="sglang",
-        help="tmux session name on the remote server",
+        default=None,
+        help="tmux session name on the remote server (default: from --node, else sglang)",
     )
     parser.add_argument(
         "--no-server-restart",
@@ -1056,6 +1173,30 @@ def main():
 
     args = parser.parse_args()
 
+    # ---- Resolve GPU node profile ----
+    # --node provides defaults; explicit flags still override.
+    if args.node:
+        prof = NODE_PROFILES[args.node]
+        args.server_base_url = args.server_base_url or prof["base_url"]
+        args.sglang_ssh_host = args.sglang_ssh_host or prof["ssh_host"]
+        args.sglang_tmux_session = args.sglang_tmux_session or prof["tmux_session"]
+    args.server_base_url = args.server_base_url or "http://localhost:8080"
+    args.sglang_ssh_host = args.sglang_ssh_host or "NXC7"
+    args.sglang_tmux_session = args.sglang_tmux_session or "sglang"
+    print(
+        f"Node: {args.node or '(default)'} | server={args.server_base_url} "
+        f"| ssh={args.sglang_ssh_host} | tmux={args.sglang_tmux_session}"
+    )
+
+    # ---- Effective per-request Halo SLOs (each defaults to --tau) ----
+    halo_ttft_slo = args.halo_ttft_slo if args.halo_ttft_slo is not None else args.tau
+    halo_tbt_slo = args.halo_tbt_slo if args.halo_tbt_slo is not None else args.tau
+    halo_e2e_slo = args.halo_e2e_slo if args.halo_e2e_slo is not None else args.tau
+
+    # Transcript-replay workloads carry their per-request baseline inside
+    # the transcript file, so they do not need --baseline-dir.
+    needs_baseline_dir = args.workload not in TRANSCRIPT_WORKLOADS
+
     concurrency_list = [int(x.strip()) for x in args.concurrency_list.split(",")]
     rate_list = [float(x.strip()) for x in args.rate_list.split(",")]
     lambda_list = [float(x.strip()) for x in args.lambda_list.split(",")]
@@ -1087,6 +1228,7 @@ def main():
         server_start_cmd=args.sglang_start_cmd,
         server_stop_cmd=args.sglang_stop_cmd,
         tmux_session=args.sglang_tmux_session,
+        local_port=local_port_from_url(args.server_base_url),
     )
 
     # Verify server connectivity for baseline mode
@@ -1148,9 +1290,15 @@ def main():
             log_level=args.log_level,
             workload=workload,
             halo_enabled=args.halo_enabled,
-            halo_slo=args.halo_slo if args.halo_slo is not None else args.tau,
+            halo_ttft_slo=halo_ttft_slo,
+            halo_tbt_slo=halo_tbt_slo,
+            halo_e2e_slo=halo_e2e_slo,
+            transcript_record_path=args.record_transcript,
         )
         runner.run_baseline(tasks)
+        # Flush async JSONL writers (tbt + transcript) so a recorded
+        # transcript file is complete before this command returns.
+        MetricsTracker.shutdown_all_writers()
         finish_server_session(
             sglang_ctrl,
             args,
@@ -1210,7 +1358,10 @@ def main():
                 log_level=args.log_level,
                 workload=workload,
                 halo_enabled=args.halo_enabled,
-                halo_slo=args.halo_slo if args.halo_slo is not None else args.tau,
+                halo_ttft_slo=halo_ttft_slo,
+                halo_tbt_slo=halo_tbt_slo,
+                halo_e2e_slo=halo_e2e_slo,
+                transcript_record_path=args.record_transcript,
             )
             runner._run_with_concurrency(tasks, concurrency=level)
             finish_server_session(
@@ -1223,7 +1374,7 @@ def main():
 
     # ---- RATE SWEEP MODE (duration-based) ----
     elif args.mode == "rate-sweep":
-        if not baseline_latencies:
+        if needs_baseline_dir and not baseline_latencies:
             print("ERROR: --baseline-dir is required for rate-sweep mode")
             sys.exit(1)
 
@@ -1285,7 +1436,10 @@ def main():
                 log_level=args.log_level,
                 workload=workload,
                 halo_enabled=args.halo_enabled,
-                halo_slo=args.halo_slo if args.halo_slo is not None else args.tau,
+                halo_ttft_slo=halo_ttft_slo,
+                halo_tbt_slo=halo_tbt_slo,
+                halo_e2e_slo=halo_e2e_slo,
+                transcript_record_path=args.record_transcript,
             )
             runner.run_rate_sweep_duration(
                 task_pool=task_pool,
@@ -1304,7 +1458,7 @@ def main():
 
     # ---- POISSON SWEEP MODE (duration-based) ----
     elif args.mode == "poisson-sweep":
-        if not baseline_latencies:
+        if needs_baseline_dir and not baseline_latencies:
             print("ERROR: --baseline-dir is required for poisson-sweep mode")
             sys.exit(1)
 
@@ -1366,7 +1520,10 @@ def main():
                 log_level=args.log_level,
                 workload=workload,
                 halo_enabled=args.halo_enabled,
-                halo_slo=args.halo_slo if args.halo_slo is not None else args.tau,
+                halo_ttft_slo=halo_ttft_slo,
+                halo_tbt_slo=halo_tbt_slo,
+                halo_e2e_slo=halo_e2e_slo,
+                transcript_record_path=args.record_transcript,
             )
             runner.run_poisson_sweep_duration(
                 task_pool=task_pool,
@@ -1385,11 +1542,16 @@ def main():
 
     # ---- SINGLE MODE ----
     elif args.mode == "single":
-        if (args.lambda_val is not None or args.rpm is not None) and not baseline_latencies:
+        if (
+            (args.lambda_val is not None or args.rpm is not None)
+            and needs_baseline_dir
+            and not baseline_latencies
+        ):
             print("ERROR: --baseline-dir is required for single rate/poisson mode")
             sys.exit(1)
 
-        if args.lambda_val is not None and baseline_latencies:
+        baseline_ready = bool(baseline_latencies) or not needs_baseline_dir
+        if args.lambda_val is not None and baseline_ready:
             # Poisson single run
             session_name = condition_session_name(args.session_name, None)
             task_pool = workload.create_task_pool(
@@ -1431,7 +1593,10 @@ def main():
                 log_level=args.log_level,
                 workload=workload,
                 halo_enabled=args.halo_enabled,
-                halo_slo=args.halo_slo if args.halo_slo is not None else args.tau,
+                halo_ttft_slo=halo_ttft_slo,
+                halo_tbt_slo=halo_tbt_slo,
+                halo_e2e_slo=halo_e2e_slo,
+                transcript_record_path=args.record_transcript,
             )
             runner._run_with_poisson_duration(task_pool, args.lambda_val, args.duration_min)
             finish_server_session(
@@ -1442,7 +1607,7 @@ def main():
                 stop_server=args.restart_server and bool(session_name) and args.fetch_server_session,
             )
 
-        elif args.rpm is not None and baseline_latencies:
+        elif args.rpm is not None and baseline_ready:
             # Rate single run
             session_name = condition_session_name(args.session_name, None)
             task_pool = workload.create_task_pool(
@@ -1484,7 +1649,10 @@ def main():
                 log_level=args.log_level,
                 workload=workload,
                 halo_enabled=args.halo_enabled,
-                halo_slo=args.halo_slo if args.halo_slo is not None else args.tau,
+                halo_ttft_slo=halo_ttft_slo,
+                halo_tbt_slo=halo_tbt_slo,
+                halo_e2e_slo=halo_e2e_slo,
+                transcript_record_path=args.record_transcript,
             )
             runner._run_with_rate_duration(task_pool, args.rpm, args.duration_min)
             finish_server_session(
@@ -1539,7 +1707,10 @@ def main():
                 log_level=args.log_level,
                 workload=workload,
                 halo_enabled=args.halo_enabled,
-                halo_slo=args.halo_slo if args.halo_slo is not None else args.tau,
+                halo_ttft_slo=halo_ttft_slo,
+                halo_tbt_slo=halo_tbt_slo,
+                halo_e2e_slo=halo_e2e_slo,
+                transcript_record_path=args.record_transcript,
             )
             runner._run_with_concurrency(tasks, concurrency=args.concurrency)
             finish_server_session(

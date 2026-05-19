@@ -29,37 +29,66 @@ This project measures how application-level goodput collapses under load even wh
 - Use the default restart behavior for `rate-sweep` and `poisson-sweep`; only use `--no-server-restart` when the user explicitly wants to reuse a running server.
 - If a custom admission-control server configuration is needed, pass it through `--sglang-start-cmd` so the runner still owns start/stop/fetch.
 
-## Halo (Project Halo Phase 1)
+## Halo (Project Halo, request-level)
 
-Pass `--halo-enabled` to `run_experiment.py` to enable Halo job-level
-admission/tracking. The runner probes `GET /halo/status` once at startup
-and aborts if the server's Halo state doesn't match (strict policy).
+> Halo was refactored job-level → **request-level** on 2026-05-19.
+> There is no job pre-registration anymore: `POST /halo/programs`,
+> `halo_job_id`, and `halo_job_done` were removed. Admission is fully
+> per-request.
 
-When on, each `run_job`:
-1. **registers the job** via `POST /halo/programs` at chain start;
-2. **carries `halo_job_id` / `halo_slo`** on every chat.completions via
-   ChatOpenAI `extra_body`;
-3. **signals termination** with `halo_job_done=true` on the chain's
-   final call so the server marks the Halo job COMPLETE immediately
-   (instead of waiting for the 5-minute quiescent safety net to trip).
+Pass `--halo-enabled` to `run_experiment.py` to enable client-side Halo
+wiring. The runner probes `GET /halo/status` once at startup and aborts
+if the server's Halo state doesn't match (strict policy).
 
-`--halo-slo` defaults to `--tau` — both have the same "slowdown-vs-
-baseline" semantics.
+When on, every `chat.completions` request carries three per-request SLO
+fields in `extra_body` (set by `make_llm`):
 
-**Server side must also be launched with `--halo-enabled`** (e.g.,
-`source ms_dev/experiments/halo_observe_only.sh` then
-`run_experiment.py --mode single` in the sglang repo). Client-side
-client_on/server_off mismatch is detected at runner startup and aborts.
+- `halo_ttft_slo` — `--halo-ttft-slo`
+- `halo_tbt_slo` — `--halo-tbt-slo`
+- `halo_e2e_slo` — `--halo-e2e-slo`
 
-Reject handling: HTTP 400 `HALO_*` rejects propagate to `metrics.csv`
-as `is_rejected=True, rejection_reason=HALO_*` the same way as the
-existing admission_control 429 path. No analysis code needs updating.
+Each flag defaults to `--tau`. With the server's `slo_mode=ratio`
+(default) these are slowdown ratios vs the solo baseline; `halo_e2e_slo`
+is always a ratio. No job is registered; the server's request-level
+admission gate evaluates each request independently.
 
-Details + new-workload guide: [workloads/AGENTS.md](workloads/AGENTS.md)
-§"Halo-compatible Workloads". Client-side helper module:
-[workloads/halo_helpers.py](workloads/halo_helpers.py). Server-side API
-reference (request fields, endpoint schemas, `event=job_complete` jsonl
-rows): `ms_dev/halo_dev/halo_api_reference.md` in the sglang repo.
+**Server side must also be launched with `--halo-enabled`** plus an
+`--halo-admission-policy`. Client-on/server-off (and vice versa) is
+detected at runner startup and aborts.
+
+Reject handling: a rejected request fails admission with HTTP 400; the
+client's `_detect_admission_rejection` records it in `metrics.csv` as
+`is_rejected=True, rejection_reason=HALO_*` (`HALO_KV_CAP`,
+`HALO_VSS_PREDICTED`, `HALO_ADMISSION_PREDICTED`, …).
+
+Server-side API reference: `ms_dev/halo_dev/halo_api_reference.md` in the
+sglang repo. Client helper: [workloads/halo_helpers.py](workloads/halo_helpers.py).
+
+## GPU nodes (`--node`)
+
+Two SGLang instances are available (B200×2 each). `--node {nxc7-1,nxc7-2}`
+selects one: it sets the ssh host, server base URL, and remote tmux
+session from a profile (`NODE_PROFILES` in `run_experiment.py`). One node
+per run. Explicit `--server-base-url` / `--sglang-ssh-host` /
+`--sglang-tmux-session` still override the profile. Local tunnels
+(`pipe_sglang_1.sh` → `:8080`, `pipe_sglang_2.sh` → `:8081`) must be up.
+
+## Request-level workload + transcript flow
+
+`codingagent_request_level_poisson` is a flat, open-loop request stream:
+each Poisson arrival is one **independent** LLM request (no job/chain).
+It replays recorded agent calls verbatim ("literal replay"), so it needs
+a transcript file:
+
+1. **Record** (also produces the baseline): a concurrency-1
+   `swe_bench_coding --mode baseline --record-transcript <path>` run
+   writes `<path>` — one JSONL line per agent call with the full prompt
+   and that call's solo TTFT/TBT/e2e.
+2. **Replay**: `--workload codingagent_request_level_poisson
+   --transcript-file <path> --mode poisson-sweep` (λ = requests/sec).
+
+Goodput is per-request (e2e/TTFT/TBT vs the recorded baseline × τ);
+parse it with `analysis_scripts/parse_request_metrics.py`.
 
 ## Admission Control Checks
 
@@ -77,12 +106,14 @@ When testing admission-control rejection behavior:
 | Path | Purpose |
 |---|---|
 | `run_experiment.py` | Main experiment runner and SGLang orchestration |
-| `workloads/swe_bench_coding/` | Default SWE-bench Lite synthetic coding workload |
+| `workloads/swe_bench_coding/` | Default SWE-bench Lite synthetic coding workload (job-level) |
 | `workloads/swe_bench_coding_tool_delay/` | SWE-bench workload with deterministic simulated tool-call intervals |
 | `workloads/swe_bench_coding_parallel_tool_delay/` | SWE-bench workload with parallel execution rounds and deterministic tool-call intervals |
+| `workloads/codingagent_request_level_poisson/` | Request-level Poisson workload — replays recorded agent calls as independent requests |
 | `metrics_tracker.py` | Writes `metrics.csv` and `tbt_events.jsonl` |
 | `agent_logger.py` | Writes per-job prompt/response logs |
-| `analysis_scripts/parse_application_metrics.py` | Builds application analysis CSVs |
+| `analysis_scripts/parse_application_metrics.py` | Builds application analysis CSVs (job workloads) |
+| `analysis_scripts/parse_request_metrics.py` | Builds per-request goodput CSVs (request-level workload) |
 | `analysis_scripts/plot_application_metrics.py` | Builds application figures |
 | `analysis_scripts/parse_server_logs.py` | Parses `server.stderr*` into `server_metrics.csv` |
 | `analysis_scripts/plot_server_metrics.py` | Builds server-side figures |
@@ -212,6 +243,35 @@ to violate it. The parser treats these as **unclassified**:
 **Why excluded, not counted as a miss:** A job cut off by run end may well have been on track for goodput. Counting it as "not goodput" systematically penalizes low-λ runs (where chain duration exceeds inter-arrival, so jobs released near the run end can't finish before termination). The classified-only rate isolates real SLO behavior.
 
 If you change the run duration or window, the unclassified count shifts accordingly; report it alongside the goodput rate when the share is non-trivial.
+
+### Rejected-at-start exclusion (unclassified jobs)
+
+In addition to run-boundary cutoffs, jobs whose **very first call** (lowest
+`call_index`) was rejected by admission control are also treated as
+**unclassified** — the system declined the job before it produced any output,
+so it never made a real SLO attempt.
+
+- `parse_application_metrics.py` `add_tau_goodput()` builds the
+  `rejected_at_start_ids` set from the calls table (first call's
+  `is_rejected_bool=True`) and excludes those jobs via
+  `classifiable = ... & ~rejected_at_start`.
+- **Mid-chain rejected jobs are NOT excluded**: a job that succeeded on
+  call 1-2 and was then rejected at call 3 *did* expend system effort, so
+  it stays in the denominator as a not-goodput attempt. Halo's design
+  (admission decision only at first call) tends to produce only
+  from-start rejects; admission-ratio-style policies can produce
+  mid-chain rejects too.
+- Backward compatibility: for runs **without** admission control no calls
+  are rejected, so `rejected_at_start_ids` is empty and behavior is
+  unchanged.
+
+**Why excluded, not counted as a miss:** "rejected before doing anything"
+and "ran and missed the SLO" are different events. Lumping the former
+into the not-goodput bucket conflates admission-policy aggressiveness
+with application-level SLO failure rate. Keeping them in the
+goodput-rate numerator/denominator would also reward over-conservative
+admission (rejecting more → "fewer slow jobs ran" → higher rate) in a
+way that hides the real attainment among admitted work.
 
 ## Confirmation Before Reporting Results
 

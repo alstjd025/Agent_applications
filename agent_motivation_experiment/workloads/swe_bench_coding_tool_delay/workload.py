@@ -85,37 +85,17 @@ class Workload(BaseSWEBenchWorkload):
         job_submit_time = context.job_start_time
         job_timeout_sec = task.get("job_timeout_sec", 0)
 
-        # HALO: pre-register the job before any LLM call. Same pattern
-        # as the base swe_bench_coding workload — see that file and
-        # workloads/halo_helpers.py.
-        if context.halo_enabled:
-            from workloads.halo_helpers import register_halo_program
-
-            register_halo_program(
-                context.server_base_url,
-                job_id=job_id,
-                slo=context.halo_slo,
-                total_calls=task["chain_length"],
-            )
-
+        # HALO (request-level): per-request SLO fields only — no job
+        # pre-registration. See swe_bench_coding/workload.py.
+        halo_on = context.halo_enabled
         llm = make_llm(
             base_url=f"{context.server_base_url}/v1",
             model_id=MODEL_ID,
             seed=context.seed,
-            halo_job_id=job_id if context.halo_enabled else None,
-            halo_slo=context.halo_slo if context.halo_enabled else None,
+            halo_ttft_slo=context.halo_ttft_slo if halo_on else None,
+            halo_tbt_slo=context.halo_tbt_slo if halo_on else None,
+            halo_e2e_slo=context.halo_e2e_slo if halo_on else None,
         )
-        # HALO: separate "last call" instance — see swe_bench_coding/workload.py.
-        halo_done_llm = None
-        if context.halo_enabled:
-            halo_done_llm = make_llm(
-                base_url=f"{context.server_base_url}/v1",
-                model_id=MODEL_ID,
-                seed=context.seed,
-                halo_job_id=job_id,
-                halo_slo=context.halo_slo,
-                halo_job_done=True,
-            )
         initial_state = create_chain_state(
             job_id=job_id,
             problem_statement=task["problem_statement"],
@@ -125,11 +105,11 @@ class Workload(BaseSWEBenchWorkload):
             agent_logger=context.agent_logger,
             console_write=context.console_write,
             llm=llm,
-            halo_done_llm=halo_done_llm,
             log_level=context.log_level,
             job_timeout_sec=job_timeout_sec,
             job_start_time=job_submit_time,
             tool_call_delays=build_tool_call_delays(task),
+            transcript_record_path=context.transcript_record_path,
         )
         initial_state["server_terminated_event"] = context.server_terminated_event
 

@@ -77,24 +77,27 @@ def make_llm(
     model_id: str = MODEL_ID,
     seed: int = 42,
     *,
-    halo_job_id: Optional[str] = None,
-    halo_slo: Optional[float] = None,
-    halo_job_done: bool = False,
+    halo_ttft_slo: Optional[float] = None,
+    halo_tbt_slo: Optional[float] = None,
+    halo_e2e_slo: Optional[float] = None,
+    halo_bypass: bool = False,
 ) -> ChatOpenAI:
     """Create a ChatOpenAI instance with proper timeout settings.
 
-    HALO wiring (see halo_api_reference.md):
-      - halo_job_id / halo_slo: when set, attached to every chat.completions
-        request via `extra_body` so the server's Halo admission gate can
-        match the request to a pre-registered job.
-      - halo_job_done: when True, also tells the server "this is the last
-        LLM call of the job" → mark the job COMPLETE on this request's
-        finish. Pattern: workload creates two ChatOpenAI instances per job
-        — the regular one for all chain calls except the last, and a
-        "halo_done" instance with halo_job_done=True for the final call.
+    HALO request-level wiring (see ms_dev/halo_dev/halo_api_reference.md):
+      - halo_ttft_slo / halo_tbt_slo / halo_e2e_slo: per-request SLO
+        fields. When set, attached to every chat.completions request via
+        `extra_body` so the server's request-level admission gate can
+        evaluate each request independently. With slo_mode=ratio these
+        are slowdown ratios vs the solo-run baseline; halo_e2e_slo is
+        always a ratio.
+      - halo_bypass: marks server-internal traffic; real clients leave it
+        False.
 
-    When `halo_job_id is None`, no extra_body is injected — works against
-    a non-Halo server unchanged.
+    There is NO job pre-registration and no halo_job_id anymore (the
+    2026-05-19 request-level refactor removed POST /halo/programs). When
+    all SLO fields are None, no extra_body is injected — works against a
+    non-Halo server unchanged.
     """
     kwargs: dict = dict(
         base_url=base_url,
@@ -105,12 +108,16 @@ def make_llm(
         top_p=1.0,
         seed=seed,
     )
-    if halo_job_id is not None:
-        extra: dict = {"halo_job_id": halo_job_id}
-        if halo_slo is not None:
-            extra["halo_slo"] = halo_slo
-        if halo_job_done:
-            extra["halo_job_done"] = True
+    extra: dict = {}
+    if halo_ttft_slo is not None:
+        extra["halo_ttft_slo"] = halo_ttft_slo
+    if halo_tbt_slo is not None:
+        extra["halo_tbt_slo"] = halo_tbt_slo
+    if halo_e2e_slo is not None:
+        extra["halo_e2e_slo"] = halo_e2e_slo
+    if halo_bypass:
+        extra["halo_bypass"] = True
+    if extra:
         kwargs["extra_body"] = extra
     return ChatOpenAI(**kwargs)
 
@@ -259,10 +266,6 @@ class ChainState(TypedDict):
     agent_logger: Optional[object]
     console_write: Optional[Callable]
     llm: Optional[Any]              # per-job ChatOpenAI instance
-    # HALO: optional second ChatOpenAI instance with halo_job_done=True in
-    # extra_body. invoke_with_tracking swaps to this for the chain's last
-    # call so the server marks the Halo job COMPLETE. None when Halo is off.
-    halo_done_llm: Optional[Any]
     last_call_output: str           # output from the previous call
     job_completed: bool             # True only if ALL N calls succeed
     error_msg: str                  # non-empty if job failed
@@ -279,6 +282,9 @@ class ChainState(TypedDict):
     server_terminated_event: Optional[threading.Event]  # set when server is killed
     tool_call_delays: List[float]   # delay before each call, indexed by call_index - 1
     tool_delay_total_s: float       # cumulative application-side tool delay
+    # Transcript recording (literal-replay capture). When set, each
+    # successful call's full prompt + solo timings are appended here.
+    transcript_record_path: Optional[str]
 
 
 # ---------------------------------------------------------------------------
@@ -294,27 +300,46 @@ def _metadata_dict(obj: Any) -> dict:
     return metadata
 
 
+def _serialize_messages(messages: list) -> List[dict]:
+    """Serialize langchain messages to {role, content} dicts.
+
+    Used by the transcript recorder so the request-level workload can
+    replay a recorded agent call's prompt verbatim.
+    """
+    role_map = {"system": "system", "human": "user", "ai": "assistant"}
+    out: List[dict] = []
+    for m in messages:
+        mtype = getattr(m, "type", None) or m.__class__.__name__.lower()
+        role = role_map.get(mtype, "user")
+        out.append({"role": role, "content": getattr(m, "content", str(m))})
+    return out
+
+
 def _detect_admission_rejection(obj: Any) -> tuple[bool, str]:
-    """Detect server-side rejection in a chunk / exception / response.
+    """Detect server-side admission rejection in a chunk / exception / response.
 
     Handles both:
-      - admission_control (Mooncake-style predictive): HTTP 429 +
-        `admission_reason` in finish_reason ("TTFT_PREDICTED", etc.)
-      - HALO job-level gate: HTTP 400 + `halo_reason` in finish_reason
-        ("HALO_NO_JOB_ID" / "HALO_PROGRAM_NOT_REGISTERED").
+      - Halo request-level admission gate: HTTP 400. The scheduler emits
+        an abort whose finish info carries
+        `{"type":"abort","status_code":400,"halo_reason":"HALO_*",
+          "message":"Halo admission gate rejected this request (reason=...)"}`.
+        Reasons: HALO_KV_CAP / HALO_VSS_PREDICTED / HALO_ADMISSION_PREDICTED
+        (and future policy reasons).
+      - Legacy admission_control (Mooncake-style predictive): HTTP 429 +
+        `admission_reason` (still present in sglang but dormant).
 
-    Returns (rejected, reason). reason is the upstream reason string
-    when available, or "ADMISSION_REJECTED" / "HALO_REJECTED" fallback.
+    Returns (rejected, reason). reason is the upstream reason string when
+    available, else "HALO_REJECTED" / "ADMISSION_REJECTED" fallback.
 
-    For exceptions raised by langchain/openai SDK on HTTP 4xx, the
-    relevant info is usually only in `str(exception)` (the response
-    metadata fields are empty), so we also scan that as a fallback.
+    For exceptions raised by the langchain/openai SDK on HTTP 4xx, the
+    relevant info is usually only in `str(exception)` (response metadata
+    fields are empty), so we also scan that as a fallback.
     """
     metadata = _metadata_dict(obj)
     finish_reason = metadata.get("finish_reason") or metadata.get("finish_details")
     reason = (
-        metadata.get("admission_reason")
-        or metadata.get("halo_reason")
+        metadata.get("halo_reason")
+        or metadata.get("admission_reason")
         or metadata.get("reason")
         or ""
     )
@@ -324,8 +349,8 @@ def _detect_admission_rejection(obj: Any) -> tuple[bool, str]:
     if isinstance(finish_reason, dict):
         status_code = finish_reason.get("status_code", status_code)
         reason = (
-            finish_reason.get("admission_reason")
-            or finish_reason.get("halo_reason")
+            finish_reason.get("halo_reason")
+            or finish_reason.get("admission_reason")
             or reason
         )
         message = finish_reason.get("message", message)
@@ -333,41 +358,42 @@ def _detect_admission_rejection(obj: Any) -> tuple[bool, str]:
     else:
         finish_type = str(finish_reason or "").lower()
 
-    # Include str(obj) so exception messages from openai SDK (e.g.
+    # Include str(obj) so exception messages from the openai SDK (e.g.
     # `openai.BadRequestError`) — which don't surface fields via
-    # _metadata_dict — still expose 'halo rejected' / 'halo_reason' /
-    # 'HALO_*' tokens. Without this the HTTP 400 rejection path is
-    # invisible to the client and metrics.csv never marks the call as
-    # is_rejected.
+    # _metadata_dict — still expose 'halo_reason' / 'HALO_*' / the
+    # rejection phrasing. Without this the HTTP 400 rejection path is
+    # invisible and metrics.csv never marks the call as is_rejected.
     text = " ".join(
         str(part)
         for part in (finish_reason, reason, message, metadata, obj)
         if part is not None
     ).lower()
 
-    # admission_control path: 429 + "admission rejected" phrasing.
+    # Halo request-level path: HTTP 400 + the admission-gate phrasing or
+    # any halo_reason / HALO_* token.
+    halo_rejected = (
+        "halo_reason" in text
+        or "admission gate rejected" in text
+        or "halo_kv_cap" in text
+        or "halo_vss_predicted" in text
+        or "halo_admission_predicted" in text
+        or (str(status_code) == "400" and "halo" in text)
+    )
+    # Legacy admission_control path: HTTP 429 + "admission rejected".
     admission_rejected = (
         "admission rejected" in text
         or "admission_reason" in text
         or (str(status_code) == "429" and "abort" in finish_type)
     )
-    # HALO path: 400 + "halo rejected" phrasing, or any HALO_* reason.
-    halo_rejected = (
-        "halo rejected" in text
-        or "halo_reason" in text
-        or "halo_no_job_id" in text
-        or "halo_program_not_registered" in text
-        or (str(status_code) == "400" and "halo" in text)
-    )
 
-    if not (admission_rejected or halo_rejected):
+    if not (halo_rejected or admission_rejected):
         return False, ""
 
     if not reason and isinstance(message, str):
-        if "Admission rejected:" in message:
+        if "reason=" in message:
+            reason = message.split("reason=", 1)[1].split(")", 1)[0].strip()
+        elif "Admission rejected:" in message:
             reason = message.split("Admission rejected:", 1)[1].split("(", 1)[0].strip()
-        elif "Halo rejected:" in message:
-            reason = message.split("Halo rejected:", 1)[1].strip()[:64]
 
     if not reason:
         reason = "HALO_REJECTED" if halo_rejected else "ADMISSION_REJECTED"
@@ -422,6 +448,7 @@ def invoke_with_tracking(
     call_index: int,
     state: ChainState,
     current_stage: str = "",
+    agent_label: Optional[str] = None,
 ) -> Optional[str]:
     """
     Invoke LLM with streaming, TBT measurement, timeout, and metrics recording.
@@ -430,6 +457,9 @@ def invoke_with_tracking(
         messages: list of langchain message objects
         call_index: 1-based index of this call within the chain
         state: current ChainState
+        current_stage: stage label used in the default agent name
+        agent_label: when set, overrides the metrics `agent` column
+            verbatim (e.g. "request" for the request-level workload).
 
     Returns:
         Response content string on success, None on timeout/error.
@@ -438,18 +468,6 @@ def invoke_with_tracking(
     if llm is None:
         llm = make_llm()
         state["llm"] = llm
-    # HALO: if this is the last call of the chain and the workload set
-    # state["halo_done_llm"], use that LLM instance instead. Its only
-    # difference from `llm` is `extra_body["halo_job_done"] = true`,
-    # which tells the server to mark the owning Halo job COMPLETE on
-    # this request's finish. See halo_api_reference.md.
-    chain_length = state.get("chain_length", 0)
-    if (
-        chain_length
-        and call_index == chain_length
-        and state.get("halo_done_llm") is not None
-    ):
-        llm = state["halo_done_llm"]
 
     start_time = time.time()
     first_token_time = None
@@ -665,7 +683,8 @@ def invoke_with_tracking(
     # ---- Metrics recording ----
     if state.get("metrics_tracker"):
         state["metrics_tracker"].record_chain_call(
-            agent_name=f"chain_call_{current_stage}" if current_stage else "chain_call",
+            agent_name=agent_label
+            or (f"chain_call_{current_stage}" if current_stage else "chain_call"),
             start_time=start_time,
             end_time=end_time,
             input_tokens=input_tokens,
@@ -690,6 +709,35 @@ def invoke_with_tracking(
             tbt_summary=tbt_summary,
             tbt_detail=tbt_detail,
         )
+
+    # ---- Transcript recording (literal-replay capture) ----
+    # On a concurrency-1 baseline run with --record-transcript, append
+    # this call's full prompt + solo timings to a JSONL. The
+    # codingagent_request_level_poisson workload replays these verbatim
+    # as independent Poisson-arriving requests. Only successful calls are
+    # recorded so every transcript entry has a valid solo baseline.
+    transcript_path = state.get("transcript_record_path")
+    if (
+        transcript_path
+        and not (is_timeout or is_error or is_job_timeout or is_server_terminated)
+        and response_content
+    ):
+        from metrics_tracker import MetricsTracker
+
+        ttft_s = (first_token_time - start_time) if first_token_time else None
+        MetricsTracker._get_jsonl_writer(transcript_path).write({
+            "request_id": f"{state.get('job_id', 'job')}__call{call_index:02d}",
+            "src_job_id": state.get("job_id", ""),
+            "call_index": call_index,
+            "stage": current_stage,
+            "nonce": state.get("nonce", ""),
+            "messages": _serialize_messages(messages),
+            "baseline_ttft_s": round(ttft_s, 6) if ttft_s is not None else None,
+            "baseline_tbt_mean_ms": tbt_summary.get("mean_ms"),
+            "baseline_e2e_s": round(end_time - start_time, 6),
+            "recorded_input_tokens": input_tokens,
+            "recorded_output_tokens": output_tokens,
+        })
 
     # ---- Agent logging ----
     if state.get("agent_logger"):
@@ -977,7 +1025,7 @@ def create_chain_state(
     job_timeout_sec: float = 0,
     job_start_time: float = 0,
     tool_call_delays: Optional[List[float]] = None,
-    halo_done_llm: Optional[ChatOpenAI] = None,
+    transcript_record_path: Optional[str] = None,
 ) -> ChainState:
     """
     Create the initial ChainState for a synthetic chain job.
@@ -1031,7 +1079,6 @@ def create_chain_state(
         agent_logger=agent_logger,
         console_write=console_write or print,
         llm=llm,
-        halo_done_llm=halo_done_llm,
         last_call_output="",
         job_completed=False,
         error_msg="",
@@ -1048,6 +1095,7 @@ def create_chain_state(
         server_terminated_event=None,
         tool_call_delays=tool_call_delays,
         tool_delay_total_s=0.0,
+        transcript_record_path=transcript_record_path,
     )
 
 

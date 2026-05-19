@@ -36,8 +36,9 @@ The protocol is defined in `workloads/base.py`.
 | `server_terminated_event` | Set when runner ends a duration run |
 | `job_start_time` | Used for job-level timeout checks |
 | `parallel_calls_path` | Optional raw CSV path for workloads that record dependency/round structure |
-| `halo_enabled` | True when client runs with `--halo-enabled`. Gates the Halo pre-register call + extra_body wiring. Defaults to False |
-| `halo_slo` | Slowdown SLO sent to `POST /halo/programs` and along every chat.completions body. Defaults to `--tau` value when CLI omits `--halo-slo` |
+| `halo_enabled` | True when client runs with `--halo-enabled`. Gates the per-request SLO `extra_body` wiring. Defaults to False |
+| `halo_ttft_slo` / `halo_tbt_slo` / `halo_e2e_slo` | Per-request Halo SLO values attached to every chat.completions body. Each defaults to `--tau` |
+| `transcript_record_path` | When set, every LLM call's full prompt + solo timings are appended to this JSONL (literal-replay capture). Defaults to None |
 
 ## Task Dictionaries
 
@@ -70,7 +71,7 @@ Important invariants:
 - SGLang admission-control rejects must be recorded explicitly as `is_rejected=True`, `rejection_reason=<reason>`, `success=False`, and `is_error=True` in call rows.
 - Job results that stop because of a rejected call must propagate `is_rejected` and `rejection_reason` to the `job_summary` row.
 - Prefer the shared invocation path in `swe_bench_coding.agent.invoke_with_tracking()` for OpenAI-compatible LLM calls so rejection handling stays consistent across workloads.
-- HALO rejects (HTTP 400 with `halo_reason` in `HALO_NO_JOB_ID` / `HALO_PROGRAM_NOT_REGISTERED`) follow the same path as admission_control rejects: `_detect_admission_rejection()` in `agent.py` recognizes both. `is_rejected=True` + `rejection_reason=<HALO_*>` should be propagated to call rows and `job_summary`.
+- HALO rejects (HTTP 400, `halo_reason` in `HALO_KV_CAP` / `HALO_VSS_PREDICTED` / `HALO_ADMISSION_PREDICTED` / …) are recognized by `_detect_admission_rejection()` in `agent.py`. `is_rejected=True` + `rejection_reason=<HALO_*>` should be propagated to call rows and `job_summary`.
 
 ## Default Workload
 
@@ -109,54 +110,56 @@ Key invariants:
 - If multiple tool-result calls are in one round, the round sleeps for `max(call_tool_delays)`, modeling parallel tool work.
 - `Plan` and later singleton calls depend on all calls from the previous execution round.
 
+## Request-level Poisson Workload
+
+`codingagent_request_level_poisson/` is **not** a job/chain workload.
+Each task is one independent LLM request; the runner submits them as a
+Poisson process (λ = requests/sec). It replays recorded agent calls
+**verbatim** ("literal replay") from a transcript JSONL.
+
+Key invariants:
+
+- Input is a transcript file produced by a concurrency-1
+  `swe_bench_coding --mode baseline --record-transcript <path>` run.
+  Each line carries the full prompt of one agent call plus that call's
+  solo TTFT/TBT/e2e — the per-request goodput baseline.
+- No job concept, no `--baseline-dir` — the baseline lives in the
+  transcript. `run_job` issues exactly one `chat.completions` request
+  via the shared `invoke_with_tracking` (with `agent_label="request"`,
+  `chain_length=1`).
+- `metrics.csv` rows for this workload have `agent == "request"`.
+  `analysis_scripts/parse_request_metrics.py` turns them into
+  per-request e2e/TTFT/TBT goodput.
+- Prompt bytes are replayed unchanged across pool cycles, so cross-
+  request prefix-cache behavior is realistic.
+
 ## Halo-compatible Workloads
 
-Project Halo Phase 1 adds a job-level admission gate on the SGLang side.
-When a client runs `run_experiment.py --halo-enabled`, every workload's
-`run_job(task, context)` must do **three** things over a chain's
-lifetime:
+Project Halo (request-level since 2026-05-19) admits/rejects **each
+request independently** — there is no job pre-registration. When a
+client runs `run_experiment.py --halo-enabled`, a workload's `run_job`
+only has to:
 
-1. **Pre-register the job** at chain start, by calling
-   `register_halo_program(...)` from `workloads/halo_helpers.py`.
-   Required fields: `job_id`, `slo`, `total_calls`. Optional, send if
-   available: `stage_sequence`, `expected_input_lens`,
-   `expected_output_lens`, `dag` (free-form JSON-able, ≤16 KiB).
-   Failures (network error, 400, 409) raise and abort the run — the
-   policy is strict by design.
+1. **Attach the per-request SLO fields.** Build the LLM with
+   `make_llm(..., halo_ttft_slo=, halo_tbt_slo=, halo_e2e_slo=)` when
+   `context.halo_enabled` is True; `make_llm` wires them into
+   `extra_body` so LangChain forwards them on every `chat.completions`.
+   Pass `None` for all three when Halo is off.
 
-2. **Build two LLM instances** with `make_llm(...)`:
-   - `llm` — used for every call except the last. Pass `halo_job_id=`
-     and `halo_slo=`; `make_llm` wires `extra_body={...}` so LangChain
-     forwards them on every `chat.completions`.
-   - `halo_done_llm` — used **only for the chain's last call**. Same
-     args plus `halo_job_done=True`. The server treats that call's
-     finish as the explicit termination signal: it marks the owning
-     Job COMPLETE, which makes `gc_completed` drop the registry entry
-     after `retain_seconds`. Without this, the job sits RUNNING until
-     the server's quiescent safety net trips (default 5 min).
+2. **Reuse `invoke_with_tracking`** for the call. `_detect_admission_rejection`
+   recognizes the HTTP-400 Halo reject (`halo_reason` in `HALO_KV_CAP` /
+   `HALO_VSS_PREDICTED` / `HALO_ADMISSION_PREDICTED` / …) and the legacy
+   429 admission_control path. It also scans `str(exception)` because
+   the openai SDK wraps 4xx into a `BadRequestError` with empty
+   `.response_metadata`. Rejections propagate to `metrics.csv` as
+   `is_rejected=True, rejection_reason=HALO_*` for free.
 
-   Store both on `ChainState` (`state["llm"]`, `state["halo_done_llm"]`);
-   `swe_bench_coding.agent.invoke_with_tracking` automatically swaps to
-   `halo_done_llm` when `call_index == state["chain_length"]`. Set
-   `halo_done_llm=None` when Halo is off — the swap is no-op.
+There is no `halo_done_llm`, no `register_halo_program`, and no
+`halo_job_id` anymore (all removed in the request-level refactor).
 
-3. **Propagate rejections to metrics**. `_detect_admission_rejection`
-   in `swe_bench_coding/agent.py` recognizes BOTH admission_control's
-   429 path AND Halo's 400 path (`halo_reason` in
-   `HALO_NO_JOB_ID`/`HALO_PROGRAM_NOT_REGISTERED`). The shared exception
-   handlers in `invoke_with_tracking` also scan `str(exception)` for
-   the same tokens because the openai SDK wraps the response into a
-   `BadRequestError` whose `.response_metadata` is empty — without that
-   the client would silently miss Halo rejects. New workloads that
-   reuse `invoke_with_tracking` get this for free.
-
-When `context.halo_enabled is False`, do not call any of the helpers
-— the workload should behave exactly as if Halo doesn't exist.
-
-See [halo_helpers.py](halo_helpers.py) for the helper signatures and
-[ms_dev/halo_dev/halo_api_reference.md](../../../../halo_dev/halo_api_reference.md)
-in the sglang repo for the full server-side API spec (request fields,
-status codes, `event=job_complete` jsonl rows, etc.).
+See [halo_helpers.py](halo_helpers.py) for the startup probe and
+`ms_dev/halo_dev/halo_api_reference.md` in the sglang repo for the full
+server-side API spec.
 
 ## Adding A Workload
 
@@ -165,12 +168,8 @@ status codes, `event=job_complete` jsonl rows, etc.).
 3. Ensure `workloads/__init__.py` can load the name.
 4. Add metadata and reproducibility fields so `run_config.json` explains the run.
 5. Verify with a tiny baseline or single run before launching sweeps.
-6. **Halo support** (when the new workload also has a meaningful concept
-   of multi-call jobs): inside `run_job(task, context)` mirror the
-   pattern from `swe_bench_coding/workload.py` — guard on
-   `context.halo_enabled`, call `register_halo_program(...)`, build
-   `llm` + `halo_done_llm` (the second one with `halo_job_done=True`),
-   thread both through `ChainState`. The shared
-   `invoke_with_tracking` handles the last-call swap and the
-   rejection-detection wiring automatically. See "Halo-compatible
-   Workloads" above for the three required steps.
+6. **Halo support**: inside `run_job(task, context)`, when
+   `context.halo_enabled` is True, pass `context.halo_ttft_slo` /
+   `halo_tbt_slo` / `halo_e2e_slo` into `make_llm(...)`. Reuse
+   `invoke_with_tracking` so HTTP-400 reject detection works. See
+   "Halo-compatible Workloads" above.

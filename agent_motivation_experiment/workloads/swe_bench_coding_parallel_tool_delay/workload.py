@@ -236,26 +236,10 @@ class Workload(BaseSWEBenchWorkload):
         tool_call_delays = build_tool_call_delays(task)
         rounds = build_execution_rounds(stage_sequence, max_parallel_width)
 
-        # HALO: pre-register the job. Parallel workload knows its full
-        # stage_sequence + an execution-round structure, so we can pass
-        # richer optional info to the server. Phase 1 stores it without
-        # using it; Phase 2 admission will look at total_calls.
-        if context.halo_enabled:
-            from workloads.halo_helpers import register_halo_program
-
-            register_halo_program(
-                context.server_base_url,
-                job_id=job_id,
-                slo=context.halo_slo,
-                total_calls=chain_length,
-                stage_sequence=list(stage_sequence),
-                dag={
-                    "type": "parallel_rounds",
-                    "rounds": [
-                        {"leader": r[0], "members": list(r)} for r in rounds
-                    ],
-                },
-            )
+        # HALO (request-level): admission is per-request, no job
+        # pre-registration. Each call's request carries the halo_*_slo
+        # fields via make_llm in run_one_call below.
+        halo_on = context.halo_enabled
 
         accumulated_context = ""
         outputs_by_call: dict[int, str] = {}
@@ -300,28 +284,16 @@ class Workload(BaseSWEBenchWorkload):
             )
             call_tracker.start_task(job_id)
             call_tracker.current_iteration = call_index - 1
-            # HALO: build the normal "llm" + an optional "halo_done_llm"
-            # used by invoke_with_tracking for the chain's final call.
-            # In parallel_tool_delay the final stage is always a
-            # singleton round, so identifying "call_index == chain_length"
-            # works the same as in the linear workloads.
+            # HALO (request-level): each call's request carries the
+            # per-request halo_*_slo fields via extra_body.
             llm = make_llm(
                 base_url=f"{context.server_base_url}/v1",
                 model_id=MODEL_ID,
                 seed=context.seed,
-                halo_job_id=job_id if context.halo_enabled else None,
-                halo_slo=context.halo_slo if context.halo_enabled else None,
+                halo_ttft_slo=context.halo_ttft_slo if halo_on else None,
+                halo_tbt_slo=context.halo_tbt_slo if halo_on else None,
+                halo_e2e_slo=context.halo_e2e_slo if halo_on else None,
             )
-            halo_done_llm = None
-            if context.halo_enabled:
-                halo_done_llm = make_llm(
-                    base_url=f"{context.server_base_url}/v1",
-                    model_id=MODEL_ID,
-                    seed=context.seed,
-                    halo_job_id=job_id,
-                    halo_slo=context.halo_slo,
-                    halo_job_done=True,
-                )
             state = {
                 "job_id": job_id,
                 "chain_length": chain_length,
@@ -330,7 +302,7 @@ class Workload(BaseSWEBenchWorkload):
                 "agent_logger": context.agent_logger,
                 "console_write": context.console_write,
                 "llm": llm,
-                "halo_done_llm": halo_done_llm,
+                "transcript_record_path": context.transcript_record_path,
                 "job_timeout_sec": job_timeout_sec,
                 "job_start_time": job_submit_time,
                 "server_terminated_event": context.server_terminated_event,

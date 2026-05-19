@@ -8,6 +8,8 @@ SGLang 서버에 multi-call coding agent workload를 부하로 넣고, server th
 
 `swe_bench_coding_parallel_tool_delay` workload는 같은 call 수와 stage sequence를 유지하면서, 연속된 `Locate` call들을 하나의 `execution_round`에서 병렬로 실행합니다. Call별 latency/token/TBT는 계속 `metrics.csv`에 저장되고, round/dependency 구조는 `parallel_calls.csv`와 분석용 `application_parallel_calls.csv`에 따로 저장됩니다.
 
+`codingagent_request_level_poisson` workload는 위 세 workload와 달리 **job/chain 개념이 없습니다.** 각 Poisson arrival이 하나의 독립적인 LLM request이고, 서버의 request-level Halo admission gate와 짝을 이룹니다. `swe_bench_coding` baseline run을 `--record-transcript`로 돌려 만든 transcript JSONL을 literal하게 재생(replay)하며, transcript 안에 들어 있는 concurrency-1 TTFT/TBT/e2e가 per-request goodput baseline이 됩니다. Goodput은 `analysis_scripts/parse_request_metrics.py`로 계산합니다.
+
 ## Quick Start
 
 아래 명령은 이 디렉터리(`Agent_applications/agent_motivation_experiment`)에서 실행하는 것을 기준으로 합니다.
@@ -102,6 +104,47 @@ python run_experiment.py \
   --tau 3.0 \
   --session-name rpm_sweep
 ```
+
+### Request-level Poisson (transcript replay)
+
+`codingagent_request_level_poisson` workload은 job 단위가 아니라 request 단위로
+Poisson 부하를 보냅니다. 먼저 transcript를 녹화한 뒤(이 run이 baseline 역할도 겸함),
+그 transcript를 replay 합니다.
+
+```bash
+# 1) Record transcript (= baseline). concurrency 1.
+python run_experiment.py \
+  --workload swe_bench_coding \
+  --mode baseline \
+  --node nxc7-1 \
+  --end-index 300 \
+  --restart-server \
+  --record-transcript results/transcripts/swe_b200x2.jsonl \
+  --session-name record_b200x2
+
+# 2) Replay as a request-level Poisson sweep (λ = requests/sec).
+python run_experiment.py \
+  --workload codingagent_request_level_poisson \
+  --mode poisson-sweep \
+  --node nxc7-1 \
+  --transcript-file results/transcripts/swe_b200x2.jsonl \
+  --lambda-list 1,2,5,10,20 \
+  --duration-min 60 \
+  --tau 3.0 \
+  --halo-enabled \
+  --session-name req_sweep
+```
+
+이 workload은 `--baseline-dir`이 필요 없습니다(baseline이 transcript 안에 있음).
+Per-request goodput은 `analysis_scripts/parse_request_metrics.py`로 계산합니다.
+
+## GPU 노드 선택 (`--node`)
+
+SGLang 서버 instance가 2개입니다(`nxc7-1`, `nxc7-2`). `--node`로 하나를 고르면
+ssh host / server base URL / 원격 tmux session이 profile에서 자동 설정됩니다.
+한 run에서는 한 노드만 씁니다. `--server-base-url` / `--sglang-ssh-host` /
+`--sglang-tmux-session`을 명시하면 profile을 덮어씁니다. 로컬 터널
+(`pipe_sglang_1.sh` → `:8080`, `pipe_sglang_2.sh` → `:8081`)이 떠 있어야 합니다.
 
 ## Server Flow
 
@@ -294,6 +337,7 @@ Parallel workload에서는 call별 상세 metric은 `metrics.csv`와 `applicatio
 | `workloads/swe_bench_coding/` | SWE-bench Lite synthetic coding agent |
 | `workloads/swe_bench_coding_tool_delay/` | `Tool result:` boundary에 deterministic interval을 넣는 SWE-bench workload |
 | `workloads/swe_bench_coding_parallel_tool_delay/` | 연속 Locate call을 같은 `execution_round`에서 병렬 실행하는 workload |
+| `workloads/codingagent_request_level_poisson/` | transcript를 literal replay하는 request-level Poisson workload (job 개념 없음) |
 | `analysis_scripts/` | metric parsing, aggregation, plotting scripts |
 | `results/` | 실험 결과 |
 | `results/aggregate_analysis/` | 여러 run을 묶은 분석 산출물 |
@@ -305,7 +349,8 @@ Parallel workload에서는 call별 상세 metric은 `metrics.csv`와 `applicatio
 
 | 스크립트 | 역할 |
 |---|---|
-| `analysis_scripts/parse_application_metrics.py` | `metrics.csv`를 application analysis CSV로 정규화 |
+| `analysis_scripts/parse_application_metrics.py` | `metrics.csv`를 application analysis CSV로 정규화 (job workload) |
+| `analysis_scripts/parse_request_metrics.py` | request-level workload의 `metrics.csv`를 per-request goodput CSV로 정규화 |
 | `analysis_scripts/parse_server_logs.py` | `server.stderr*`를 `server_metrics.csv`로 파싱 |
 | `analysis_scripts/plot_application_metrics.py` | throughput/goodput/WCR/call-job breakdown 그림 생성 |
 | `analysis_scripts/plot_server_metrics.py` | server decode/prefill/request stats 그림 생성 |
