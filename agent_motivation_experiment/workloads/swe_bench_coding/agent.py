@@ -81,6 +81,7 @@ def make_llm(
     halo_tbt_slo: Optional[float] = None,
     halo_e2e_slo: Optional[float] = None,
     halo_bypass: bool = False,
+    timeout: Optional[float] = None,
 ) -> ChatOpenAI:
     """Create a ChatOpenAI instance with proper timeout settings.
 
@@ -94,6 +95,10 @@ def make_llm(
       - halo_bypass: marks server-internal traffic; real clients leave it
         False.
 
+    `timeout` is the HTTP client timeout in seconds; None uses
+    PER_CALL_TIMEOUT. Pass a large value to keep only a dead-connection
+    safety net when client-side aborts are disabled.
+
     There is NO job pre-registration and no halo_job_id anymore (the
     2026-05-19 request-level refactor removed POST /halo/programs). When
     all SLO fields are None, no extra_body is injected — works against a
@@ -104,7 +109,7 @@ def make_llm(
         api_key="dummy",
         model=model_id,
         temperature=0.0,
-        timeout=PER_CALL_TIMEOUT,
+        timeout=timeout if timeout is not None else PER_CALL_TIMEOUT,
         top_p=1.0,
         seed=seed,
     )
@@ -497,6 +502,11 @@ def invoke_with_tracking(
 
     job_timeout_sec = state.get("job_timeout_sec", 0)
     job_start_time = state.get("job_start_time", 0)
+    # Client-side abort thresholds. A workload may set these to None to
+    # disable the TTFT / idle aborts (e.g. the request-level workload
+    # under --disable-request-timeouts). Absent keys keep the defaults.
+    per_call_timeout = state.get("per_call_timeout", PER_CALL_TIMEOUT)
+    idle_timeout = state.get("idle_timeout", IDLE_TIMEOUT)
 
     try:
         for chunk in llm.stream(messages):
@@ -531,18 +541,23 @@ def invoke_with_tracking(
                 state["is_server_terminated"] = True
                 break
 
-            # Call-level timeout check: TTFT or idle
+            # Call-level timeout check: TTFT or idle (skipped when the
+            # corresponding threshold is None — disabled by the workload).
             if first_token_time is None:
                 # No first token yet — TTFT timeout
-                if chunk_arrival_time - start_time > PER_CALL_TIMEOUT:
+                if per_call_timeout is not None and chunk_arrival_time - start_time > per_call_timeout:
                     is_timeout = True
-                    error_msg = f"Call {call_index}: no response within {PER_CALL_TIMEOUT}s (TTFT timeout)"
+                    error_msg = f"Call {call_index}: no response within {per_call_timeout}s (TTFT timeout)"
                     break
             else:
                 # Streaming in progress — idle timeout
-                if last_stream_chunk_time is not None and chunk_arrival_time - last_stream_chunk_time > IDLE_TIMEOUT:
+                if (
+                    idle_timeout is not None
+                    and last_stream_chunk_time is not None
+                    and chunk_arrival_time - last_stream_chunk_time > idle_timeout
+                ):
                     is_timeout = True
-                    error_msg = f"Call {call_index}: no chunk for {IDLE_TIMEOUT}s (idle timeout)"
+                    error_msg = f"Call {call_index}: no chunk for {idle_timeout}s (idle timeout)"
                     break
 
             if hasattr(chunk, "content") and chunk.content is not None:

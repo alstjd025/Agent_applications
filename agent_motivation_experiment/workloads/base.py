@@ -30,6 +30,11 @@ class RunContext:
     # call's full prompt + solo timings are appended to this JSONL so the
     # codingagent_request_level_poisson workload can replay them verbatim.
     transcript_record_path: Optional[str] = None
+    # When True, the request-level workload disables every client-side
+    # abort (τ / TTFT / idle timeout) so slow requests run to completion
+    # and are measured rather than killed. Honored by the request-level
+    # workload only. Defaults to False.
+    disable_timeouts: bool = False
 
 
 @dataclass

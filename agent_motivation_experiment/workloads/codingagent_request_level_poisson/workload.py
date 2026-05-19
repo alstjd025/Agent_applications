@@ -163,6 +163,14 @@ class Workload:
         stage = task.get("stage", "")
         messages = _deserialize_messages(task["messages"])
 
+        # --disable-request-timeouts: drop every client-side abort so a
+        # slow request runs to completion (measured, not killed). The
+        # HTTP client timeout is kept large only as a dead-connection
+        # safety net.
+        disable_to = context.disable_timeouts
+        if disable_to:
+            job_timeout_sec = 0
+
         halo_on = context.halo_enabled
         llm = make_llm(
             base_url=f"{context.server_base_url}/v1",
@@ -171,6 +179,7 @@ class Workload:
             halo_ttft_slo=context.halo_ttft_slo if halo_on else None,
             halo_tbt_slo=context.halo_tbt_slo if halo_on else None,
             halo_e2e_slo=context.halo_e2e_slo if halo_on else None,
+            timeout=3600.0 if disable_to else None,
         )
 
         # Minimal single-call state for the shared invoke path. chain_length=1
@@ -194,6 +203,10 @@ class Workload:
             "rejection_reason": "",
             "last_call_error_msg": "",
         }
+        if disable_to:
+            # None disables the TTFT / idle aborts in invoke_with_tracking.
+            state["per_call_timeout"] = None
+            state["idle_timeout"] = None
 
         response = invoke_with_tracking(
             messages, 1, state, stage, agent_label="request"

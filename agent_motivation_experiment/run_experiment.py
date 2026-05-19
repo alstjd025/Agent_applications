@@ -221,6 +221,7 @@ class MotivationExperimentRunner:
         halo_tbt_slo: Optional[float] = None,
         halo_e2e_slo: Optional[float] = None,
         transcript_record_path: Optional[str] = None,
+        disable_timeouts: bool = False,
     ):
         self.csv_path = csv_path
         self.error_log_path = error_log_path
@@ -238,6 +239,8 @@ class MotivationExperimentRunner:
         self.halo_e2e_slo = halo_e2e_slo
         # Transcript recording (literal-replay capture). See agent.py.
         self.transcript_record_path = transcript_record_path
+        # Disable client-side request aborts (request-level workload).
+        self.disable_timeouts = disable_timeouts
 
         # HALO: probe the server once at construction. Server is assumed
         # to be up by the time main() instantiates the runner (every
@@ -336,6 +339,7 @@ class MotivationExperimentRunner:
                 halo_tbt_slo=self.halo_tbt_slo,
                 halo_e2e_slo=self.halo_e2e_slo,
                 transcript_record_path=self.transcript_record_path,
+                disable_timeouts=self.disable_timeouts,
             )
             result = self.workload.run_job(task, context)
             job_end_time = time.time()
@@ -821,6 +825,7 @@ def make_run_config(args, workload, workload_config: dict, **extra) -> dict:
         },
         "transcript_file": args.transcript_file,
         "record_transcript": args.record_transcript,
+        "disable_request_timeouts": args.disable_request_timeouts,
         "reproducibility": workload.reproducibility_config(args, workload_config),
         "created_at": datetime.now().isoformat(),
     }
@@ -963,6 +968,17 @@ def main():
             "When set, append every LLM call's full prompt + solo timings "
             "to this JSONL. Use on a concurrency-1 baseline run to capture "
             "a transcript for the request-level workload to replay."
+        ),
+    )
+    parser.add_argument(
+        "--disable-request-timeouts",
+        action="store_true",
+        help=(
+            "codingagent_request_level_poisson only: disable every "
+            "client-side abort (e2e τ-timeout, 120s TTFT, 60s idle) so "
+            "slow requests run to completion and are measured rather than "
+            "killed. The HTTP client timeout is kept at 1h as a "
+            "dead-connection safety net."
         ),
     )
 
@@ -1294,6 +1310,7 @@ def main():
             halo_tbt_slo=halo_tbt_slo,
             halo_e2e_slo=halo_e2e_slo,
             transcript_record_path=args.record_transcript,
+            disable_timeouts=args.disable_request_timeouts,
         )
         runner.run_baseline(tasks)
         # Flush async JSONL writers (tbt + transcript) so a recorded
@@ -1362,6 +1379,7 @@ def main():
                 halo_tbt_slo=halo_tbt_slo,
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
+                disable_timeouts=args.disable_request_timeouts,
             )
             runner._run_with_concurrency(tasks, concurrency=level)
             finish_server_session(
@@ -1440,6 +1458,7 @@ def main():
                 halo_tbt_slo=halo_tbt_slo,
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
+                disable_timeouts=args.disable_request_timeouts,
             )
             runner.run_rate_sweep_duration(
                 task_pool=task_pool,
@@ -1524,6 +1543,7 @@ def main():
                 halo_tbt_slo=halo_tbt_slo,
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
+                disable_timeouts=args.disable_request_timeouts,
             )
             runner.run_poisson_sweep_duration(
                 task_pool=task_pool,
@@ -1597,6 +1617,7 @@ def main():
                 halo_tbt_slo=halo_tbt_slo,
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
+                disable_timeouts=args.disable_request_timeouts,
             )
             runner._run_with_poisson_duration(task_pool, args.lambda_val, args.duration_min)
             finish_server_session(
@@ -1653,6 +1674,7 @@ def main():
                 halo_tbt_slo=halo_tbt_slo,
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
+                disable_timeouts=args.disable_request_timeouts,
             )
             runner._run_with_rate_duration(task_pool, args.rpm, args.duration_min)
             finish_server_session(
@@ -1711,6 +1733,7 @@ def main():
                 halo_tbt_slo=halo_tbt_slo,
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
+                disable_timeouts=args.disable_request_timeouts,
             )
             runner._run_with_concurrency(tasks, concurrency=args.concurrency)
             finish_server_session(
