@@ -514,7 +514,7 @@ class MotivationExperimentRunner:
 
         interval = 60.0 / rate_per_min
         duration_sec = duration_min * 60.0
-        max_workers = 256
+        max_workers = 1024
 
         stats = {
             "submitted": 0, "completed": 0,
@@ -601,7 +601,7 @@ class MotivationExperimentRunner:
         self._server_terminated.clear()
 
         duration_sec = duration_min * 60.0
-        max_workers = 256
+        max_workers = 1024
         rng = random.Random(self.seed)  # For reproducible Poisson arrivals
 
         stats = {
