@@ -281,7 +281,34 @@ def add_tau_goodput(
             else pd.Series(False, index=jobs.index)
         )
         boundary_cutoff = server_term & ~rejected & ~job_timeout
-        classifiable = classifiable & ~boundary_cutoff
+
+        # Rejected-at-start exclusion: a job whose very first call (lowest
+        # call_index in the calls table) was rejected by admission control
+        # never actually ran — the server declined before producing any
+        # output. Counting it as an SLO miss conflates "we attempted and
+        # failed" with "we never tried", so exclude these from the
+        # goodput-rate denominator too. Mid-chain rejected jobs (some
+        # calls succeeded before reject) stay in the denominator because
+        # the system did expend effort on them.
+        rejected_at_start_ids: set = set()
+        if (
+            not calls.empty
+            and "task_id" in calls.columns
+            and "call_index" in calls.columns
+            and "is_rejected_bool" in calls.columns
+        ):
+            first_calls = (
+                calls.sort_values("call_index")
+                .drop_duplicates(subset="task_id", keep="first")
+            )
+            rej_first = first_calls["is_rejected_bool"].fillna(False).astype(bool)
+            rejected_at_start_ids = set(first_calls.loc[rej_first, "task_id"])
+        if "task_id" in jobs.columns and rejected_at_start_ids:
+            rejected_at_start = jobs["task_id"].isin(rejected_at_start_ids)
+        else:
+            rejected_at_start = pd.Series(False, index=jobs.index)
+
+        classifiable = classifiable & ~boundary_cutoff & ~rejected_at_start
         ok = (
             jobs["job_completed_bool"]
             & classifiable

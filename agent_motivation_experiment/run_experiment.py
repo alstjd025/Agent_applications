@@ -64,9 +64,15 @@ NODE_PROFILES: Dict[str, Dict[str, object]] = {
     },
 }
 
-# Workloads whose per-request baseline lives in a transcript file, so they
-# do NOT require --baseline-dir.
-TRANSCRIPT_WORKLOADS = {"codingagent_request_level_poisson"}
+# Workloads that do NOT require --baseline-dir:
+#   - codingagent_request_level_poisson carries its per-request baseline
+#     inside the transcript file.
+#   - sharegpt_request_level_poisson uses absolute SLO thresholds and has
+#     no per-request baseline at all.
+NO_BASELINE_DIR_WORKLOADS = {
+    "codingagent_request_level_poisson",
+    "sharegpt_request_level_poisson",
+}
 
 
 def local_port_from_url(base_url: str, default: int = 8080) -> int:
@@ -793,11 +799,18 @@ def write_run_config(run_dir: str, config: dict):
         json.dump(config, f, ensure_ascii=False, indent=2)
 
 
-def load_workload_config(path: Optional[str]) -> dict:
-    """Load workload-specific JSON config."""
-    if not path:
+def load_workload_config(path_or_json: Optional[str]) -> dict:
+    """Load workload-specific JSON config.
+
+    Accepts either a path to a JSON file or an inline JSON object string
+    (anything starting with '{', e.g. '{"num_conversations": 8000}').
+    """
+    if not path_or_json:
         return {}
-    with open(path) as f:
+    stripped = path_or_json.strip()
+    if stripped.startswith("{"):
+        return json.loads(stripped)
+    with open(path_or_json) as f:
         return json.load(f)
 
 
@@ -825,7 +838,7 @@ def make_run_config(args, workload, workload_config: dict, **extra) -> dict:
         },
         "transcript_file": args.transcript_file,
         "record_transcript": args.record_transcript,
-        "disable_request_timeouts": args.disable_request_timeouts,
+        "disable_timeouts": args.disable_timeouts,
         "reproducibility": workload.reproducibility_config(args, workload_config),
         "created_at": datetime.now().isoformat(),
     }
@@ -945,7 +958,10 @@ def main():
         "--workload-config",
         type=str,
         default=None,
-        help="Path to a workload-specific JSON config file.",
+        help=(
+            "Workload-specific JSON config: either a path to a JSON file "
+            "or an inline JSON object string (e.g. '{\"num_conversations\": 8000}')."
+        ),
     )
     parser.add_argument("--replay-count", type=int, default=1)
     parser.add_argument("--start-index", type=int, default=0)
@@ -971,14 +987,16 @@ def main():
         ),
     )
     parser.add_argument(
-        "--disable-request-timeouts",
+        "--disable-timeouts",
+        dest="disable_timeouts",
         action="store_true",
         help=(
-            "codingagent_request_level_poisson only: disable every "
-            "client-side abort (e2e τ-timeout, 120s TTFT, 60s idle) so "
-            "slow requests run to completion and are measured rather than "
-            "killed. The HTTP client timeout is kept at 1h as a "
-            "dead-connection safety net."
+            "Disable every client-side abort (120s TTFT, 60s idle, and — "
+            "for the request-level workload — the e2e τ-timeout) so calls "
+            "run to completion rather than being killed. Useful for "
+            "transcript recording at higher concurrency. The HTTP client "
+            "timeout is kept at 1h as a dead-connection safety net. "
+            "Honored by all workloads."
         ),
     )
 
@@ -1209,9 +1227,9 @@ def main():
     halo_tbt_slo = args.halo_tbt_slo if args.halo_tbt_slo is not None else args.tau
     halo_e2e_slo = args.halo_e2e_slo if args.halo_e2e_slo is not None else args.tau
 
-    # Transcript-replay workloads carry their per-request baseline inside
-    # the transcript file, so they do not need --baseline-dir.
-    needs_baseline_dir = args.workload not in TRANSCRIPT_WORKLOADS
+    # Some request-level workloads do not need --baseline-dir (see
+    # NO_BASELINE_DIR_WORKLOADS).
+    needs_baseline_dir = args.workload not in NO_BASELINE_DIR_WORKLOADS
 
     concurrency_list = [int(x.strip()) for x in args.concurrency_list.split(",")]
     rate_list = [float(x.strip()) for x in args.rate_list.split(",")]
@@ -1310,7 +1328,7 @@ def main():
             halo_tbt_slo=halo_tbt_slo,
             halo_e2e_slo=halo_e2e_slo,
             transcript_record_path=args.record_transcript,
-            disable_timeouts=args.disable_request_timeouts,
+            disable_timeouts=args.disable_timeouts,
         )
         runner.run_baseline(tasks)
         # Flush async JSONL writers (tbt + transcript) so a recorded
@@ -1379,7 +1397,7 @@ def main():
                 halo_tbt_slo=halo_tbt_slo,
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
-                disable_timeouts=args.disable_request_timeouts,
+                disable_timeouts=args.disable_timeouts,
             )
             runner._run_with_concurrency(tasks, concurrency=level)
             finish_server_session(
@@ -1458,7 +1476,7 @@ def main():
                 halo_tbt_slo=halo_tbt_slo,
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
-                disable_timeouts=args.disable_request_timeouts,
+                disable_timeouts=args.disable_timeouts,
             )
             runner.run_rate_sweep_duration(
                 task_pool=task_pool,
@@ -1543,7 +1561,7 @@ def main():
                 halo_tbt_slo=halo_tbt_slo,
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
-                disable_timeouts=args.disable_request_timeouts,
+                disable_timeouts=args.disable_timeouts,
             )
             runner.run_poisson_sweep_duration(
                 task_pool=task_pool,
@@ -1617,7 +1635,7 @@ def main():
                 halo_tbt_slo=halo_tbt_slo,
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
-                disable_timeouts=args.disable_request_timeouts,
+                disable_timeouts=args.disable_timeouts,
             )
             runner._run_with_poisson_duration(task_pool, args.lambda_val, args.duration_min)
             finish_server_session(
@@ -1674,7 +1692,7 @@ def main():
                 halo_tbt_slo=halo_tbt_slo,
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
-                disable_timeouts=args.disable_request_timeouts,
+                disable_timeouts=args.disable_timeouts,
             )
             runner._run_with_rate_duration(task_pool, args.rpm, args.duration_min)
             finish_server_session(
@@ -1733,7 +1751,7 @@ def main():
                 halo_tbt_slo=halo_tbt_slo,
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
-                disable_timeouts=args.disable_request_timeouts,
+                disable_timeouts=args.disable_timeouts,
             )
             runner._run_with_concurrency(tasks, concurrency=args.concurrency)
             finish_server_session(

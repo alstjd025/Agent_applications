@@ -126,6 +126,24 @@ Key invariants:
 - If multiple tool-result calls are in one round, the round sleeps for `max(call_tool_delays)`, modeling parallel tool work.
 - `Plan` and later singleton calls depend on all calls from the previous execution round.
 
+## Request-level Workloads
+
+`codingagent_request_level_poisson/` and `sharegpt_request_level_poisson/`
+are flat, open-loop request streams (one LLM request per task, Poisson
+arrivals — no job/chain).
+
+- `codingagent_request_level_poisson` replays a transcript JSONL verbatim
+  (the transcript carries its per-request `baseline × tau` baseline) and
+  is analyzed with `analysis_scripts/request_level/parse_request_metrics.py`.
+- `sharegpt_request_level_poisson` is **direct**: it downloads ShareGPT
+  from HuggingFace and sends requests straight away — no transcript, no
+  baseline. Goodput is judged by **absolute SLO thresholds**, so `tau` is
+  unused and all client-side aborts are disabled.
+
+See [AGENTS.md](AGENTS.md) §"Request-level Poisson Workload" and
+§"ShareGPT Request-level Workload", plus each workload folder's own
+`AGENTS.md`.
+
 ## Adding A Workload
 
 1. Create `workloads/<name>/workload.py`.

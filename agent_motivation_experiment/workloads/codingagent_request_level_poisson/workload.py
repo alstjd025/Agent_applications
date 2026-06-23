@@ -14,7 +14,7 @@ behavior stays realistic.
 
 There is no "job" concept here: one request = one unit. Goodput is
 per-request (e2e / TTFT / TBT vs the recorded baseline x tau); see
-analysis_scripts/parse_request_metrics.py.
+analysis_scripts/request_level/parse_request_metrics.py.
 """
 
 import json

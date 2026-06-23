@@ -48,8 +48,8 @@ When testing admission-control rejection behavior:
 | `workloads/swe_bench_coding_parallel_tool_delay/` | SWE-bench workload with parallel execution rounds and deterministic tool-call intervals |
 | `metrics_tracker.py` | Writes `metrics.csv` and `tbt_events.jsonl` |
 | `agent_logger.py` | Writes per-job prompt/response logs |
-| `analysis_scripts/parse_application_metrics.py` | Builds application analysis CSVs |
-| `analysis_scripts/plot_application_metrics.py` | Builds application figures |
+| `analysis_scripts/job_level/parse_application_metrics.py` | Builds application analysis CSVs |
+| `analysis_scripts/job_level/plot_application_metrics.py` | Builds application figures |
 | `analysis_scripts/parse_server_logs.py` | Parses `server.stderr*` into `server_metrics.csv` |
 | `analysis_scripts/plot_server_metrics.py` | Builds server-side figures |
 | `results/` | Run outputs |
@@ -74,20 +74,20 @@ python run_experiment.py \
 Postprocess one run:
 
 ```bash
-python analysis_scripts/parse_application_metrics.py results/<run>
+python analysis_scripts/job_level/parse_application_metrics.py results/<run>
 python analysis_scripts/parse_server_logs.py results/<run>
-python analysis_scripts/plot_application_metrics.py results/<run>
+python analysis_scripts/job_level/plot_application_metrics.py results/<run>
 python analysis_scripts/plot_server_metrics.py results/<run>
 ```
 
 Build cross-run summaries:
 
 ```bash
-python analysis_scripts/plot_lambda_slowdown_goodput.py \
+python analysis_scripts/job_level/plot_lambda_slowdown_goodput.py \
   --results-dir results \
   --output-dir results/aggregate_analysis/lambda_slowdown_goodput
 
-python analysis_scripts/analyze_job_call_slowdown_by_release.py \
+python analysis_scripts/job_level/analyze_job_call_slowdown_by_release.py \
   --results-dir results \
   --baseline-dir results/baseline_20260424-180204 \
   --output-dir results/aggregate_analysis/job_call_slowdown_by_release_time

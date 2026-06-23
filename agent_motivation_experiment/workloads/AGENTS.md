@@ -128,10 +128,42 @@ Key invariants:
   via the shared `invoke_with_tracking` (with `agent_label="request"`,
   `chain_length=1`).
 - `metrics.csv` rows for this workload have `agent == "request"`.
-  `analysis_scripts/parse_request_metrics.py` turns them into
+  `analysis_scripts/request_level/parse_request_metrics.py` turns them into
   per-request e2e/TTFT/TBT goodput.
 - Prompt bytes are replayed unchanged across pool cycles, so cross-
   request prefix-cache behavior is realistic.
+
+## ShareGPT Request-level Workload
+
+`sharegpt_request_level_poisson/` is the same flat request-level Poisson
+shape, but the data source is the ShareGPT multi-turn chat dataset.
+
+Key invariants:
+
+- **Direct, single-step.** `load_dataset` downloads ShareGPT from
+  HuggingFace and flattens it into requests sent straight away. There is
+  **no record step, no transcript, and no per-request solo baseline** —
+  goodput is judged by **absolute SLO thresholds** (post-hoc), not
+  `baseline × tau`. So `tau` is unused and there is no `baseline × tau`
+  timeout.
+- **All client-side aborts are disabled** (`job_timeout_sec=0`,
+  `per_call_timeout=None`, `idle_timeout=None`): every request runs to
+  completion and is measured, not killed.
+- Each conversation is flattened to one request per human turn; request
+  `k`'s prompt is the conversation prefix
+  `[u_1, a_1, …, u_{k-1}, a_{k-1}, u_k]` with the recorded ShareGPT gpt
+  turns as assistant context. No system prompt is injected.
+- `request_id = sg-{conv:05d}-t{turn:02d}`; the task `instance_id` adds a
+  `__rNN` replay-cycle suffix. `metrics.csv` rows have `agent ==
+  "request"`.
+- Conversation source / sampling is configured via `--workload-config`
+  (`hf_repo`, `hf_data_file`, `num_conversations`, `min_human_turns`,
+  `max_human_turns`, `sample_seed`). See the workload's `AGENTS.md`.
+- It is in `run_experiment.py`'s `NO_BASELINE_DIR_WORKLOADS`, so runs do
+  not need `--baseline-dir`.
+- **Analysis TODO**: `parse_request_metrics.py` is still `tau` +
+  transcript based; absolute-SLO goodput parsing for this workload is not
+  yet implemented.
 
 ## Halo-compatible Workloads
 

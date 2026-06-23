@@ -8,7 +8,7 @@ SGLang 서버에 multi-call coding agent workload를 부하로 넣고, server th
 
 `swe_bench_coding_parallel_tool_delay` workload는 같은 call 수와 stage sequence를 유지하면서, 연속된 `Locate` call들을 하나의 `execution_round`에서 병렬로 실행합니다. Call별 latency/token/TBT는 계속 `metrics.csv`에 저장되고, round/dependency 구조는 `parallel_calls.csv`와 분석용 `application_parallel_calls.csv`에 따로 저장됩니다.
 
-`codingagent_request_level_poisson` workload는 위 세 workload와 달리 **job/chain 개념이 없습니다.** 각 Poisson arrival이 하나의 독립적인 LLM request이고, 서버의 request-level Halo admission gate와 짝을 이룹니다. `swe_bench_coding` baseline run을 `--record-transcript`로 돌려 만든 transcript JSONL을 literal하게 재생(replay)하며, transcript 안에 들어 있는 concurrency-1 TTFT/TBT/e2e가 per-request goodput baseline이 됩니다. Goodput은 `analysis_scripts/parse_request_metrics.py`로 계산합니다.
+`codingagent_request_level_poisson` workload는 위 세 workload와 달리 **job/chain 개념이 없습니다.** 각 Poisson arrival이 하나의 독립적인 LLM request이고, 서버의 request-level Halo admission gate와 짝을 이룹니다. `swe_bench_coding` baseline run을 `--record-transcript`로 돌려 만든 transcript JSONL을 literal하게 재생(replay)하며, transcript 안에 들어 있는 concurrency-1 TTFT/TBT/e2e가 per-request goodput baseline이 됩니다. Goodput은 `analysis_scripts/request_level/parse_request_metrics.py`로 계산합니다.
 
 ## Quick Start
 
@@ -136,7 +136,7 @@ python run_experiment.py \
 ```
 
 이 workload은 `--baseline-dir`이 필요 없습니다(baseline이 transcript 안에 있음).
-Per-request goodput은 `analysis_scripts/parse_request_metrics.py`로 계산합니다.
+Per-request goodput은 `analysis_scripts/request_level/parse_request_metrics.py`로 계산합니다.
 
 ## GPU 노드 선택 (`--node`)
 
@@ -191,8 +191,8 @@ results/YYMMDD_HHMM_<session-name>/
 Application-side CSV와 figure:
 
 ```bash
-python analysis_scripts/parse_application_metrics.py results/20260505-210642_hicache
-python analysis_scripts/plot_application_metrics.py results/20260505-210642_hicache
+python analysis_scripts/job_level/parse_application_metrics.py results/20260505-210642_hicache
+python analysis_scripts/job_level/plot_application_metrics.py results/20260505-210642_hicache
 ```
 
 Server-side CSV와 figure:
@@ -205,7 +205,7 @@ python analysis_scripts/plot_server_metrics.py results/20260505-210642_hicache
 λ sweep 전체 비교:
 
 ```bash
-python analysis_scripts/plot_lambda_slowdown_goodput.py \
+python analysis_scripts/job_level/plot_lambda_slowdown_goodput.py \
   --results-dir results \
   --output-dir results/aggregate_analysis/lambda_slowdown_goodput
 ```
@@ -213,7 +213,7 @@ python analysis_scripts/plot_lambda_slowdown_goodput.py \
 Job release time 기준 slowdown 분석:
 
 ```bash
-python analysis_scripts/analyze_job_call_slowdown_by_release.py \
+python analysis_scripts/job_level/analyze_job_call_slowdown_by_release.py \
   --baseline-dir results/baseline_20260424-180204 \
   --run 0.1=results/20260430-173659 \
   --run 0.2=results/20260430-193949
@@ -349,15 +349,15 @@ Parallel workload에서는 call별 상세 metric은 `metrics.csv`와 `applicatio
 
 | 스크립트 | 역할 |
 |---|---|
-| `analysis_scripts/parse_application_metrics.py` | `metrics.csv`를 application analysis CSV로 정규화 (job workload) |
-| `analysis_scripts/parse_request_metrics.py` | request-level workload의 `metrics.csv`를 per-request goodput CSV로 정규화 |
+| `analysis_scripts/job_level/parse_application_metrics.py` | `metrics.csv`를 application analysis CSV로 정규화 (job workload) |
+| `analysis_scripts/request_level/parse_request_metrics.py` | request-level workload의 `metrics.csv`를 per-request goodput CSV로 정규화 |
 | `analysis_scripts/parse_server_logs.py` | `server.stderr*`를 `server_metrics.csv`로 파싱 |
-| `analysis_scripts/plot_application_metrics.py` | throughput/goodput/WCR/call-job breakdown 그림 생성 |
+| `analysis_scripts/job_level/plot_application_metrics.py` | throughput/goodput/WCR/call-job breakdown 그림 생성 |
 | `analysis_scripts/plot_server_metrics.py` | server decode/prefill/request stats 그림 생성 |
-| `analysis_scripts/plot_lambda_slowdown_goodput.py` | λ별 call slowdown과 goodput 비교 |
-| `analysis_scripts/plot_latency_slowdown_cdf.py` | latency slowdown CDF 생성 |
-| `analysis_scripts/analyze_job_call_slowdown_by_release.py` | release time 기준 job/call slowdown 분석 |
-| `analysis_scripts/analyze_motivation.py` | 여러 run을 묶은 motivation summary figure 생성 |
+| `analysis_scripts/job_level/plot_lambda_slowdown_goodput.py` | λ별 call slowdown과 goodput 비교 |
+| `analysis_scripts/job_level/plot_latency_slowdown_cdf.py` | latency slowdown CDF 생성 |
+| `analysis_scripts/job_level/analyze_job_call_slowdown_by_release.py` | release time 기준 job/call slowdown 분석 |
+| `analysis_scripts/job_level/analyze_motivation.py` | 여러 run을 묶은 motivation summary figure 생성 |
 
 ## Workload Model
 

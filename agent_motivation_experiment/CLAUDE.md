@@ -88,7 +88,7 @@ a transcript file:
    --transcript-file <path> --mode poisson-sweep` (λ = requests/sec).
 
 Goodput is per-request (e2e/TTFT/TBT vs the recorded baseline × τ);
-parse it with `analysis_scripts/parse_request_metrics.py`.
+parse it with `analysis_scripts/request_level/parse_request_metrics.py`.
 
 ## Admission Control Checks
 
@@ -110,18 +110,21 @@ When testing admission-control rejection behavior:
 | `workloads/swe_bench_coding_tool_delay/` | SWE-bench workload with deterministic simulated tool-call intervals |
 | `workloads/swe_bench_coding_parallel_tool_delay/` | SWE-bench workload with parallel execution rounds and deterministic tool-call intervals |
 | `workloads/codingagent_request_level_poisson/` | Request-level Poisson workload — replays recorded agent calls as independent requests |
+| `workloads/sharegpt_request_level_poisson/` | Request-level Poisson workload — downloads ShareGPT and sends multi-turn chat turns as independent requests (direct; no transcript/baseline; absolute-SLO goodput) |
 | `metrics_tracker.py` | Writes `metrics.csv` and `tbt_events.jsonl` |
 | `agent_logger.py` | Writes per-job prompt/response logs |
-| `analysis_scripts/parse_application_metrics.py` | Builds application analysis CSVs (job workloads) |
-| `analysis_scripts/parse_request_metrics.py` | Builds per-request goodput CSVs (request-level workload) |
-| `analysis_scripts/plot_application_metrics.py` | Builds application figures |
+| `analysis_scripts/job_level/parse_application_metrics.py` | Builds application analysis CSVs (job workloads) |
+| `analysis_scripts/request_level/parse_request_metrics.py` | Per-request goodput CSVs (codingagent transcript+τ flavor) |
+| `analysis_scripts/request_level/parse_request_summary.py` | Per-run raw-load stats (ShareGPT direct flavor — no baseline, no goodput yet) |
+| `analysis_scripts/request_level/summarize_lambda_sweep.py` | Cross-λ summary table + optional plots for request-level sweeps |
+| `analysis_scripts/job_level/plot_application_metrics.py` | Builds application figures |
 | `analysis_scripts/parse_server_logs.py` | Parses `server.stderr*` into `server_metrics.csv` |
 | `analysis_scripts/plot_server_metrics.py` | Builds server-side figures |
-| `analysis_scripts/plot_lambda_slowdown_goodput.py` | Cross-run λ→slowdown/goodput summary CSVs and plots |
-| `analysis_scripts/plot_latency_slowdown_cdf.py` | Latency slowdown CDF figure across runs |
-| `analysis_scripts/analyze_job_call_slowdown_by_release.py` | Per-λ release-time job/call slowdown analysis |
-| `analysis_scripts/analyze_motivation.py` | Motivation summary figure across runs |
-| `analysis_scripts/summarize_sweep_window.py` | Re-aggregates `application_summary.csv` columns over a `[start_min, end_min]` time window across runs (skips warmup/saturation) |
+| `analysis_scripts/job_level/plot_lambda_slowdown_goodput.py` | Cross-run λ→slowdown/goodput summary CSVs and plots |
+| `analysis_scripts/job_level/plot_latency_slowdown_cdf.py` | Latency slowdown CDF figure across runs |
+| `analysis_scripts/job_level/analyze_job_call_slowdown_by_release.py` | Per-λ release-time job/call slowdown analysis |
+| `analysis_scripts/job_level/analyze_motivation.py` | Motivation summary figure across runs |
+| `analysis_scripts/job_level/summarize_sweep_window.py` | Re-aggregates `application_summary.csv` columns over a `[start_min, end_min]` time window across runs (skips warmup/saturation) |
 | `results/` | Run outputs |
 | `results/aggregate_analysis/` | Cross-run analysis outputs |
 | `workloads/AGENTS.md` | Workload adapter notes |
@@ -144,20 +147,20 @@ python run_experiment.py \
 Postprocess one run:
 
 ```bash
-python analysis_scripts/parse_application_metrics.py results/<run>
+python analysis_scripts/job_level/parse_application_metrics.py results/<run>
 python analysis_scripts/parse_server_logs.py results/<run>
-python analysis_scripts/plot_application_metrics.py results/<run>
+python analysis_scripts/job_level/plot_application_metrics.py results/<run>
 python analysis_scripts/plot_server_metrics.py results/<run>
 ```
 
 Build cross-run summaries:
 
 ```bash
-python analysis_scripts/plot_lambda_slowdown_goodput.py \
+python analysis_scripts/job_level/plot_lambda_slowdown_goodput.py \
   --results-dir results \
   --output-dir results/aggregate_analysis/lambda_slowdown_goodput
 
-python analysis_scripts/analyze_job_call_slowdown_by_release.py \
+python analysis_scripts/job_level/analyze_job_call_slowdown_by_release.py \
   --results-dir results \
   --baseline-dir results/baseline_20260424-180204 \
   --output-dir results/aggregate_analysis/job_call_slowdown_by_release_time
@@ -166,7 +169,7 @@ python analysis_scripts/analyze_job_call_slowdown_by_release.py \
 Re-aggregate summary over a steady-state window (e.g. drop the first 20 min of warmup):
 
 ```bash
-python analysis_scripts/summarize_sweep_window.py \
+python analysis_scripts/job_level/summarize_sweep_window.py \
   --run-dirs results/260510_*tau5_lambda_* \
   --window-min 20 80 \
   --output-csv results/aggregate_analysis/sweep_window_summary_tau5_20to80min.csv \
@@ -300,7 +303,7 @@ intended for the paper so the whole paper looks consistent. Figure size and
 inner axes box can vary per figure; the items below should stay fixed unless
 explicitly relaxed.
 
-Reference implementation: [analysis_scripts/summarize_sweep_window.py](analysis_scripts/summarize_sweep_window.py)
+Reference implementation: [analysis_scripts/job_level/summarize_sweep_window.py](analysis_scripts/job_level/summarize_sweep_window.py)
 (`plot_goodput_vs_lambda`).
 
 ### rcParams (apply via `plt.rc_context`)
