@@ -95,6 +95,7 @@ class Workload(BaseSWEBenchWorkload):
             halo_ttft_slo=context.halo_ttft_slo if halo_on else None,
             halo_tbt_slo=context.halo_tbt_slo if halo_on else None,
             halo_e2e_slo=context.halo_e2e_slo if halo_on else None,
+            timeout=3600.0 if context.disable_timeouts else None,
         )
         initial_state = create_chain_state(
             job_id=job_id,
@@ -110,6 +111,7 @@ class Workload(BaseSWEBenchWorkload):
             job_start_time=job_submit_time,
             tool_call_delays=build_tool_call_delays(task),
             transcript_record_path=context.transcript_record_path,
+            disable_timeouts=context.disable_timeouts,
         )
         initial_state["server_terminated_event"] = context.server_terminated_event
 

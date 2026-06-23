@@ -290,6 +290,11 @@ class ChainState(TypedDict):
     # Transcript recording (literal-replay capture). When set, each
     # successful call's full prompt + solo timings are appended here.
     transcript_record_path: Optional[str]
+    # Client-side abort thresholds (seconds). None disables that abort —
+    # invoke_with_tracking reads these with PER_CALL_TIMEOUT / IDLE_TIMEOUT
+    # as the fallback. Set by create_chain_state from --disable-timeouts.
+    per_call_timeout: Optional[float]
+    idle_timeout: Optional[float]
 
 
 # ---------------------------------------------------------------------------
@@ -1041,6 +1046,7 @@ def create_chain_state(
     job_start_time: float = 0,
     tool_call_delays: Optional[List[float]] = None,
     transcript_record_path: Optional[str] = None,
+    disable_timeouts: bool = False,
 ) -> ChainState:
     """
     Create the initial ChainState for a synthetic chain job.
@@ -1111,6 +1117,8 @@ def create_chain_state(
         tool_call_delays=tool_call_delays,
         tool_delay_total_s=0.0,
         transcript_record_path=transcript_record_path,
+        per_call_timeout=None if disable_timeouts else PER_CALL_TIMEOUT,
+        idle_timeout=None if disable_timeouts else IDLE_TIMEOUT,
     )
 
 

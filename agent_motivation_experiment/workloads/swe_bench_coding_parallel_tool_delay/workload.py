@@ -293,6 +293,7 @@ class Workload(BaseSWEBenchWorkload):
                 halo_ttft_slo=context.halo_ttft_slo if halo_on else None,
                 halo_tbt_slo=context.halo_tbt_slo if halo_on else None,
                 halo_e2e_slo=context.halo_e2e_slo if halo_on else None,
+                timeout=3600.0 if context.disable_timeouts else None,
             )
             state = {
                 "job_id": job_id,
@@ -312,6 +313,10 @@ class Workload(BaseSWEBenchWorkload):
                 "rejection_reason": "",
                 "last_call_error_msg": "",
             }
+            if context.disable_timeouts:
+                # None disables the TTFT / idle aborts in invoke_with_tracking.
+                state["per_call_timeout"] = None
+                state["idle_timeout"] = None
             if context.console_write:
                 context.console_write(
                     f"[Job {job_id}] Starting call {call_index}/{chain_length} "
