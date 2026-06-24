@@ -39,6 +39,7 @@ from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 
 from metrics_tracker import MetricsTracker
 from agent_logger import AgentLogger
+from arrival_trace import load_arrival_trace
 from workloads import load_workload
 from workloads.base import RunContext
 
@@ -681,6 +682,99 @@ class MotivationExperimentRunner:
 
         self._print_summary(stats, mode="poisson", level=lam)
 
+    def _run_with_trace_duration(
+        self,
+        task_pool,
+        arrival_offsets: List[float],
+        trace_name: str = "trace",
+    ):
+        """Submit tasks at times given by an arrival trace.
+
+        `arrival_offsets` is a sorted list of seconds-from-start offsets
+        (see arrival_trace.load_arrival_trace / traces/TRACE_FORMAT.md).
+        The trace governs only *when* to submit; *what* is submitted comes
+        from `task_pool.next_task()` in pool order, so this driver is
+        workload-agnostic (job-level or request-level).
+
+        Timing is replayed verbatim (no rescaling). Like the Poisson/rate
+        drivers this is open-loop: if the server falls behind, arrivals
+        whose offset has already passed are submitted back-to-back. The run
+        ends once every arrival has been submitted; in-flight jobs then
+        drain (executor shutdown) after `server_terminated` is signaled.
+        """
+        self._server_terminated.clear()
+
+        max_workers = 1024
+        n = len(arrival_offsets)
+
+        stats = {
+            "submitted": 0, "completed": 0,
+            "success": 0, "failed": 0, "error": 0,
+            "job_timeout": 0, "server_terminated": 0,
+        }
+
+        self._pbar = tqdm(total=n, desc=f"trace={trace_name}", unit="job",
+                          bar_format="{desc}: {n}/{total} submitted, {postfix}")
+
+        pending = set()
+        experiment_start = time.monotonic()
+        idx = 0  # index of the next arrival to submit
+
+        try:
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                while True:
+                    now = time.monotonic()
+                    elapsed = now - experiment_start
+
+                    # Submit every arrival whose scheduled offset has come.
+                    while idx < n and elapsed >= arrival_offsets[idx]:
+                        task = task_pool.next_task()
+                        if task is None:
+                            idx = n  # pool exhausted -> end the run
+                            break
+                        fut = ex.submit(self.run_single_job, task)
+                        pending.add(fut)
+                        stats["submitted"] += 1
+                        idx += 1
+                        elapsed = time.monotonic() - experiment_start
+
+                    # All arrivals submitted: signal before draining so
+                    # in-flight jobs observe the termination event.
+                    if idx >= n:
+                        self.signal_server_terminated()
+                        break
+
+                    if pending:
+                        next_arrival = experiment_start + arrival_offsets[idx]
+                        timeout = max(0.1, min(1.0, next_arrival - time.monotonic()))
+                        done, pending = wait(pending, timeout=timeout,
+                                             return_when=FIRST_COMPLETED)
+                        for fut in done:
+                            self._update_stats(stats, fut.result())
+                    else:
+                        # No in-flight work: idle until the next arrival.
+                        sleep_s = (experiment_start + arrival_offsets[idx]) - time.monotonic()
+                        if sleep_s > 0:
+                            time.sleep(min(sleep_s, 1.0))
+
+                    if self._pbar:
+                        self._pbar.postfix = (
+                            f"{stats['completed']} done, "
+                            f"{stats['success']} ok, "
+                            f"{stats['failed']} fail, "
+                            f"{stats['job_timeout']} τ-timeout, "
+                            f"{stats['server_terminated']} srv-kill"
+                        )
+                        self._pbar.refresh()
+        finally:
+            time.sleep(3)
+            if self._pbar:
+                self._pbar.close()
+                self._pbar = None
+            MetricsTracker.shutdown_all_writers()
+
+        self._print_summary(stats, mode="trace", level=trace_name)
+
     @staticmethod
     def _update_stats(stats: dict, result: dict):
         stats["completed"] += 1
@@ -940,7 +1034,7 @@ def main():
     # Mode
     parser.add_argument(
         "--mode",
-        choices=["baseline", "sweep", "rate-sweep", "poisson-sweep", "single"],
+        choices=["baseline", "sweep", "rate-sweep", "poisson-sweep", "single", "trace-replay"],
         required=True,
         help="Experiment mode",
     )
@@ -997,6 +1091,29 @@ def main():
             "transcript recording at higher concurrency. The HTTP client "
             "timeout is kept at 1h as a dead-connection safety net. "
             "Honored by all workloads."
+        ),
+    )
+
+    # Trace-replay (--mode trace-replay): drive arrival timing from a
+    # canonical arrival trace (see traces/TRACE_FORMAT.md). Trace governs
+    # *when* to fire; the selected --workload still decides *what* is sent.
+    parser.add_argument(
+        "--trace-file",
+        type=str,
+        default=None,
+        help=(
+            "Canonical arrival-trace CSV for --mode trace-replay (required "
+            "for that mode). Needs an 'arrival_s' column. See "
+            "traces/TRACE_FORMAT.md."
+        ),
+    )
+    parser.add_argument(
+        "--trace-duration-min",
+        type=float,
+        default=None,
+        help=(
+            "Optional cap (minutes) for --mode trace-replay: arrivals with "
+            "arrival_s > cap are dropped. Default: replay the whole trace."
         ),
     )
 
@@ -1577,6 +1694,82 @@ def main():
                 stop_server=(not args.no_server_restart) and bool(session_name) and args.fetch_server_session,
             )
             time.sleep(2)
+
+    # ---- TRACE-REPLAY MODE (arrival timing from a canonical trace) ----
+    elif args.mode == "trace-replay":
+        if not args.trace_file:
+            print("ERROR: --trace-file is required for trace-replay mode")
+            sys.exit(1)
+        if needs_baseline_dir and not baseline_latencies:
+            print("ERROR: --baseline-dir is required for trace-replay mode "
+                  "with this workload")
+            sys.exit(1)
+
+        arrival_offsets = load_arrival_trace(
+            args.trace_file, cap_min=args.trace_duration_min
+        )
+        trace_name = os.path.splitext(os.path.basename(args.trace_file))[0]
+        print(
+            f"Loaded {len(arrival_offsets)} arrivals from trace "
+            f"{args.trace_file} (span {arrival_offsets[-1] / 60.0:.1f} min)"
+        )
+
+        session_name = condition_session_name(args.session_name, None)
+        task_pool = workload.create_task_pool(
+            dataset, baseline_latencies, rng, args, workload_config
+        )
+        paths = setup_run_dir(args.output_dir, session_name, resume_dir=args.resume_dir)
+        if args.restart_server:
+            if not restart_server_if_requested(sglang_ctrl, enabled=True, session_name=session_name):
+                print("ERROR: Failed to restart SGLang server")
+                sys.exit(1)
+
+        write_run_config(paths["run_dir"], make_run_config(
+            args,
+            workload,
+            workload_config,
+            mode="trace-replay",
+            trace_file=args.trace_file,
+            trace_arrivals=len(arrival_offsets),
+            trace_span_sec=arrival_offsets[-1],
+            trace_duration_min=args.trace_duration_min,
+            tau=args.tau,
+            baseline_dir=args.baseline_dir,
+            server_restarted=args.restart_server,
+            server_session_name=session_name,
+            server_session_remote_dir=(
+                f"{args.remote_session_root.rstrip('/')}/{session_name}" if session_name else None
+            ),
+            server_session_local_dir=(
+                os.path.join(paths["run_dir"], args.server_session_subdir) if session_name else None
+            ),
+        ))
+
+        runner = MotivationExperimentRunner(
+            csv_path=paths["csv_path"],
+            error_log_path=paths["error_log"],
+            agent_log_root_dir=paths["agent_logs"],
+            tbt_jsonl_path=paths["tbt_jsonl"],
+            parallel_calls_path=paths["parallel_calls"],
+            server_base_url=args.server_base_url,
+            seed=args.seed,
+            log_level=args.log_level,
+            workload=workload,
+            halo_enabled=args.halo_enabled,
+            halo_ttft_slo=halo_ttft_slo,
+            halo_tbt_slo=halo_tbt_slo,
+            halo_e2e_slo=halo_e2e_slo,
+            transcript_record_path=args.record_transcript,
+            disable_timeouts=args.disable_timeouts,
+        )
+        runner._run_with_trace_duration(task_pool, arrival_offsets, trace_name=trace_name)
+        finish_server_session(
+            sglang_ctrl,
+            args,
+            paths["run_dir"],
+            session_name,
+            stop_server=args.restart_server and bool(session_name) and args.fetch_server_session,
+        )
 
     # ---- SINGLE MODE ----
     elif args.mode == "single":
