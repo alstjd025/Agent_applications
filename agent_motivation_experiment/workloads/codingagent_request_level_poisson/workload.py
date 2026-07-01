@@ -174,8 +174,10 @@ class Workload:
         halo_on = context.halo_enabled
         llm = make_llm(
             base_url=f"{context.server_base_url}/v1",
-            model_id=MODEL_ID,
+            model_id=context.model or MODEL_ID,
             seed=context.seed,
+            api=context.api,
+            max_tokens=context.max_tokens,
             halo_ttft_slo=context.halo_ttft_slo if halo_on else None,
             halo_tbt_slo=context.halo_tbt_slo if halo_on else None,
             halo_e2e_slo=context.halo_e2e_slo if halo_on else None,

@@ -1,0 +1,295 @@
+"""Per-run Llumnix server-side metrics collector.
+
+Scrapes Prometheus ``/metrics`` from every layer of the Llumnix serving
+stack on a fixed interval and persists one JSONL time-series file per target
+under ``<run_dir>/server_metrics/``. This replaces the SGLang-specific
+``parse_server_logs.py`` path (which parses SGLang stderr) — Llumnix has no
+such stderr; all server-side signal lives in Prometheus endpoints.
+
+Layers (see deploy/neutral/full-mode-scheduling/load-balance/*.yaml in the
+llumnix_reproduce repo):
+  - vLLM engines  : <host>:8000..8003/metrics   -> vllm:* engine metrics
+  - scheduler     : <host>:8088/metrics         -> scheduler_* (rescheduling)
+  - gateway       : <host>:8089/metrics         -> request_*, gateway_*,
+                                                   instance_lrs_*, instance_cms_*
+
+Design notes:
+  - Reuses the daemon-thread + interval loop shape of legacy/load_monitor.py
+    and the AsyncJSONLWriter background sink from metrics_tracker.py.
+  - Tolerant of transient scrape failures (host-side kubectl port-forward can
+    drop long-lived connections); a failed tick writes {"ok": false}.
+  - There is NO migration-completion metric in this Llumnix build; the numeric
+    migration signal is scheduler_rescheduling_total. Ground-truth "a KV
+    transfer happened" comes from engine/scheduler logs, captured separately
+    at run teardown (see capture_migration_logs()).
+"""
+
+import re
+import subprocess
+import threading
+import time
+from typing import Dict, List, Optional
+
+import requests
+
+from metrics_tracker import AsyncJSONLWriter
+
+
+# ---------------------------------------------------------------------------
+# Metric name whitelists per layer (exact metric names; labels are preserved).
+# Histogram families are captured via their _sum/_count so rates/averages can
+# be derived across ticks in analysis. Bucket lines are intentionally skipped.
+# ---------------------------------------------------------------------------
+ENGINE_METRICS = {
+    "vllm:num_requests_running",
+    "vllm:num_requests_waiting",
+    "vllm:num_requests_swapped",
+    "vllm:kv_cache_usage_perc",          # this build (NOT gpu_cache_usage_perc)
+    "vllm:gpu_cache_usage_perc",         # fallback for older engines
+    "vllm:gpu_cache_usage_blocks",
+    "vllm:gpu_cache_total_blocks",
+    "vllm:prompt_tokens_total",
+    "vllm:generation_tokens_total",
+    "vllm:num_preemptions_total",
+    "vllm:request_success_total",
+    "vllm:e2e_request_latency_seconds_sum",
+    "vllm:e2e_request_latency_seconds_count",
+    "vllm:time_to_first_token_seconds_sum",
+    "vllm:time_to_first_token_seconds_count",
+    "vllm:inter_token_latency_seconds_sum",
+    "vllm:inter_token_latency_seconds_count",
+    "vllm:request_queue_time_seconds_sum",
+    "vllm:request_prefill_time_seconds_sum",
+    "vllm:request_decode_time_seconds_sum",
+}
+
+SCHEDULER_METRICS = {
+    "scheduler_scheduling_total",
+    "scheduler_scheduling_failed_total",
+    "scheduler_rescheduling_total",          # migration-decision counter
+    "scheduler_rescheduling_failed_total",
+    "scheduler_cms_refresh_metadata_duration_milliseconds_sum",
+    "scheduler_cms_refresh_status_duration_milliseconds_sum",
+}
+
+GATEWAY_METRICS = {
+    "gateway_pending_requests",
+    "gateway_current_requests",
+    "request_total",
+    "request_retry_total",
+    "request_fallback_total",
+    "request_input_tokens_total",
+    "request_output_tokens_total",
+    "request_e2e_latency_seconds_sum",
+    "request_e2e_latency_seconds_count",
+    "request_ttft_milliseconds_sum",
+    "request_ttft_milliseconds_count",
+    "request_tpot_milliseconds_sum",
+    "request_tpot_milliseconds_count",
+    "request_queue_duration_milliseconds_sum",
+    "request_schedule_duration_milliseconds_sum",
+    # per-instance load (gateway realtime + CMS-from-redis)
+    "instance_lrs_running_requests",
+    "instance_lrs_waiting_requests",
+    "instance_lrs_running_tokens",
+    "instance_lrs_total_requests",
+    "instance_cms_running_requests",
+    "instance_cms_waiting_requests",
+    "instance_cms_used_gpu_tokens",
+    "instance_cms_kv_cache_usage_ratio_projected",   # the rescheduler's load signal
+    "instance_cms_decode_batch_size",
+}
+
+
+# ---------------------------------------------------------------------------
+# Prometheus text parsing
+# ---------------------------------------------------------------------------
+_SERIES_RE = re.compile(
+    r"^(?P<name>[a-zA-Z_:][a-zA-Z0-9_:]*)"      # metric name
+    r"(?:\{(?P<labels>[^}]*)\})?"                 # optional {labels}
+    r"\s+(?P<value>[-+0-9.eEnaN]+)"               # value (incl. NaN/inf-ish)
+    r"(?:\s+\d+)?\s*$"                            # optional timestamp
+)
+
+
+def parse_prometheus(text: str, wanted: set) -> Dict[str, float]:
+    """Parse Prometheus exposition text into a flat {series_key: value} dict.
+
+    series_key = metric name, or ``name|k=v,k=v`` when labels are present, so
+    per-instance/per-model series stay distinguishable in one flat record.
+    Only metric names in ``wanted`` are kept; bucket lines and comments skip.
+    """
+    out: Dict[str, float] = {}
+    for line in text.splitlines():
+        if not line or line[0] == "#":
+            continue
+        m = _SERIES_RE.match(line)
+        if not m:
+            continue
+        name = m.group("name")
+        if name not in wanted:
+            continue
+        try:
+            value = float(m.group("value"))
+        except ValueError:
+            continue
+        labels = m.group("labels")
+        if labels:
+            # normalise: strip quotes, sort by key for a stable series_key
+            parts = []
+            for kv in labels.split(","):
+                if "=" not in kv:
+                    continue
+                k, _, v = kv.partition("=")
+                parts.append(f"{k.strip()}={v.strip().strip(chr(34))}")
+            key = name + "|" + ",".join(sorted(parts)) if parts else name
+        else:
+            key = name
+        out[key] = value
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Target descriptor
+# ---------------------------------------------------------------------------
+class ScrapeTarget:
+    def __init__(self, label: str, url: str, wanted: set):
+        self.label = label          # file name stem, e.g. "engine_8000"
+        self.url = url              # http://host:port/metrics
+        self.wanted = wanted
+
+
+def default_llumnix_targets(
+    host: str = "localhost",
+    engine_ports=(8000, 8001, 8002, 8003),
+    scheduler_port: int = 8088,
+    gateway_port: int = 8089,
+) -> List[ScrapeTarget]:
+    """Build the canonical target list for the 4×TP2 neutral deployment."""
+    targets: List[ScrapeTarget] = []
+    for p in engine_ports:
+        targets.append(ScrapeTarget(f"engine_{p}", f"http://{host}:{p}/metrics", ENGINE_METRICS))
+    targets.append(ScrapeTarget("scheduler", f"http://{host}:{scheduler_port}/metrics", SCHEDULER_METRICS))
+    targets.append(ScrapeTarget("gateway", f"http://{host}:{gateway_port}/metrics", GATEWAY_METRICS))
+    return targets
+
+
+# ---------------------------------------------------------------------------
+# Collector
+# ---------------------------------------------------------------------------
+class LlumnixMetricsCollector:
+    """Background time-series scraper for the Llumnix serving stack.
+
+    One daemon thread scrapes every target sequentially each ``interval``
+    seconds and appends a timestamped record to a per-target JSONL file via
+    AsyncJSONLWriter. Start once at run start, stop at run teardown.
+    """
+
+    def __init__(self, targets: List[ScrapeTarget], out_dir: str, interval: float = 1.0):
+        self.targets = targets
+        self.out_dir = out_dir
+        self.interval = interval
+        self.is_running = False
+        self._thread: Optional[threading.Thread] = None
+        self._writers: Dict[str, AsyncJSONLWriter] = {
+            t.label: AsyncJSONLWriter(f"{out_dir.rstrip('/')}/{t.label}.jsonl")
+            for t in targets
+        }
+
+    def start(self):
+        if self.is_running:
+            return
+        self.is_running = True
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+        print(
+            f"[LlumnixMetrics] Started (interval={self.interval}s, "
+            f"{len(self.targets)} targets -> {self.out_dir}/)"
+        )
+
+    def stop(self):
+        self.is_running = False
+        if self._thread:
+            self._thread.join(timeout=self.interval + 5)
+        for w in self._writers.values():
+            w.close()
+        print("[LlumnixMetrics] Stopped")
+
+    def _loop(self):
+        while self.is_running:
+            tick = time.time()
+            for t in self.targets:
+                record = {"t": tick, "ok": True}
+                try:
+                    resp = requests.get(t.url, timeout=2)
+                    resp.raise_for_status()
+                    record.update(parse_prometheus(resp.text, t.wanted))
+                except Exception:
+                    record["ok"] = False
+                self._writers[t.label].write(record)
+            # keep cadence roughly fixed regardless of scrape duration
+            elapsed = time.time() - tick
+            time.sleep(max(0.0, self.interval - elapsed))
+
+
+# ---------------------------------------------------------------------------
+# Migration ground-truth log capture (no completion metric exists)
+# ---------------------------------------------------------------------------
+def capture_migration_logs(
+    out_path: str,
+    scheduler_selector: str = "app=scheduler",
+    engine_selector: str = "llumnix.io/infer-type=neutral",
+    namespace: str = "llumnix",
+    tail: int = 5000,
+) -> bool:
+    """Grep scheduler + engine pod logs for migration/rescheduling evidence.
+
+    Writes matching lines to ``out_path``. Returns False if kubectl is
+    unavailable or both greps fail. Best-effort: this is the only ground-truth
+    that a KV transfer actually happened (scheduler_rescheduling_total only
+    counts decisions).
+    """
+    patterns = "rescheduling|Generate rescheduling pairs|Received Migration|" \
+               "MigrationFrontend|No requests to migrate|migrate"
+    wrote_any = False
+    try:
+        with open(out_path, "w", encoding="utf-8") as f:
+            for title, selector in (
+                ("scheduler", scheduler_selector),
+                ("engine(neutral)", engine_selector),
+            ):
+                f.write(f"\n===== {title} ({selector}) =====\n")
+                try:
+                    logs = subprocess.run(
+                        ["kubectl", "logs", "-n", namespace, "-l", selector,
+                         "--tail", str(tail), "--prefix", "--timestamps"],
+                        capture_output=True, text=True, timeout=60,
+                    )
+                    if logs.returncode != 0:
+                        f.write(f"[kubectl logs failed: {logs.stderr.strip()}]\n")
+                        continue
+                    matched = [
+                        ln for ln in logs.stdout.splitlines()
+                        if re.search(patterns, ln, re.IGNORECASE)
+                    ]
+                    f.write("\n".join(matched) + ("\n" if matched else "[no matching lines]\n"))
+                    wrote_any = wrote_any or bool(matched)
+                except Exception as e:
+                    f.write(f"[error: {e}]\n")
+    except Exception as e:
+        print(f"[LlumnixMetrics] capture_migration_logs failed: {e}")
+        return False
+    return wrote_any
+
+
+if __name__ == "__main__":
+    # Smoke self-test against a locally port-forwarded stack.
+    import sys
+    out = sys.argv[1] if len(sys.argv) > 1 else "/tmp/llumnix_metrics_selftest"
+    import os
+    os.makedirs(out, exist_ok=True)
+    c = LlumnixMetricsCollector(default_llumnix_targets(), out_dir=out, interval=1.0)
+    c.start()
+    time.sleep(5)
+    c.stop()
+    print(f"wrote sample series to {out}/")

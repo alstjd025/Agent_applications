@@ -18,12 +18,15 @@ Key design goals for the "Illusion of Efficiency" motivation experiment:
 """
 
 import hashlib
+import json
 import time
 import uuid
 import random
 import threading
+from types import SimpleNamespace
 from typing import TypedDict, Optional, Any, List, Callable
 
+import requests
 import tiktoken
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
@@ -50,6 +53,9 @@ BASE_URL = "http://localhost:8080/v1"
 MODEL_ID = "meta-llama/Llama-3.3-70B-Instruct"
 PER_CALL_TIMEOUT = 120  # seconds — TTFT timeout: no first token within this time
 IDLE_TIMEOUT = 60  # seconds — idle timeout: no chunk for this duration during streaming
+# Completions API (Llumnix gateway) default output cap. vLLM's /v1/completions
+# defaults max_tokens to 16, so we MUST set an explicit cap for this path.
+DEFAULT_MAX_TOKENS = 2048
 
 
 # ---------------------------------------------------------------------------
@@ -77,12 +83,14 @@ def make_llm(
     model_id: str = MODEL_ID,
     seed: int = 42,
     *,
+    api: str = "chat",
+    max_tokens: Optional[int] = None,
     halo_ttft_slo: Optional[float] = None,
     halo_tbt_slo: Optional[float] = None,
     halo_e2e_slo: Optional[float] = None,
     halo_bypass: bool = False,
     timeout: Optional[float] = None,
-) -> ChatOpenAI:
+):
     """Create a ChatOpenAI instance with proper timeout settings.
 
     HALO request-level wiring (see ms_dev/halo_dev/halo_api_reference.md):
@@ -103,7 +111,26 @@ def make_llm(
     2026-05-19 request-level refactor removed POST /halo/programs). When
     all SLO fields are None, no extra_body is injected — works against a
     non-Halo server unchanged.
+
+    `api` selects the wire protocol:
+      - "chat" (default): LangChain ChatOpenAI -> POST /v1/chat/completions.
+      - "completions": LlumnixCompletionsLLM -> POST /v1/completions (the
+        Llumnix gateway only serves completions; chat returns HTTP 400). The
+        adapter renders the message list with the Llama-3 chat template and
+        streams SSE, exposing the same .stream()/.invoke() -> .content contract
+        so invoke_with_tracking is unchanged.
     """
+    if api == "completions":
+        return LlumnixCompletionsLLM(
+            base_url=base_url,
+            model=model_id,
+            seed=seed,
+            temperature=0.0,
+            top_p=1.0,
+            max_tokens=max_tokens if max_tokens is not None else DEFAULT_MAX_TOKENS,
+            timeout=timeout if timeout is not None else PER_CALL_TIMEOUT,
+        )
+
     kwargs: dict = dict(
         base_url=base_url,
         api_key="dummy",
@@ -125,6 +152,111 @@ def make_llm(
     if extra:
         kwargs["extra_body"] = extra
     return ChatOpenAI(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Llumnix completions adapter (/v1/completions)
+# ---------------------------------------------------------------------------
+# The Llumnix gateway only serves /v1/completions (chat -> HTTP 400). This
+# adapter renders the LangChain message list with the Llama-3 chat template and
+# streams SSE from /v1/completions, yielding chunk objects with a `.content`
+# attribute so the shared invoke_with_tracking() path is unchanged. Built on
+# `requests` (already a dependency) to avoid pulling in the openai SDK.
+
+_LLAMA3_ROLE_MAP = {"system": "system", "human": "user", "ai": "assistant"}
+
+
+def render_llama3_prompt(messages: list) -> str:
+    """Render langchain messages into a Llama-3-Instruct prompt string.
+
+    /v1/completions does NOT apply a chat template, so we build the special-
+    token prompt ourselves and end with the assistant header so the model
+    continues as the assistant. Role mapping matches `_serialize_messages`.
+    """
+    parts = ["<|begin_of_text|>"]
+    for m in messages:
+        mtype = getattr(m, "type", None) or m.__class__.__name__.lower()
+        role = _LLAMA3_ROLE_MAP.get(mtype, "user")
+        content = getattr(m, "content", str(m))
+        parts.append(
+            f"<|start_header_id|>{role}<|end_header_id|>\n\n{content}<|eot_id|>"
+        )
+    parts.append("<|start_header_id|>assistant<|end_header_id|>\n\n")
+    return "".join(parts)
+
+
+class LlumnixCompletionsLLM:
+    """Minimal /v1/completions client with a ChatOpenAI-compatible surface.
+
+    Exposes `.stream(messages)` (generator of objects with `.content`) and
+    `.invoke(messages)` (returns an object with `.content`) so it drops into
+    `invoke_with_tracking` unchanged. TTFT/TBT/token counting all operate on
+    `.content`, and metadata access degrades to {} (no admission gate in
+    Llumnix), so no rejection is ever falsely detected.
+    """
+
+    # Halt generation at the Llama-3 turn boundary (we bypassed the chat
+    # template, so the server won't add these stops automatically).
+    STOP = ["<|eot_id|>", "<|end_of_text|>"]
+
+    def __init__(self, base_url, model, seed=42, temperature=0.0, top_p=1.0,
+                 max_tokens=DEFAULT_MAX_TOKENS, timeout=PER_CALL_TIMEOUT):
+        # base_url already includes the /v1 suffix (added at the workload
+        # call site), matching ChatOpenAI's convention.
+        self.completions_url = base_url.rstrip("/") + "/completions"
+        self.model = model
+        self.seed = seed
+        self.temperature = temperature
+        self.top_p = top_p
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+
+    def _payload(self, messages: list, stream: bool) -> dict:
+        return {
+            "model": self.model,
+            "prompt": render_llama3_prompt(messages),
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "seed": self.seed,
+            "stop": self.STOP,
+            "stream": stream,
+        }
+
+    def stream(self, messages: list):
+        resp = requests.post(
+            self.completions_url,
+            json=self._payload(messages, stream=True),
+            stream=True,
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+        for raw in resp.iter_lines(decode_unicode=True):
+            if not raw:
+                continue
+            if raw.startswith("data:"):
+                data = raw[len("data:"):].strip()
+            else:
+                continue
+            if data == "[DONE]":
+                break
+            try:
+                obj = json.loads(data)
+                text = obj["choices"][0].get("text", "")
+            except (ValueError, KeyError, IndexError):
+                continue
+            yield SimpleNamespace(content=text)
+
+    def invoke(self, messages: list):
+        resp = requests.post(
+            self.completions_url,
+            json=self._payload(messages, stream=False),
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+        obj = resp.json()
+        text = obj["choices"][0].get("text", "")
+        return SimpleNamespace(content=text)
 
 
 # ---------------------------------------------------------------------------

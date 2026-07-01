@@ -40,8 +40,43 @@ from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from metrics_tracker import MetricsTracker
 from agent_logger import AgentLogger
 from arrival_trace import load_arrival_trace
+from llumnix_metrics import (
+    LlumnixMetricsCollector,
+    default_llumnix_targets,
+    capture_migration_logs,
+)
 from workloads import load_workload
 from workloads.base import RunContext
+
+
+# ---------------------------------------------------------------------------
+# Llumnix server-side metrics collectors, keyed by run directory. A collector
+# is registered here when an ExperimentRunner is built with engine="llumnix"
+# and finalized (stopped + migration logs captured) by finish_server_session,
+# which already receives the run_dir — so no per-call-site wiring is needed.
+# ---------------------------------------------------------------------------
+_LLUMNIX_COLLECTORS: Dict[str, tuple] = {}
+
+
+def _finalize_llumnix_collector(run_dir: Optional[str]) -> None:
+    """Stop the run's Llumnix collector and capture migration ground-truth logs."""
+    if not run_dir:
+        return
+    entry = _LLUMNIX_COLLECTORS.pop(run_dir, None)
+    if not entry:
+        return
+    collector, cfg = entry
+    try:
+        collector.stop()
+    except Exception as e:
+        print(f"[LlumnixMetrics] stop failed: {e}")
+    if cfg and cfg.get("capture_logs"):
+        log_path = os.path.join(run_dir, "server_metrics", "migration_events.log")
+        try:
+            hit = capture_migration_logs(log_path, namespace=cfg.get("namespace", "llumnix"))
+            print(f"[LlumnixMetrics] migration logs -> {log_path} (matches={hit})")
+        except Exception as e:
+            print(f"[LlumnixMetrics] migration log capture failed: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -229,10 +264,27 @@ class MotivationExperimentRunner:
         halo_e2e_slo: Optional[float] = None,
         transcript_record_path: Optional[str] = None,
         disable_timeouts: bool = False,
+        engine: str = "sglang",
+        api: str = "chat",
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        enable_server_metrics: bool = True,
+        llumnix_cfg: Optional[dict] = None,
     ):
         self.csv_path = csv_path
         self.error_log_path = error_log_path
         self.server_base_url = server_base_url
+        # Engine wire protocol + model override, threaded into RunContext ->
+        # make_llm(api=, model=, max_tokens=).
+        self.engine = engine
+        self.api = api
+        self.model = model
+        self.max_tokens = max_tokens
+        # Per-request vLLM /metrics scrape (KVCacheMonitor). Meaningful only for
+        # a co-located single-engine SGLang server; disabled for Llumnix (the
+        # gateway has no engine metrics; use the background collector instead).
+        self.enable_server_metrics = enable_server_metrics
+        self.run_dir = os.path.dirname(csv_path)
         self.max_iterations = max_iterations
         self.seed = seed
         self.log_level = log_level
@@ -256,7 +308,11 @@ class MotivationExperimentRunner:
         # surfaced before any LLM traffic. Raises HaloConfigError; the
         # uncaught exception aborts main() — which is what we want
         # (per ms_dev/halo_dev/CLAUDE.md §13 Q7/Q12 strict policy).
+        # Skipped for the Llumnix engine: it has no /halo/status endpoint, so
+        # a strict probe would always abort even with Halo off.
         try:
+            if self.engine != "sglang":
+                raise ImportError  # reuse the skip path below
             from workloads.halo_helpers import assert_halo_mode_matches
 
             self._halo_server_status = assert_halo_mode_matches(
@@ -292,9 +348,27 @@ class MotivationExperimentRunner:
         _ = MetricsTracker(
             self.csv_path,
             server_base_url=self.server_base_url,
-            enable_server_metrics=True,
+            enable_server_metrics=self.enable_server_metrics,
             tbt_jsonl_path=self.tbt_jsonl_path,
         )
+
+        # Start the per-run Llumnix server-side metrics collector. Registered
+        # by run_dir so finish_server_session() can stop it + capture migration
+        # logs without any per-call-site wiring. See _finalize_llumnix_collector.
+        if self.engine == "llumnix" and llumnix_cfg is not None:
+            targets = default_llumnix_targets(
+                host=llumnix_cfg["host"],
+                engine_ports=llumnix_cfg["engine_ports"],
+                scheduler_port=llumnix_cfg["scheduler_port"],
+                gateway_port=llumnix_cfg["gateway_port"],
+            )
+            collector = LlumnixMetricsCollector(
+                targets,
+                out_dir=os.path.join(self.run_dir, "server_metrics"),
+                interval=llumnix_cfg["interval"],
+            )
+            collector.start()
+            _LLUMNIX_COLLECTORS[self.run_dir] = (collector, llumnix_cfg)
 
     def _console_write(self, message: str) -> None:
         with self._console_lock:
@@ -347,6 +421,9 @@ class MotivationExperimentRunner:
                 halo_e2e_slo=self.halo_e2e_slo,
                 transcript_record_path=self.transcript_record_path,
                 disable_timeouts=self.disable_timeouts,
+                api=self.api,
+                model=self.model,
+                max_tokens=self.max_tokens,
             )
             result = self.workload.run_job(task, context)
             job_end_time = time.time()
@@ -917,6 +994,21 @@ def make_run_config(args, workload, workload_config: dict, **extra) -> dict:
         "workload_metadata": workload.metadata(args, workload_config),
         "server_base_url": args.server_base_url,
         "node": args.node,
+        "engine": args.engine,
+        "api": args.api,
+        "model": args.model,
+        "max_tokens": args.max_tokens,
+        "llumnix_metrics": (
+            {
+                "host": args.metrics_host,
+                "engine_ports": args.engine_ports,
+                "scheduler_port": args.scheduler_port,
+                "gateway_port": args.gateway_port,
+                "interval": args.metrics_interval,
+                "capture_logs": not args.no_migration_log_capture,
+            }
+            if args.engine == "llumnix" else None
+        ),
         "seed": args.seed,
         "halo": {
             "enabled": args.halo_enabled,
@@ -1014,7 +1106,14 @@ def finish_server_session(
     session_name: Optional[str],
     stop_server: bool,
 ) -> None:
-    """Stop the remote server if owned by this run and fetch its session folder."""
+    """Stop the remote server if owned by this run and fetch its session folder.
+
+    Also finalizes the Llumnix server-side metrics collector for this run_dir
+    (stop scraping + capture migration ground-truth logs). No-op for SGLang.
+    """
+    # Stop the Llumnix collector first so its files are flushed before we
+    # return, regardless of the (SGLang-only) server stop/fetch below.
+    _finalize_llumnix_collector(run_dir)
     if stop_server:
         ctrl.stop()
         time.sleep(2)
@@ -1045,6 +1144,42 @@ def main():
         type=str,
         default="/home/nxc/mskim/agent/Agent_applications/agent_motivation_experiment/results",
     )
+
+    # Engine profile: which serving system this run targets.
+    #   sglang  (default) -> ssh+tmux server control, chat.completions, Halo.
+    #   llumnix           -> already-running k8s stack; /v1/completions only;
+    #                        no server control; no Halo; self-scraped metrics.
+    parser.add_argument(
+        "--engine", choices=["sglang", "llumnix"], default="sglang",
+        help="Target serving system. 'llumnix' disables SGLang server control "
+             "and Halo, uses /v1/completions, and scrapes server-side metrics.",
+    )
+    parser.add_argument(
+        "--api", choices=["chat", "completions"], default=None,
+        help="Wire protocol. Defaults: sglang->chat, llumnix->completions.",
+    )
+    parser.add_argument(
+        "--model", type=str, default=None,
+        help="Model id override sent on each request. Defaults per engine "
+             "(llumnix -> meta-llama/Meta-Llama-3-8B-Instruct).",
+    )
+    parser.add_argument(
+        "--max-tokens", type=int, default=None,
+        help="Output token cap for the completions API (vLLM defaults to 16).",
+    )
+    # Llumnix server-side metrics collector (per-run time series).
+    parser.add_argument("--metrics-interval", type=float, default=1.0,
+                        help="Llumnix /metrics scrape interval seconds.")
+    parser.add_argument("--metrics-host", type=str, default="localhost",
+                        help="Host for Llumnix /metrics endpoints (port-forward target).")
+    parser.add_argument("--engine-ports", type=str, default="8000,8001,8002,8003",
+                        help="Comma-separated vLLM engine metrics ports.")
+    parser.add_argument("--scheduler-port", type=int, default=8088)
+    parser.add_argument("--gateway-port", type=int, default=8089)
+    parser.add_argument("--no-migration-log-capture", action="store_true",
+                        help="Skip kubectl-logs migration ground-truth capture at teardown.")
+    parser.add_argument("--migration-log-namespace", type=str, default="llumnix",
+                        help="k8s namespace for migration log capture.")
 
     # Workload
     parser.add_argument("--workload", type=str, default="swe_bench_coding")
@@ -1331,13 +1466,51 @@ def main():
         args.server_base_url = args.server_base_url or prof["base_url"]
         args.sglang_ssh_host = args.sglang_ssh_host or prof["ssh_host"]
         args.sglang_tmux_session = args.sglang_tmux_session or prof["tmux_session"]
+
+    # ---- Llumnix engine profile ----
+    # Already-running k8s stack: no server control, no Halo, completions API,
+    # gateway default endpoint. Set before the localhost:8080 default below so
+    # server_base_url falls back to the gateway port, not the SGLang tunnel.
+    llumnix_cfg = None
+    if args.engine == "llumnix":
+        args.api = args.api or "completions"
+        if args.halo_enabled:
+            print("[llumnix] --halo-enabled ignored (no admission gate in Llumnix)")
+            args.halo_enabled = False
+        args.restart_server = False
+        args.no_server_restart = True
+        args.fetch_server_session = False
+        if not args.model:
+            args.model = "meta-llama/Meta-Llama-3-8B-Instruct"
+        if not args.server_base_url:
+            args.server_base_url = f"http://localhost:{args.gateway_port}"
+        engine_ports = tuple(
+            int(p) for p in str(args.engine_ports).split(",") if p.strip()
+        )
+        llumnix_cfg = {
+            "host": args.metrics_host,
+            "engine_ports": engine_ports,
+            "scheduler_port": args.scheduler_port,
+            "gateway_port": args.gateway_port,
+            "interval": args.metrics_interval,
+            "capture_logs": not args.no_migration_log_capture,
+            "namespace": args.migration_log_namespace,
+        }
+    else:
+        args.api = args.api or "chat"
+
     args.server_base_url = args.server_base_url or "http://localhost:8080"
     args.sglang_ssh_host = args.sglang_ssh_host or "NXC7"
     args.sglang_tmux_session = args.sglang_tmux_session or "sglang"
     print(
-        f"Node: {args.node or '(default)'} | server={args.server_base_url} "
-        f"| ssh={args.sglang_ssh_host} | tmux={args.sglang_tmux_session}"
+        f"Engine: {args.engine} (api={args.api}) | server={args.server_base_url}"
+        + (f" | model={args.model}" if args.model else "")
     )
+    if args.engine == "sglang":
+        print(
+            f"Node: {args.node or '(default)'} "
+            f"| ssh={args.sglang_ssh_host} | tmux={args.sglang_tmux_session}"
+        )
 
     # ---- Effective per-request Halo SLOs (each defaults to --tau) ----
     halo_ttft_slo = args.halo_ttft_slo if args.halo_ttft_slo is not None else args.tau
@@ -1446,6 +1619,12 @@ def main():
             halo_e2e_slo=halo_e2e_slo,
             transcript_record_path=args.record_transcript,
             disable_timeouts=args.disable_timeouts,
+            engine=args.engine,
+            api=args.api,
+            model=args.model,
+            max_tokens=args.max_tokens,
+            enable_server_metrics=(args.engine != "llumnix"),
+            llumnix_cfg=llumnix_cfg,
         )
         runner.run_baseline(tasks)
         # Flush async JSONL writers (tbt + transcript) so a recorded
@@ -1515,6 +1694,12 @@ def main():
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
                 disable_timeouts=args.disable_timeouts,
+                engine=args.engine,
+                api=args.api,
+                model=args.model,
+                max_tokens=args.max_tokens,
+                enable_server_metrics=(args.engine != "llumnix"),
+                llumnix_cfg=llumnix_cfg,
             )
             runner._run_with_concurrency(tasks, concurrency=level)
             finish_server_session(
@@ -1594,6 +1779,12 @@ def main():
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
                 disable_timeouts=args.disable_timeouts,
+                engine=args.engine,
+                api=args.api,
+                model=args.model,
+                max_tokens=args.max_tokens,
+                enable_server_metrics=(args.engine != "llumnix"),
+                llumnix_cfg=llumnix_cfg,
             )
             runner.run_rate_sweep_duration(
                 task_pool=task_pool,
@@ -1679,6 +1870,12 @@ def main():
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
                 disable_timeouts=args.disable_timeouts,
+                engine=args.engine,
+                api=args.api,
+                model=args.model,
+                max_tokens=args.max_tokens,
+                enable_server_metrics=(args.engine != "llumnix"),
+                llumnix_cfg=llumnix_cfg,
             )
             runner.run_poisson_sweep_duration(
                 task_pool=task_pool,
@@ -1761,6 +1958,12 @@ def main():
             halo_e2e_slo=halo_e2e_slo,
             transcript_record_path=args.record_transcript,
             disable_timeouts=args.disable_timeouts,
+            engine=args.engine,
+            api=args.api,
+            model=args.model,
+            max_tokens=args.max_tokens,
+            enable_server_metrics=(args.engine != "llumnix"),
+            llumnix_cfg=llumnix_cfg,
         )
         runner._run_with_trace_duration(task_pool, arrival_offsets, trace_name=trace_name)
         finish_server_session(
@@ -1829,6 +2032,12 @@ def main():
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
                 disable_timeouts=args.disable_timeouts,
+                engine=args.engine,
+                api=args.api,
+                model=args.model,
+                max_tokens=args.max_tokens,
+                enable_server_metrics=(args.engine != "llumnix"),
+                llumnix_cfg=llumnix_cfg,
             )
             runner._run_with_poisson_duration(task_pool, args.lambda_val, args.duration_min)
             finish_server_session(
@@ -1886,6 +2095,12 @@ def main():
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
                 disable_timeouts=args.disable_timeouts,
+                engine=args.engine,
+                api=args.api,
+                model=args.model,
+                max_tokens=args.max_tokens,
+                enable_server_metrics=(args.engine != "llumnix"),
+                llumnix_cfg=llumnix_cfg,
             )
             runner._run_with_rate_duration(task_pool, args.rpm, args.duration_min)
             finish_server_session(
@@ -1945,6 +2160,12 @@ def main():
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
                 disable_timeouts=args.disable_timeouts,
+                engine=args.engine,
+                api=args.api,
+                model=args.model,
+                max_tokens=args.max_tokens,
+                enable_server_metrics=(args.engine != "llumnix"),
+                llumnix_cfg=llumnix_cfg,
             )
             runner._run_with_concurrency(tasks, concurrency=args.concurrency)
             finish_server_session(

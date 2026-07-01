@@ -35,6 +35,16 @@ class RunContext:
     # and are measured rather than killed. Honored by the request-level
     # workload only. Defaults to False.
     disable_timeouts: bool = False
+    # Engine wire protocol. "chat" (default) -> ChatOpenAI /v1/chat/completions
+    # (SGLang). "completions" -> LlumnixCompletionsLLM /v1/completions (the
+    # Llumnix gateway serves only completions). Passed into make_llm(api=...).
+    api: str = "chat"
+    # Optional model-id override (e.g. meta-llama/Meta-Llama-3-8B-Instruct for
+    # the Llumnix deployment). When None, each workload's own MODEL_ID is used.
+    model: Optional[str] = None
+    # Output token cap for the completions API (vLLM defaults to 16). When
+    # None, make_llm falls back to DEFAULT_MAX_TOKENS. Ignored by the chat API.
+    max_tokens: Optional[int] = None
 
 
 @dataclass

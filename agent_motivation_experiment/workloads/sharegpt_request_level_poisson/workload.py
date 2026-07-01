@@ -179,8 +179,10 @@ class Workload:
         halo_on = context.halo_enabled
         llm = make_llm(
             base_url=f"{context.server_base_url}/v1",
-            model_id=MODEL_ID,
+            model_id=context.model or MODEL_ID,
             seed=context.seed,
+            api=context.api,
+            max_tokens=context.max_tokens,
             # Halo SLO fields are forwarded verbatim; with absolute SLOs
             # these carry absolute thresholds (server slo_mode decides).
             halo_ttft_slo=context.halo_ttft_slo if halo_on else None,
