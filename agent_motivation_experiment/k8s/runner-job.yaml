@@ -1,0 +1,111 @@
+# In-cluster benchmark runner (removes the host-side kubectl port-forward
+# bottleneck: reaches gateway/scheduler/engines via k8s DNS, native pod-network).
+#
+# Image: reuses the vLLM image already in containerd (has python3.12 + pip; no
+#        registry pull). The few extra deps are pip-installed at start.
+# kubectl: the host k3s binary is mounted and symlinked to kubectl; it uses the
+#        pod's ServiceAccount token (in-cluster config) with the RBAC in
+#        runner-rbac.yaml — needed for --restart-per-condition + migration logs.
+# Code + results: the repo dir is hostPath-mounted at /work, so results land
+#        back on the host for analysis. Results are chowned to the host user.
+#
+# Tune the experiment via the env vars below (LAMBDA_LIST / DURATION_MIN / ...).
+# Runs as root so pip can install into the image; results are chowned to 3092:1999.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bench-runner
+  namespace: llumnix
+spec:
+  backoffLimit: 0
+  completions: 1
+  template:
+    metadata:
+      labels:
+        app: bench-runner
+    spec:
+      serviceAccountName: bench-runner
+      restartPolicy: Never
+      containers:
+        - name: runner
+          image: llumnix-registry.cn-beijing.cr.aliyuncs.com/llumnix/vllm:20260306-165123
+          workingDir: /work
+          env:
+            - name: NVIDIA_VISIBLE_DEVICES     # non-GPU pod on an nvidia-default runtime
+              value: "void"
+            - name: HF_HOME                    # reuse the shared HF cache (ShareGPT + tokenizer)
+              value: /hf-cache
+            - name: HF_HUB_OFFLINE             # ShareGPT is pre-staged; no HF egress from the pod
+              value: "1"
+            - name: HF_DATASETS_OFFLINE
+              value: "1"
+            - name: WORKLOAD
+              value: "sharegpt_request_level_poisson"
+            - name: MODE
+              value: "poisson-sweep"
+            - name: LAMBDA_LIST
+              value: "2,8"
+            - name: DURATION_MIN
+              value: "2"
+            - name: NUM_CONV
+              value: "200"
+            - name: SESSION
+              value: "incluster_sweep"
+            - name: RESTART_PER_CONDITION      # "1" -> add --restart-per-condition
+              value: "1"
+            - name: EXTRA_ARGS
+              value: ""
+            - name: RESULT_UID
+              value: "3092"
+            - name: RESULT_GID
+              value: "1999"
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -uo pipefail
+              # kubectl := host k3s binary (uses in-cluster SA token + RBAC)
+              ln -sf /usr/local/bin/k3s /usr/local/bin/kubectl
+              kubectl version --client >/dev/null 2>&1 && echo "[runner] kubectl ok"
+              # Use the repo's host-built venv (mounted at /work/.venv). Its
+              # interpreter symlink resolves to /usr/bin/python3.12, which this
+              # image also has, so all deps (langchain/datasets/tiktoken/...)
+              # come for free — no pip in-pod (the image's pip mirror is unusable).
+              PYBIN=/work/.venv/bin/python
+              "$PYBIN" -c "import langchain_openai, datasets, tiktoken" \
+                && echo "[runner] venv deps ok" || { echo "[runner] venv missing deps"; exit 1; }
+              RESTART_FLAG=""
+              [ "${RESTART_PER_CONDITION}" = "1" ] && RESTART_FLAG="--restart-per-condition"
+              echo "[runner] starting: workload=${WORKLOAD} mode=${MODE} lambdas=${LAMBDA_LIST}"
+              "$PYBIN" run_experiment.py \
+                --engine llumnix --in-cluster \
+                --workload "${WORKLOAD}" \
+                --mode "${MODE}" \
+                --lambda-list "${LAMBDA_LIST}" \
+                --duration-min "${DURATION_MIN}" \
+                --workload-config "{\"num_conversations\": ${NUM_CONV}}" \
+                --output-dir /work/results \
+                --session-name "${SESSION}" \
+                --metrics-interval 1.0 \
+                ${RESTART_FLAG} ${EXTRA_ARGS}
+              rc=$?
+              # make result files owned by the host user for analysis
+              chown -R "${RESULT_UID}:${RESULT_GID}" /work/results 2>/dev/null || true
+              echo "[runner] done rc=$rc"
+              exit $rc
+          volumeMounts:
+            - { name: work, mountPath: /work }
+            - { name: k3s, mountPath: /usr/local/bin/k3s, readOnly: true }
+            - { name: hf-cache, mountPath: /hf-cache }
+      volumes:
+        - name: work
+          hostPath:
+            path: /home/nxclab/llumnix_reproduce/Agent_applications/agent_motivation_experiment
+            type: Directory
+        - name: k3s
+          hostPath:
+            path: /usr/local/bin/k3s
+            type: File
+        - name: hf-cache            # shared HF cache holding the pre-staged ShareGPT dump
+          hostPath:                 # (and the Llama tokenizer). Read-only: offline mode.
+            path: /NHNHOME/huggingface
+            type: Directory

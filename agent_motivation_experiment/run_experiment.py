@@ -45,6 +45,7 @@ from llumnix_metrics import (
     default_llumnix_targets,
     capture_migration_logs,
 )
+from llumnix_deploy import restart_llumnix
 from workloads import load_workload
 from workloads.base import RunContext
 
@@ -357,7 +358,9 @@ class MotivationExperimentRunner:
         # logs without any per-call-site wiring. See _finalize_llumnix_collector.
         if self.engine == "llumnix" and llumnix_cfg is not None:
             targets = default_llumnix_targets(
-                host=llumnix_cfg["host"],
+                engine_host=llumnix_cfg["engine_host"],
+                scheduler_host=llumnix_cfg["scheduler_host"],
+                gateway_host=llumnix_cfg["gateway_host"],
                 engine_ports=llumnix_cfg["engine_ports"],
                 scheduler_port=llumnix_cfg["scheduler_port"],
                 gateway_port=llumnix_cfg["gateway_port"],
@@ -1046,6 +1049,33 @@ def restart_server_if_requested(
     return ctrl.start_session(session_name)
 
 
+def _maybe_restart_llumnix(args) -> bool:
+    """Cold-restart the Llumnix stack before a condition when requested.
+
+    Returns True (continue) when not applicable or when the restart succeeds.
+    """
+    if not (getattr(args, "engine", "sglang") == "llumnix" and args.restart_per_condition):
+        return True
+    r = restart_llumnix(
+        namespace=args.migration_log_namespace,
+        gateway_probe_url=args.server_base_url,
+        wait_timeout=args.restart_timeout,
+    )
+    return bool(r.get("ok"))
+
+
+def condition_server_prep(args, ctrl, enabled: bool, session_name: Optional[str]) -> bool:
+    """Prepare the server for a condition, dispatching on --engine.
+
+    - llumnix: cold-restart engine + control plane iff --restart-per-condition
+      (SGLang ssh/tmux control is inert for this engine).
+    - sglang: the existing restart_server_if_requested behaviour.
+    """
+    if getattr(args, "engine", "sglang") == "llumnix":
+        return _maybe_restart_llumnix(args)
+    return restart_server_if_requested(ctrl, enabled=enabled, session_name=session_name)
+
+
 def copy_server_stderr_to_run_root(server_session_dir: str, run_dir: str) -> Optional[str]:
     """Copy the first server.stderr* file from a fetched server session into run_dir."""
     candidates = []
@@ -1171,7 +1201,18 @@ def main():
     parser.add_argument("--metrics-interval", type=float, default=1.0,
                         help="Llumnix /metrics scrape interval seconds.")
     parser.add_argument("--metrics-host", type=str, default="localhost",
-                        help="Host for Llumnix /metrics endpoints (port-forward target).")
+                        help="Single host for all Llumnix /metrics (host-side "
+                             "port-forward). Overridden by --in-cluster / per-layer hosts.")
+    parser.add_argument("--in-cluster", action="store_true",
+                        help="Runner runs as a pod inside k3s: reach layers via k8s DNS "
+                             "(engine=neutral-0.neutral, scheduler=scheduler, gateway=gateway) "
+                             "and default server-base-url to http://gateway:<port>. Removes the "
+                             "port-forward bottleneck and survives pod restarts.")
+    parser.add_argument("--metrics-engine-host", type=str, default=None,
+                        help="Override engine /metrics host (default: localhost, or "
+                             "neutral-0.neutral under --in-cluster).")
+    parser.add_argument("--metrics-scheduler-host", type=str, default=None)
+    parser.add_argument("--metrics-gateway-host", type=str, default=None)
     parser.add_argument("--engine-ports", type=str, default="8000,8001,8002,8003",
                         help="Comma-separated vLLM engine metrics ports.")
     parser.add_argument("--scheduler-port", type=int, default=8088)
@@ -1179,7 +1220,13 @@ def main():
     parser.add_argument("--no-migration-log-capture", action="store_true",
                         help="Skip kubectl-logs migration ground-truth capture at teardown.")
     parser.add_argument("--migration-log-namespace", type=str, default="llumnix",
-                        help="k8s namespace for migration log capture.")
+                        help="k8s namespace for migration log capture / restarts.")
+    parser.add_argument("--restart-per-condition", action="store_true",
+                        help="Cold-restart engine + control plane (kubectl) before each "
+                             "sweep condition / restart-server run, for full per-experiment "
+                             "isolation (fresh KV/prefix cache + counters). ~150s per restart.")
+    parser.add_argument("--restart-timeout", type=int, default=600,
+                        help="Seconds to wait for pods Ready + gateway serving after a restart.")
 
     # Workload
     parser.add_argument("--workload", type=str, default="swe_bench_coding")
@@ -1477,18 +1524,38 @@ def main():
         if args.halo_enabled:
             print("[llumnix] --halo-enabled ignored (no admission gate in Llumnix)")
             args.halo_enabled = False
-        args.restart_server = False
-        args.no_server_restart = True
+        # Server control is via k8s (condition_server_prep -> restart_llumnix),
+        # not ssh/tmux. restart_server gates the single/baseline restart block;
+        # tie it to --restart-per-condition so those modes honor it too. The
+        # SGLang ssh path stays inert (condition_server_prep dispatches on
+        # engine) and fetch_server_session=False keeps finish_server_session
+        # from ever calling ctrl.stop().
+        args.restart_server = args.restart_per_condition
+        args.no_server_restart = not args.restart_per_condition
         args.fetch_server_session = False
         if not args.model:
             args.model = "meta-llama/Meta-Llama-3-8B-Instruct"
-        if not args.server_base_url:
-            args.server_base_url = f"http://localhost:{args.gateway_port}"
+        # Per-layer /metrics hosts + load-gen endpoint. In-cluster uses k8s DNS
+        # (restart-stable); host-side uses one port-forward host for all layers.
+        if args.in_cluster:
+            eng_host = args.metrics_engine_host or "neutral-0.neutral"
+            sch_host = args.metrics_scheduler_host or "scheduler"
+            gw_host = args.metrics_gateway_host or "gateway"
+            if not args.server_base_url:
+                args.server_base_url = f"http://gateway:{args.gateway_port}"
+        else:
+            eng_host = args.metrics_engine_host or args.metrics_host
+            sch_host = args.metrics_scheduler_host or args.metrics_host
+            gw_host = args.metrics_gateway_host or args.metrics_host
+            if not args.server_base_url:
+                args.server_base_url = f"http://localhost:{args.gateway_port}"
         engine_ports = tuple(
             int(p) for p in str(args.engine_ports).split(",") if p.strip()
         )
         llumnix_cfg = {
-            "host": args.metrics_host,
+            "engine_host": eng_host,
+            "scheduler_host": sch_host,
+            "gateway_host": gw_host,
             "engine_ports": engine_ports,
             "scheduler_port": args.scheduler_port,
             "gateway_port": args.gateway_port,
@@ -1582,7 +1649,7 @@ def main():
         session_name = condition_session_name(args.session_name, None)
         paths = setup_run_dir(args.output_dir, session_name, resume_dir=args.resume_dir)
         if args.restart_server:
-            if not restart_server_if_requested(sglang_ctrl, enabled=True, session_name=session_name):
+            if not condition_server_prep(args, sglang_ctrl, enabled=True, session_name=session_name):
                 print("ERROR: Failed to restart SGLang server")
                 sys.exit(1)
         write_run_config(paths["run_dir"], make_run_config(
@@ -1651,7 +1718,8 @@ def main():
             tag = f"concurrency_{level}"
             session_name = condition_session_name(args.session_name, tag)
             if args.restart_server:
-                if not restart_server_if_requested(
+                if not condition_server_prep(
+                    args,
                     sglang_ctrl,
                     enabled=True,
                     session_name=session_name,
@@ -1735,7 +1803,8 @@ def main():
             print(f"{'='*60}")
 
             # Restart server between experiments
-            if not restart_server_if_requested(
+            if not condition_server_prep(
+                args,
                 sglang_ctrl,
                 enabled=not args.no_server_restart,
                 session_name=session_name,
@@ -1826,7 +1895,8 @@ def main():
             print(f"{'='*60}")
 
             # Restart server between experiments
-            if not restart_server_if_requested(
+            if not condition_server_prep(
+                args,
                 sglang_ctrl,
                 enabled=not args.no_server_restart,
                 session_name=session_name,
@@ -1917,7 +1987,7 @@ def main():
         )
         paths = setup_run_dir(args.output_dir, session_name, resume_dir=args.resume_dir)
         if args.restart_server:
-            if not restart_server_if_requested(sglang_ctrl, enabled=True, session_name=session_name):
+            if not condition_server_prep(args, sglang_ctrl, enabled=True, session_name=session_name):
                 print("ERROR: Failed to restart SGLang server")
                 sys.exit(1)
 
@@ -1993,7 +2063,7 @@ def main():
             )
             paths = setup_run_dir(args.output_dir, session_name, resume_dir=args.resume_dir)
             if args.restart_server:
-                if not restart_server_if_requested(sglang_ctrl, enabled=True, session_name=session_name):
+                if not condition_server_prep(args, sglang_ctrl, enabled=True, session_name=session_name):
                     print("ERROR: Failed to restart SGLang server")
                     sys.exit(1)
 
@@ -2056,7 +2126,7 @@ def main():
             )
             paths = setup_run_dir(args.output_dir, session_name, resume_dir=args.resume_dir)
             if args.restart_server:
-                if not restart_server_if_requested(sglang_ctrl, enabled=True, session_name=session_name):
+                if not condition_server_prep(args, sglang_ctrl, enabled=True, session_name=session_name):
                     print("ERROR: Failed to restart SGLang server")
                     sys.exit(1)
 
@@ -2122,7 +2192,7 @@ def main():
 
             paths = setup_run_dir(args.output_dir, session_name, resume_dir=args.resume_dir)
             if args.restart_server:
-                if not restart_server_if_requested(sglang_ctrl, enabled=True, session_name=session_name):
+                if not condition_server_prep(args, sglang_ctrl, enabled=True, session_name=session_name):
                     print("ERROR: Failed to restart SGLang server")
                     sys.exit(1)
 

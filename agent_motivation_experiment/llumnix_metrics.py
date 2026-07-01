@@ -160,17 +160,25 @@ class ScrapeTarget:
 
 
 def default_llumnix_targets(
-    host: str = "localhost",
+    engine_host: str = "localhost",
+    scheduler_host: str = "localhost",
+    gateway_host: str = "localhost",
     engine_ports=(8000, 8001, 8002, 8003),
     scheduler_port: int = 8088,
     gateway_port: int = 8089,
 ) -> List[ScrapeTarget]:
-    """Build the canonical target list for the 4×TP2 neutral deployment."""
+    """Build the canonical target list for the 4×TP2 neutral deployment.
+
+    Hosts are per-layer so this works both from the host via a single
+    port-forward (all three = localhost, different ports) and from an
+    in-cluster runner pod via k8s DNS (engine=neutral-0.neutral,
+    scheduler=scheduler, gateway=gateway — restart-stable names).
+    """
     targets: List[ScrapeTarget] = []
     for p in engine_ports:
-        targets.append(ScrapeTarget(f"engine_{p}", f"http://{host}:{p}/metrics", ENGINE_METRICS))
-    targets.append(ScrapeTarget("scheduler", f"http://{host}:{scheduler_port}/metrics", SCHEDULER_METRICS))
-    targets.append(ScrapeTarget("gateway", f"http://{host}:{gateway_port}/metrics", GATEWAY_METRICS))
+        targets.append(ScrapeTarget(f"engine_{p}", f"http://{engine_host}:{p}/metrics", ENGINE_METRICS))
+    targets.append(ScrapeTarget("scheduler", f"http://{scheduler_host}:{scheduler_port}/metrics", SCHEDULER_METRICS))
+    targets.append(ScrapeTarget("gateway", f"http://{gateway_host}:{gateway_port}/metrics", GATEWAY_METRICS))
     return targets
 
 

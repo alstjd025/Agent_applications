@@ -1,0 +1,42 @@
+# ServiceAccount + RBAC for the in-cluster benchmark runner.
+# The runner needs to cold-restart the Llumnix stack between conditions
+# (--restart-per-condition) and read pod logs for migration ground-truth:
+#   - delete the engine pod (LWS recreates neutral-0)      -> pods delete
+#   - rollout restart scheduler/gateway Deployments         -> deployments patch
+#   - wait pod Ready / rollout status                       -> pods,replicasets get/list
+#   - capture migration logs (kubectl logs)                 -> pods/log get
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bench-runner
+  namespace: llumnix
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bench-runner
+  namespace: llumnix
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bench-runner
+  namespace: llumnix
+subjects:
+  - kind: ServiceAccount
+    name: bench-runner
+    namespace: llumnix
+roleRef:
+  kind: Role
+  name: bench-runner
+  apiGroup: rbac.authorization.k8s.io

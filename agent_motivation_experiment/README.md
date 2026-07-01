@@ -10,6 +10,32 @@ SGLang 서버에 multi-call coding agent workload를 부하로 넣고, server th
 
 `codingagent_request_level_poisson` workload는 위 세 workload와 달리 **job/chain 개념이 없습니다.** 각 Poisson arrival이 하나의 독립적인 LLM request이고, 서버의 request-level Halo admission gate와 짝을 이룹니다. `swe_bench_coding` baseline run을 `--record-transcript`로 돌려 만든 transcript JSONL을 literal하게 재생(replay)하며, transcript 안에 들어 있는 concurrency-1 TTFT/TBT/e2e가 per-request goodput baseline이 됩니다. Goodput은 `analysis_scripts/request_level/parse_request_metrics.py`로 계산합니다.
 
+## Two serving backends: SGLang vs Llumnix (`--engine`)
+
+이 러너는 **두 서빙 백엔드**를 지원합니다. `--engine` 플래그로 고릅니다.
+
+- **`--engine sglang`** (기본): 원격 NXC7의 SGLang을 ssh+tmux로 제어. 이 README의
+  나머지 부분(Quick Start 등)이 이 경로입니다. `chat.completions` + Halo 사용.
+- **`--engine llumnix`**: NXC13 k3s에 떠 있는 **Llumnix**(migration 서빙 스택)에 부하.
+  게이트웨이가 `/v1/completions`만 받으므로 Llama-3 템플릿 completions 어댑터를 쓰고,
+  서버제어는 k8s(재시작), 서버측 metric은 Prometheus `/metrics`를 각 계층에서 긁어
+  `server_metrics/*.jsonl`로 저장합니다. **러너를 클러스터 내부 파드로 실행**해
+  port-forward 병목을 없앱니다.
+
+> **Llumnix에서 실험하는 법 → [`k8s/README.md`](k8s/README.md)** 를 보세요. (전제조건,
+> `runner-job.yaml` env로 λ/duration 설정, 실행/모니터링, 결과·분석, 조건별 완전
+> 재시작(`--restart-per-condition`), 트러블슈팅까지 자립적으로 정리돼 있습니다.)
+>
+> 빠른 시작:
+> ```bash
+> kubectl apply -f k8s/runner-rbac.yaml            # 최초 1회 (RBAC)
+> # k8s/runner-job.yaml 의 env(LAMBDA_LIST / DURATION_MIN / RESTART_PER_CONDITION ...) 편집
+> kubectl -n llumnix delete job bench-runner --ignore-not-found
+> kubectl apply -f k8s/runner-job.yaml             # 실험 실행
+> kubectl -n llumnix logs -f job/bench-runner      # 진행 확인
+> # 결과: results/<YYMMDD_HHMM>_<SESSION>_lambda_<λ>/  (metrics.csv + server_metrics/)
+> ```
+
 ## Quick Start
 
 아래 명령은 이 디렉터리(`Agent_applications/agent_motivation_experiment`)에서 실행하는 것을 기준으로 합니다.

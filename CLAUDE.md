@@ -30,10 +30,12 @@ synthetic coding agent workload로 측정합니다.
 
 작업 종류별 진입 순서:
 
-- **실험 실행/수정/디버깅** →
+- **실험 실행/수정/디버깅 (SGLang@NXC7)** →
   1. [`agent_motivation_experiment/README.md`](agent_motivation_experiment/README.md) (Quick Start, 모드별 명령)
   2. [`agent_motivation_experiment/CLAUDE.md`](agent_motivation_experiment/CLAUDE.md) (core flow, server ownership, admission control 검사 절차)
   3. [`agent_motivation_experiment/AGENTS.md`](agent_motivation_experiment/AGENTS.md)
+- **Llumnix 서빙(NXC13 k3s)에 부하 실험** → [`agent_motivation_experiment/k8s/README.md`](agent_motivation_experiment/k8s/README.md)
+  (`--engine llumnix`, 인클러스터 runner 파드, 조건별 재시작, 서버측 metric 수집). 개념은 위 CLAUDE.md "Engine profiles" 절.
 - **워크로드 어댑터 변경** →
   1. [`agent_motivation_experiment/workloads/AGENTS.md`](agent_motivation_experiment/workloads/AGENTS.md)
   2. 해당 workload 폴더의 `AGENTS.md` (예: `swe_bench_coding_tool_delay/`, `swe_bench_coding_parallel_tool_delay/`)

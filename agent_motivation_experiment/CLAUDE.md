@@ -29,6 +29,34 @@ This project measures how application-level goodput collapses under load even wh
 - Use the default restart behavior for `rate-sweep` and `poisson-sweep`; only use `--no-server-restart` when the user explicitly wants to reuse a running server.
 - If a custom admission-control server configuration is needed, pass it through `--sglang-start-cmd` so the runner still owns start/stop/fetch.
 
+## Engine profiles (`--engine sglang` | `--engine llumnix`)
+
+The runner targets one of two serving backends. Default `sglang` (everything in
+"Core Flow" / "Server Ownership" above). `--engine llumnix` targets the Llumnix
+migration stack in k3s on NXC13 — **operational guide: [`k8s/README.md`](k8s/README.md)**.
+
+Under `--engine llumnix` the profile (resolved in `main()`) automatically:
+- uses `/v1/completions` via a Llama-3-templated adapter (`LlumnixCompletionsLLM`
+  in `workloads/swe_bench_coding/agent.py`; gateway rejects chat) — threaded to
+  all workloads via `RunContext.api/model/max_tokens`;
+- disables Halo and the per-request `KVCacheMonitor`; defaults the model to
+  `meta-llama/Meta-Llama-3-8B-Instruct`;
+- replaces ssh/tmux server control with k8s: `--restart-per-condition` cold-restarts
+  the engine (`kubectl delete pod neutral-0`) + control plane (`rollout restart
+  scheduler,gateway`) before each condition (`llumnix_deploy.py:restart_llumnix`);
+- runs a background collector (`llumnix_metrics.py`) scraping Prometheus `/metrics`
+  from engines/scheduler/gateway into `server_metrics/*.jsonl`, finalized (with
+  migration-log capture) by `finish_server_session`.
+
+`--in-cluster` (set when running as the `bench-runner` pod, see `k8s/`) points the
+load generator and collector at k8s DNS (`gateway`, `scheduler`, `neutral-0.neutral`)
+instead of localhost port-forwards — this is the path for real load (port-forward
+caps ~7-8 req/s). The SGLang path is unchanged; all llumnix logic is additive.
+
+Server-side metric note: `scheduler_rescheduling_total` (the migration-decision
+counter) is only exposed after a rescheduling actually happens; ground-truth KV
+transfers live in `server_metrics/migration_events.log`, not a metric.
+
 ## Halo (Project Halo, request-level)
 
 > Halo was refactored job-level → **request-level** on 2026-05-19.
@@ -105,7 +133,11 @@ When testing admission-control rejection behavior:
 
 | Path | Purpose |
 |---|---|
-| `run_experiment.py` | Main experiment runner and SGLang orchestration |
+| `run_experiment.py` | Main experiment runner + SGLang/Llumnix orchestration (`--engine`) |
+| `llumnix_metrics.py` | Llumnix per-run Prometheus `/metrics` collector (`server_metrics/*.jsonl`) |
+| `llumnix_deploy.py` | Llumnix k8s cold-restart helper (`--restart-per-condition`) |
+| `k8s/` | In-cluster runner pod: `runner-rbac.yaml`, `runner-job.yaml`, `README.md` |
+| `analysis_scripts/parse_llumnix_metrics.py` | Folds `server_metrics/*.jsonl` → `analysis/llumnix_server_metrics{,_summary}.csv` |
 | `workloads/swe_bench_coding/` | Default SWE-bench Lite synthetic coding workload (job-level) |
 | `workloads/swe_bench_coding_tool_delay/` | SWE-bench workload with deterministic simulated tool-call intervals |
 | `workloads/swe_bench_coding_parallel_tool_delay/` | SWE-bench workload with parallel execution rounds and deterministic tool-call intervals |
