@@ -23,20 +23,26 @@ Stdlib only (no pandas).
 
 import argparse
 import csv
+import re
 from datetime import datetime
+
+# Trailing tz offset (+00:00 / +0000 / Z). Uniform across a trace, so dropping
+# it is safe — arrival_s is relative (offset cancels). 2024 traces carry it.
+_TZ_OFFSET = re.compile(r"(?:[+-]\d{2}:?\d{2}|Z)$")
 
 
 def _parse_ts(s: str) -> float:
-    """Parse 'YYYY-MM-DD HH:MM:SS.fffffff' to epoch seconds.
+    """Parse an Azure timestamp to epoch seconds.
 
-    Python's %f handles at most 6 fractional digits; Azure uses 7
-    (100 ns ticks), so truncate the fractional part to microseconds.
+    Handles 2023 (7-digit/100 ns fractional, no offset) and 2024 (6-digit
+    fractional or none, with a +00:00 offset). %f takes at most 6 digits, so
+    the fractional part is truncated to microseconds; the uniform tz offset is
+    stripped (relative timing is unaffected).
     """
-    s = s.strip()
+    s = _TZ_OFFSET.sub("", s.strip()).strip()
     if "." in s:
         head, frac = s.split(".", 1)
-        frac = frac[:6].ljust(6, "0")
-        s = f"{head}.{frac}"
+        s = f"{head}.{frac[:6].ljust(6, '0')}"
         fmt = "%Y-%m-%d %H:%M:%S.%f"
     else:
         fmt = "%Y-%m-%d %H:%M:%S"
