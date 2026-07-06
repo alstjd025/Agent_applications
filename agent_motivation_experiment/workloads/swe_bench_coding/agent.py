@@ -185,6 +185,32 @@ def render_llama3_prompt(messages: list) -> str:
     return "".join(parts)
 
 
+_HTTP_SESSION = None
+_HTTP_SESSION_LOCK = threading.Lock()
+
+
+def _llumnix_http_session():
+    """Process-shared requests.Session with a large connection pool.
+
+    Under high concurrency (multiprocess load gen with many threads/worker), a
+    fresh `requests.post` per call opens a new TCP connection each time →
+    connection churn / ephemeral-port exhaustion / "Max retries exceeded". A
+    pooled keep-alive Session with a big pool reuses connections and sustains
+    high load. One session per process (each MP worker gets its own).
+    """
+    global _HTTP_SESSION
+    if _HTTP_SESSION is None:
+        with _HTTP_SESSION_LOCK:
+            if _HTTP_SESSION is None:
+                from requests.adapters import HTTPAdapter
+                s = requests.Session()
+                adapter = HTTPAdapter(pool_connections=64, pool_maxsize=1024, max_retries=0)
+                s.mount("http://", adapter)
+                s.mount("https://", adapter)
+                _HTTP_SESSION = s
+    return _HTTP_SESSION
+
+
 class LlumnixCompletionsLLM:
     """Minimal /v1/completions client with a ChatOpenAI-compatible surface.
 
@@ -224,7 +250,7 @@ class LlumnixCompletionsLLM:
         }
 
     def stream(self, messages: list):
-        resp = requests.post(
+        resp = _llumnix_http_session().post(
             self.completions_url,
             json=self._payload(messages, stream=True),
             stream=True,
@@ -248,7 +274,7 @@ class LlumnixCompletionsLLM:
             yield SimpleNamespace(content=text)
 
     def invoke(self, messages: list):
-        resp = requests.post(
+        resp = _llumnix_http_session().post(
             self.completions_url,
             json=self._payload(messages, stream=False),
             timeout=self.timeout,

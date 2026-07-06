@@ -29,6 +29,17 @@ This project measures how application-level goodput collapses under load even wh
 - Use the default restart behavior for `rate-sweep` and `poisson-sweep`; only use `--no-server-restart` when the user explicitly wants to reuse a running server.
 - If a custom admission-control server configuration is needed, pass it through `--sglang-start-cmd` so the runner still owns start/stop/fetch.
 
+## Experiment log + independence rule (Llumnix experiments)
+
+Every Llumnix experiment is recorded under [`experiments/`](experiments/) as
+`EXP-NN_*.md` (why / hypothesis / what-to-observe / exact settings / result);
+`experiments/README.md` is the index + methodology. **Ground rule: every
+experimental condition cold-restarts the whole engine** (engine pod + control
+plane) so each condition is fully independent — e.g. **a λ-sweep restarts per λ**.
+This is `--restart-per-condition` (env `RESTART_PER_CONDITION=1` in
+`k8s/runner-job.yaml`); keep it ON for all recorded experiments. See also the
+engine-profile section below and [`k8s/README.md`](k8s/README.md).
+
 ## Engine profiles (`--engine sglang` | `--engine llumnix`)
 
 The runner targets one of two serving backends. Default `sglang` (everything in

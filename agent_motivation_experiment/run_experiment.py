@@ -81,6 +81,99 @@ def _finalize_llumnix_collector(run_dir: Optional[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Multiprocess load generation (see experiments/DEV_multiprocess-load-generator.md)
+# A load_procs>1 parent fans the open-loop load across N worker PROCESSES (spawn,
+# GIL-free) so one runner pod sustains high request rates. Each worker is itself a
+# single-process runner (load_procs=1, no collector, no restart) writing to metric
+# shards; the parent merges shards into the standard metrics.csv/tbt/agent_logs.
+# These are module-level so the spawn context can pickle them by name.
+# ---------------------------------------------------------------------------
+def _mp_load_worker(cfg: dict) -> Optional[dict]:
+    """One load-generator process: build workload+pool, run the real load loop."""
+    import random as _random
+    from workloads import load_workload
+    workload = load_workload(cfg["workload_name"])
+    args = cfg["args"]
+    wcfg = cfg["workload_config"]
+    dataset = workload.load_dataset(args, wcfg)
+    # Disjoint-ish slice per worker so streams differ (reduces exact-duplicate
+    # prefix-cache masking); fall back to the full dataset if too small.
+    if isinstance(dataset, list) and len(dataset) >= cfg["n_shards"]:
+        dataset = dataset[cfg["shard_idx"]::cfg["n_shards"]]
+    rng = _random.Random(cfg["seed"])
+    pool = workload.create_task_pool(dataset, {}, rng, args, wcfg)
+
+    worker = MotivationExperimentRunner(
+        csv_path=cfg["shard_csv"],
+        error_log_path=cfg["shard_err"],
+        agent_log_root_dir=cfg["shard_agent"],
+        tbt_jsonl_path=cfg["shard_tbt"],
+        parallel_calls_path=cfg["shard_parallel"],
+        server_base_url=cfg["server_base_url"],
+        seed=cfg["seed"],
+        log_level="quiet",
+        workload=workload,
+        engine=cfg["engine"],
+        api=cfg["api"],
+        model=cfg["model"],
+        max_tokens=cfg["max_tokens"],
+        enable_server_metrics=False,   # per-request scrape off; parent owns the collector
+        llumnix_cfg=None,              # no server-side collector in workers
+        load_procs=1,                 # workers run the real single-process loop
+        load_threads=cfg["load_threads"],
+        disable_timeouts=cfg["disable_timeouts"],
+    )
+    mode = cfg["mode"]
+    if mode == "rate":
+        return worker._run_with_rate_duration(pool, cfg["rate"], cfg["duration_min"])
+    if mode == "poisson":
+        return worker._run_with_poisson_duration(pool, cfg["rate"], cfg["duration_min"])
+    if mode == "trace":
+        return worker._run_with_trace_duration(pool, cfg["arrival_offsets"], cfg["trace_name"])
+    return None
+
+
+def _merge_load_shards(shard_dir: str, n: int, csv_out: str, tbt_out: str,
+                       agent_dir: str, err_out: str) -> None:
+    """Merge per-worker metric shards into the standard run-dir files."""
+    # metrics.csv: header from the first shard, then all data rows.
+    shard_csvs = [os.path.join(shard_dir, f"metrics.p{k}.csv") for k in range(n)]
+    shard_csvs = [p for p in shard_csvs if os.path.isfile(p)]
+    if shard_csvs:
+        with open(csv_out, "w", encoding="utf-8") as out:
+            for i, p in enumerate(shard_csvs):
+                with open(p, encoding="utf-8") as f:
+                    lines = f.readlines()
+                if not lines:
+                    continue
+                out.writelines(lines if i == 0 else lines[1:])
+    # tbt_events.jsonl: concat
+    with open(tbt_out, "w", encoding="utf-8") as out:
+        for k in range(n):
+            p = os.path.join(shard_dir, f"tbt.p{k}.jsonl")
+            if os.path.isfile(p):
+                with open(p, encoding="utf-8") as f:
+                    shutil.copyfileobj(f, out)
+    # errors.log: append
+    with open(err_out, "a", encoding="utf-8") as out:
+        for k in range(n):
+            p = os.path.join(shard_dir, f"errors.p{k}.log")
+            if os.path.isfile(p):
+                with open(p, encoding="utf-8") as f:
+                    shutil.copyfileobj(f, out)
+    # agent_logs: move each worker's files into the merged dir
+    os.makedirs(agent_dir, exist_ok=True)
+    for k in range(n):
+        d = os.path.join(shard_dir, f"agent_logs_p{k}")
+        if os.path.isdir(d):
+            for fn in os.listdir(d):
+                try:
+                    shutil.move(os.path.join(d, fn), os.path.join(agent_dir, fn))
+                except Exception:
+                    pass
+
+
+# ---------------------------------------------------------------------------
 # GPU node profiles
 # ---------------------------------------------------------------------------
 # Each profile bundles the connection + remote-control settings for one
@@ -271,10 +364,26 @@ class MotivationExperimentRunner:
         max_tokens: Optional[int] = None,
         enable_server_metrics: bool = True,
         llumnix_cfg: Optional[dict] = None,
+        load_procs: int = 1,
+        load_threads: int = 1024,
+        dataset=None,
+        mp_args=None,
+        mp_workload_config=None,
     ):
         self.csv_path = csv_path
         self.error_log_path = error_log_path
         self.server_base_url = server_base_url
+        # Multiprocess load generation. The parent (load_procs>1) fans the open-loop
+        # load across worker processes; each worker is itself a runner with
+        # load_procs=1 (so it runs the real single-process loop). load_threads caps
+        # per-process in-flight requests. dataset is kept so MP workers can rebuild
+        # per-worker task pools without the parent re-plumbing it.
+        self.load_procs = max(1, int(load_procs))
+        self.load_threads = int(load_threads)
+        self.dataset = dataset
+        # Kept only so a load_procs>1 parent can build per-worker task pools.
+        self._mp_args = mp_args
+        self._mp_workload_config = mp_workload_config
         # Engine wire protocol + model override, threaded into RunContext ->
         # make_llm(api=, model=, max_tokens=).
         self.engine = engine
@@ -597,11 +706,14 @@ class MotivationExperimentRunner:
         Uses the selected workload's task pool to generate tasks on-the-fly.
         No concurrency cap — all submitted tasks run in parallel.
         """
+        if self.load_procs > 1:
+            return self._run_multiprocess("rate", rate=rate_per_min,
+                                          duration_min=duration_min)
         self._server_terminated.clear()
 
         interval = 60.0 / rate_per_min
         duration_sec = duration_min * 60.0
-        max_workers = 1024
+        max_workers = self.load_threads
 
         stats = {
             "submitted": 0, "completed": 0,
@@ -674,6 +786,7 @@ class MotivationExperimentRunner:
             MetricsTracker.shutdown_all_writers()
 
         self._print_summary(stats, mode="rate", level=rate_per_min)
+        return stats
 
     def _run_with_poisson_duration(
         self,
@@ -685,10 +798,13 @@ class MotivationExperimentRunner:
 
         Inter-arrival times are exponentially distributed with mean 1/λ seconds.
         """
+        if self.load_procs > 1:
+            return self._run_multiprocess("poisson", rate=lam,
+                                          duration_min=duration_min)
         self._server_terminated.clear()
 
         duration_sec = duration_min * 60.0
-        max_workers = 1024
+        max_workers = self.load_threads
         rng = random.Random(self.seed)  # For reproducible Poisson arrivals
 
         stats = {
@@ -761,6 +877,7 @@ class MotivationExperimentRunner:
             MetricsTracker.shutdown_all_writers()
 
         self._print_summary(stats, mode="poisson", level=lam)
+        return stats
 
     def _run_with_trace_duration(
         self,
@@ -782,9 +899,12 @@ class MotivationExperimentRunner:
         ends once every arrival has been submitted; in-flight jobs then
         drain (executor shutdown) after `server_terminated` is signaled.
         """
+        if self.load_procs > 1:
+            return self._run_multiprocess("trace", arrival_offsets=arrival_offsets,
+                                          trace_name=trace_name)
         self._server_terminated.clear()
 
-        max_workers = 1024
+        max_workers = self.load_threads
         n = len(arrival_offsets)
 
         stats = {
@@ -854,6 +974,77 @@ class MotivationExperimentRunner:
             MetricsTracker.shutdown_all_writers()
 
         self._print_summary(stats, mode="trace", level=trace_name)
+        return stats
+
+    def _run_multiprocess(self, mode, rate=None, duration_min=None,
+                          arrival_offsets=None, trace_name=None):
+        """Parent path for load_procs>1: fan the load across N worker processes.
+
+        Splits the offered load (rate/N, λ/N, or the trace arrivals round-robin),
+        runs each share in its own process via the spawn context, then merges the
+        per-worker metric shards into this run's standard files. The parent keeps
+        owning the server-side collector + (already-done) restart, so the
+        per-condition independence rule is unaffected.
+        """
+        import multiprocessing as _mp
+        n = self.load_procs
+        run_dir = os.path.dirname(self.csv_path)
+        shard_dir = os.path.join(run_dir, "shards")
+        os.makedirs(shard_dir, exist_ok=True)
+
+        cfgs = []
+        for k in range(n):
+            cfgs.append({
+                "mode": mode,
+                "shard_idx": k,
+                "n_shards": n,
+                "shard_csv": os.path.join(shard_dir, f"metrics.p{k}.csv"),
+                "shard_err": os.path.join(shard_dir, f"errors.p{k}.log"),
+                "shard_agent": os.path.join(shard_dir, f"agent_logs_p{k}"),
+                "shard_tbt": os.path.join(shard_dir, f"tbt.p{k}.jsonl"),
+                "shard_parallel": os.path.join(shard_dir, f"parallel.p{k}.csv"),
+                "server_base_url": self.server_base_url,
+                "seed": self.seed + k,
+                "engine": self.engine,
+                "api": self.api,
+                "model": self.model,
+                "max_tokens": self.max_tokens,
+                "load_threads": self.load_threads,
+                "disable_timeouts": self.disable_timeouts,
+                "workload_name": getattr(self._mp_args, "workload", None),
+                "args": self._mp_args,
+                "workload_config": self._mp_workload_config,
+                "rate": (rate / n) if rate is not None else None,     # split the offered rate
+                "duration_min": duration_min,
+                "arrival_offsets": (list(arrival_offsets[k::n])
+                                    if arrival_offsets is not None else None),
+                "trace_name": trace_name,
+            })
+
+        level = rate if rate is not None else trace_name
+        self._console_write(
+            f"[MP] {mode}: launching {n} load workers "
+            f"(per-worker {'rate' if rate is not None else 'trace-share'}"
+            f"{'=' + format(rate / n, '.3g') if rate is not None else ''}, "
+            f"{self.load_threads} threads each)"
+        )
+        ctx = _mp.get_context("spawn")
+        with ctx.Pool(processes=n) as pool:
+            results = pool.map(_mp_load_worker, cfgs)
+
+        _merge_load_shards(shard_dir, n, self.csv_path, self.tbt_jsonl_path,
+                           self.agent_log_dir, self.error_log_path)
+
+        agg = {"submitted": 0, "completed": 0, "success": 0, "failed": 0,
+               "error": 0, "job_timeout": 0, "server_terminated": 0}
+        for r in results:
+            if not r:
+                continue
+            for key in agg:
+                agg[key] += r.get(key, 0)
+        self._console_write(f"[MP] {mode}: merged {n} shards -> {self.csv_path}")
+        self._print_summary(agg, mode=mode, level=level)
+        return agg
 
     @staticmethod
     def _update_stats(stats: dict, result: dict):
@@ -1001,6 +1192,8 @@ def make_run_config(args, workload, workload_config: dict, **extra) -> dict:
         "api": args.api,
         "model": args.model,
         "max_tokens": args.max_tokens,
+        "load_procs": args.load_procs,
+        "load_threads": args.load_threads,
         "llumnix_metrics": (
             {
                 "host": args.metrics_host,
@@ -1196,6 +1389,21 @@ def main():
     parser.add_argument(
         "--max-tokens", type=int, default=None,
         help="Output token cap for the completions API (vLLM defaults to 16).",
+    )
+    # Multiprocess load generation: fan the open-loop load across N OS processes
+    # (each its own interpreter -> bypasses the GIL) so one runner pod can sustain
+    # high request rates. The parent stays the single coordinator (restart /
+    # collector), so the "restart per condition" independence rule is unaffected.
+    parser.add_argument(
+        "--load-procs", type=int, default=1,
+        help="Number of load-generator worker processes (default 1 = single "
+             "process, legacy behavior). >1 fans the open-loop rate/poisson/trace "
+             "load across processes and merges per-process metric shards.",
+    )
+    parser.add_argument(
+        "--load-threads", type=int, default=1024,
+        help="Per-process ThreadPool cap for in-flight requests. With --load-procs "
+             ">1 defaults to 256 per worker unless set explicitly.",
     )
     # Llumnix server-side metrics collector (per-run time series).
     parser.add_argument("--metrics-interval", type=float, default=1.0,
@@ -1506,6 +1714,11 @@ def main():
 
     args = parser.parse_args()
 
+    # Multiprocess load: default to 256 threads per worker (not 1024) so N workers
+    # don't spawn N*1024 threads. Explicit --load-threads still wins.
+    if args.load_procs > 1 and args.load_threads == 1024:
+        args.load_threads = 256
+
     # ---- Resolve GPU node profile ----
     # --node provides defaults; explicit flags still override.
     if args.node:
@@ -1692,6 +1905,11 @@ def main():
             max_tokens=args.max_tokens,
             enable_server_metrics=(args.engine != "llumnix"),
             llumnix_cfg=llumnix_cfg,
+            load_procs=args.load_procs,
+            load_threads=args.load_threads,
+            dataset=dataset,
+            mp_args=args,
+            mp_workload_config=workload_config,
         )
         runner.run_baseline(tasks)
         # Flush async JSONL writers (tbt + transcript) so a recorded
@@ -1768,6 +1986,11 @@ def main():
                 max_tokens=args.max_tokens,
                 enable_server_metrics=(args.engine != "llumnix"),
                 llumnix_cfg=llumnix_cfg,
+                load_procs=args.load_procs,
+                load_threads=args.load_threads,
+                dataset=dataset,
+                mp_args=args,
+                mp_workload_config=workload_config,
             )
             runner._run_with_concurrency(tasks, concurrency=level)
             finish_server_session(
@@ -1854,6 +2077,11 @@ def main():
                 max_tokens=args.max_tokens,
                 enable_server_metrics=(args.engine != "llumnix"),
                 llumnix_cfg=llumnix_cfg,
+                load_procs=args.load_procs,
+                load_threads=args.load_threads,
+                dataset=dataset,
+                mp_args=args,
+                mp_workload_config=workload_config,
             )
             runner.run_rate_sweep_duration(
                 task_pool=task_pool,
@@ -1946,6 +2174,11 @@ def main():
                 max_tokens=args.max_tokens,
                 enable_server_metrics=(args.engine != "llumnix"),
                 llumnix_cfg=llumnix_cfg,
+                load_procs=args.load_procs,
+                load_threads=args.load_threads,
+                dataset=dataset,
+                mp_args=args,
+                mp_workload_config=workload_config,
             )
             runner.run_poisson_sweep_duration(
                 task_pool=task_pool,
@@ -2034,6 +2267,11 @@ def main():
             max_tokens=args.max_tokens,
             enable_server_metrics=(args.engine != "llumnix"),
             llumnix_cfg=llumnix_cfg,
+            load_procs=args.load_procs,
+            load_threads=args.load_threads,
+            dataset=dataset,
+            mp_args=args,
+            mp_workload_config=workload_config,
         )
         runner._run_with_trace_duration(task_pool, arrival_offsets, trace_name=trace_name)
         finish_server_session(
@@ -2108,6 +2346,11 @@ def main():
                 max_tokens=args.max_tokens,
                 enable_server_metrics=(args.engine != "llumnix"),
                 llumnix_cfg=llumnix_cfg,
+                load_procs=args.load_procs,
+                load_threads=args.load_threads,
+                dataset=dataset,
+                mp_args=args,
+                mp_workload_config=workload_config,
             )
             runner._run_with_poisson_duration(task_pool, args.lambda_val, args.duration_min)
             finish_server_session(
@@ -2171,6 +2414,11 @@ def main():
                 max_tokens=args.max_tokens,
                 enable_server_metrics=(args.engine != "llumnix"),
                 llumnix_cfg=llumnix_cfg,
+                load_procs=args.load_procs,
+                load_threads=args.load_threads,
+                dataset=dataset,
+                mp_args=args,
+                mp_workload_config=workload_config,
             )
             runner._run_with_rate_duration(task_pool, args.rpm, args.duration_min)
             finish_server_session(
@@ -2236,6 +2484,11 @@ def main():
                 max_tokens=args.max_tokens,
                 enable_server_metrics=(args.engine != "llumnix"),
                 llumnix_cfg=llumnix_cfg,
+                load_procs=args.load_procs,
+                load_threads=args.load_threads,
+                dataset=dataset,
+                mp_args=args,
+                mp_workload_config=workload_config,
             )
             runner._run_with_concurrency(tasks, concurrency=args.concurrency)
             finish_server_session(

@@ -43,8 +43,12 @@ spec:
               value: "sharegpt_request_level_poisson"
             - name: MODE
               value: "poisson-sweep"
-            - name: LAMBDA_LIST
+            - name: LAMBDA_LIST                 # used when MODE=poisson-sweep (req/s)
               value: "2,8"
+            - name: RATE_LIST                   # used when MODE=rate-sweep (rpm)
+              value: "300,600,1200"
+            - name: LOAD_PROCS                  # load-generator worker processes (GIL bypass)
+              value: "1"
             - name: DURATION_MIN
               value: "2"
             - name: NUM_CONV
@@ -75,12 +79,19 @@ spec:
                 && echo "[runner] venv deps ok" || { echo "[runner] venv missing deps"; exit 1; }
               RESTART_FLAG=""
               [ "${RESTART_PER_CONDITION}" = "1" ] && RESTART_FLAG="--restart-per-condition"
-              echo "[runner] starting: workload=${WORKLOAD} mode=${MODE} lambdas=${LAMBDA_LIST}"
+              # mode-appropriate rate flag: rate-sweep uses rpm, else poisson uses req/s
+              if [ "${MODE}" = "rate-sweep" ]; then
+                RATE_FLAG="--rate-list ${RATE_LIST}"
+              else
+                RATE_FLAG="--lambda-list ${LAMBDA_LIST}"
+              fi
+              echo "[runner] starting: workload=${WORKLOAD} mode=${MODE} ${RATE_FLAG} load-procs=${LOAD_PROCS}"
               "$PYBIN" run_experiment.py \
                 --engine llumnix --in-cluster \
                 --workload "${WORKLOAD}" \
                 --mode "${MODE}" \
-                --lambda-list "${LAMBDA_LIST}" \
+                ${RATE_FLAG} \
+                --load-procs "${LOAD_PROCS}" \
                 --duration-min "${DURATION_MIN}" \
                 --workload-config "{\"num_conversations\": ${NUM_CONV}}" \
                 --output-dir /work/results \
