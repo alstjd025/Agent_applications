@@ -82,6 +82,6 @@ Required for the client to sustain high load.
 - [x] pooled HTTP session fix (connection churn under load)
 - [x] scale test: MP drives system to saturation (gateway_current=1024); bottleneck
       is the gateway control plane, GPU fleet ~idle with short requests
-- [ ] EXP-02 rate-sweep (5→30 req/s, MP procs=8, restart-per-condition) — RUNNING
+- [x] EXP-02 rate-sweep (5→30 req/s, MP procs=8, restart-per-condition) — DONE: clean congestion-collapse curve (knee ~8-10 req/s, goodput 100%→25%); bottleneck = gateway control plane (gw_current→1357), GPU fleet idle (KV 2-4%). See EXP-02.
 - [ ] follow-up for true GPU-KV overload: heavier/long-output requests or raise the
       gateway concurrency cap (config, not code)

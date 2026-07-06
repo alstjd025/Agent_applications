@@ -41,9 +41,46 @@ state — no carryover.
 - Any migration (`rescheduling_total`, migration_events.log) — expected ~none
   (dispatch balances; KV stays low).
 
-## Result
-_(filled in after the run)_
+## Result (2026-07-06, MP load-procs=8, restart per condition)
 
-Run dirs: `results/*exp02_ratesweep_rate_*/`.
-Analysis: `parse_request_summary.py` (per run) + `summarize_lambda_sweep.py`
-(cross-rate) + `parse_llumnix_metrics.py` (server-side).
+Run dirs: `results/*_exp02_ratesweep_rpm_{300,600,900,1200,1500,1800}/`.
+Cross-rate summary: `results/aggregate_analysis/exp02_ratesweep_summary.csv`.
+
+| req/s | offered | ok% | ok tput | out tok/s | e2e p50 | e2e p99 | TTFT p50 | gw_current | gw_pending | eng_run(Σ4) | KV% |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 5  | 1200 | **100** | 5.0 | 1971 | 1.4s  | 24.4s | 0.03s | 88   | 56  | 75  | 2.0 |
+| 10 | 2400 | 89  | **8.8** | 3247 | 24.6s | 81.9s | 0.76s | 295  | 160 | 144 | 2.2 |
+| 15 | 3600 | 53  | 7.7 | 2055 | 20.4s | 83.9s | 0.95s | 841  | 176 | 175 | 2.2 |
+| 20 | 4800 | 35  | 6.1 | 1425 | 13.6s | 57.0s | 1.01s | 941  | 304 | 157 | 3.4 |
+| 25 | 6000 | 28  | 4.4 | 1102 | 16.3s | 56.4s | 1.39s | 1084 | 349 | 150 | 2.2 |
+| 30 | 7200 | 25  | 6.8 | 1794 | 18.4s | 48.0s | 1.87s | 1357 | 517 | 188 | 4.1 |
+
+**Findings**
+1. **Saturation knee ≈ 8–10 req/s.** Successful throughput peaks at ~8.8 req/s
+   (offered 10) then **declines** (7.7 → 6.1 → 4.4) as offered rate rises —
+   textbook **congestion collapse**: past saturation the system does more work
+   that ends up failing, so goodput goes *down*.
+2. **Goodput collapses** monotonically: 100 → 89 → 53 → 35 → 28 → 25 %.
+   TTFT p50 degrades 0.03s → 1.9s (gateway queueing).
+3. **The bottleneck is the gateway control plane, NOT the GPU fleet.**
+   `gateway_current` climbs 88 → 1357 and `gateway_pending` 56 → 517 (the gateway
+   saturates around its ~1024 concurrency budget), while the **GPU engines stay
+   idle**: total running ~75–188 across 4 instances and **KV cache only 2–4 %** at
+   every rate. In full-mode the gateway does a per-request `scheduler:8088/schedule`
+   round-trip, which serializes throughput long before the GPUs are stressed.
+4. **The MP load generator was necessary and sufficient** to reach these rates: a
+   single process caps ~17 req/s (client-bound); with `--load-procs 8` the client
+   drove up to 120 offered req/s and saturated the serving system. Each rate ran
+   from a **cold engine restart**, so the collapse is not carryover.
+
+**Caveat / what this does NOT show**: true **GPU-inference** overload (high KV,
+preemptions). Short ShareGPT outputs keep KV at ~2–4 % even when the gateway is
+saturated. To stress the GPU fleet itself you must either send **long-output**
+requests (so 1024 concurrent gateway requests translate into large KV) or raise
+the gateway concurrency budget (a gateway config flag, not code). See EXP-03/next.
+
+## Next
+- EXP-03: dispatch-policy comparison (load-balance vs round-robin vs flood; migration
+  ON vs OFF) at rates around the knee — does policy/migration move the goodput curve?
+- To reach GPU-KV overload: a long-output workload variant or a larger gateway
+  concurrency budget.
