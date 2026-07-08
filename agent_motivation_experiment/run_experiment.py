@@ -121,6 +121,8 @@ def _mp_load_worker(cfg: dict) -> Optional[dict]:
         llumnix_cfg=None,              # no server-side collector in workers
         load_procs=1,                 # workers run the real single-process loop
         load_threads=cfg["load_threads"],
+        warmup_rpm=cfg.get("warmup_rpm", 0.0),
+        warmup_sec=cfg.get("warmup_sec", 60.0),
         disable_timeouts=cfg["disable_timeouts"],
     )
     mode = cfg["mode"]
@@ -366,6 +368,8 @@ class MotivationExperimentRunner:
         llumnix_cfg: Optional[dict] = None,
         load_procs: int = 1,
         load_threads: int = 1024,
+        warmup_rpm: float = 0.0,
+        warmup_sec: float = 60.0,
         dataset=None,
         mp_args=None,
         mp_workload_config=None,
@@ -380,6 +384,13 @@ class MotivationExperimentRunner:
         # per-worker task pools without the parent re-plumbing it.
         self.load_procs = max(1, int(load_procs))
         self.load_threads = int(load_threads)
+        # Cold-start warmup ramp (rate mode): submit at warmup_rpm for warmup_sec
+        # BEFORE the measured phase, so the measured phase starts from a balanced,
+        # loaded fleet with live CMS metrics (prevents the empty-fleet fill-up
+        # "thundering herd" pathology). warmup_rpm==0 disables. Analysis must
+        # anchor at warmup end (run_config records both values).
+        self.warmup_rpm = float(warmup_rpm or 0.0)
+        self.warmup_sec = float(warmup_sec or 0.0)
         self.dataset = dataset
         # Kept only so a load_procs>1 parent can build per-worker task pools.
         self._mp_args = mp_args
@@ -713,6 +724,12 @@ class MotivationExperimentRunner:
 
         interval = 60.0 / rate_per_min
         duration_sec = duration_min * 60.0
+        # Optional cold-start warmup phase: submit at warmup_rpm for the first
+        # warmup_sec, THEN the measured phase at rate_per_min for duration_sec.
+        # Total wall time = warmup_sec + duration_sec.
+        warmup_sec = self.warmup_sec if self.warmup_rpm > 0 else 0.0
+        warmup_interval = (60.0 / self.warmup_rpm) if self.warmup_rpm > 0 else interval
+        total_sec = warmup_sec + duration_sec
         max_workers = self.load_threads
 
         stats = {
@@ -721,7 +738,9 @@ class MotivationExperimentRunner:
             "job_timeout": 0, "server_terminated": 0,
         }
 
-        self._pbar = tqdm(total=0, desc=f"RPM={rate_per_min:.0f}", unit="job",
+        desc = f"RPM={rate_per_min:.0f}" + (
+            f" (warmup {self.warmup_rpm:.0f}rpm x{warmup_sec:.0f}s)" if warmup_sec else "")
+        self._pbar = tqdm(total=0, desc=desc, unit="job",
                           bar_format="{desc}: {n} submitted, {postfix}")
 
         pending = set()
@@ -736,19 +755,20 @@ class MotivationExperimentRunner:
 
                     # Check duration — signal BEFORE breaking so in-flight
                     # jobs see the event while the executor is still alive
-                    if elapsed >= duration_sec:
+                    if elapsed >= total_sec:
                         self.signal_server_terminated()
                         break
 
-                    # Submit tasks at the specified rate
-                    while now >= next_submit_time and (now - experiment_start) < duration_sec:
+                    # Submit tasks at the phase-appropriate rate (warmup first)
+                    while now >= next_submit_time and (now - experiment_start) < total_sec:
                         task = task_pool.next_task()
                         if task is None:
                             break
                         fut = ex.submit(self.run_single_job, task)
                         pending.add(fut)
                         stats["submitted"] += 1
-                        next_submit_time += interval
+                        in_warmup = (next_submit_time - experiment_start) < warmup_sec
+                        next_submit_time += warmup_interval if in_warmup else interval
                         now = time.monotonic()
 
                     if pending:
@@ -775,7 +795,7 @@ class MotivationExperimentRunner:
                     if not pending and now >= next_submit_time:
                         # Wait for next submit time
                         sleep_s = next_submit_time - time.monotonic()
-                        if sleep_s > 0 and (time.monotonic() - experiment_start) < duration_sec:
+                        if sleep_s > 0 and (time.monotonic() - experiment_start) < total_sec:
                             time.sleep(min(sleep_s, 1.0))
         finally:
             # Wait briefly for in-flight jobs to finish
@@ -1015,6 +1035,8 @@ class MotivationExperimentRunner:
                 "args": self._mp_args,
                 "workload_config": self._mp_workload_config,
                 "rate": (rate / n) if rate is not None else None,     # split the offered rate
+                "warmup_rpm": self.warmup_rpm / n,                    # split the warmup rate too
+                "warmup_sec": self.warmup_sec,
                 "duration_min": duration_min,
                 "arrival_offsets": (list(arrival_offsets[k::n])
                                     if arrival_offsets is not None else None),
@@ -1194,6 +1216,8 @@ def make_run_config(args, workload, workload_config: dict, **extra) -> dict:
         "max_tokens": args.max_tokens,
         "load_procs": args.load_procs,
         "load_threads": args.load_threads,
+        "warmup_rpm": args.warmup_rpm,
+        "warmup_sec": args.warmup_sec,
         "llumnix_metrics": (
             {
                 "host": args.metrics_host,
@@ -1401,9 +1425,20 @@ def main():
              "load across processes and merges per-process metric shards.",
     )
     parser.add_argument(
-        "--load-threads", type=int, default=1024,
-        help="Per-process ThreadPool cap for in-flight requests. With --load-procs "
-             ">1 defaults to 256 per worker unless set explicitly.",
+        "--warmup-rpm", type=float, default=0.0,
+        help="Cold-start warmup: submit at this rate (req/min) for --warmup-sec "
+             "BEFORE the measured phase (rate mode). 0 disables. Prevents the "
+             "empty-fleet fill-up thundering herd; analysis anchors after warmup.",
+    )
+    parser.add_argument(
+        "--warmup-sec", type=float, default=60.0,
+        help="Warmup phase length in seconds (used when --warmup-rpm > 0).",
+    )
+    parser.add_argument(
+        "--load-threads", type=int, default=None,
+        help="Per-process ThreadPool cap for in-flight requests. Default: 1024 "
+             "(single process) or 256 per worker (--load-procs >1). An explicit "
+             "value always wins (None sentinel distinguishes 'unset' from 1024).",
     )
     # Llumnix server-side metrics collector (per-run time series).
     parser.add_argument("--metrics-interval", type=float, default=1.0,
@@ -1715,9 +1750,10 @@ def main():
     args = parser.parse_args()
 
     # Multiprocess load: default to 256 threads per worker (not 1024) so N workers
-    # don't spawn N*1024 threads. Explicit --load-threads still wins.
-    if args.load_procs > 1 and args.load_threads == 1024:
-        args.load_threads = 256
+    # don't spawn N*1024 threads. Explicit --load-threads always wins (default is
+    # a None sentinel, so an explicit 1024 is honored too).
+    if args.load_threads is None:
+        args.load_threads = 1024 if args.load_procs <= 1 else 256
 
     # ---- Resolve GPU node profile ----
     # --node provides defaults; explicit flags still override.
@@ -1903,6 +1939,8 @@ def main():
             api=args.api,
             model=args.model,
             max_tokens=args.max_tokens,
+            warmup_rpm=args.warmup_rpm,
+            warmup_sec=args.warmup_sec,
             enable_server_metrics=(args.engine != "llumnix"),
             llumnix_cfg=llumnix_cfg,
             load_procs=args.load_procs,
@@ -1984,6 +2022,8 @@ def main():
                 api=args.api,
                 model=args.model,
                 max_tokens=args.max_tokens,
+                warmup_rpm=args.warmup_rpm,
+                warmup_sec=args.warmup_sec,
                 enable_server_metrics=(args.engine != "llumnix"),
                 llumnix_cfg=llumnix_cfg,
                 load_procs=args.load_procs,
@@ -2075,6 +2115,8 @@ def main():
                 api=args.api,
                 model=args.model,
                 max_tokens=args.max_tokens,
+                warmup_rpm=args.warmup_rpm,
+                warmup_sec=args.warmup_sec,
                 enable_server_metrics=(args.engine != "llumnix"),
                 llumnix_cfg=llumnix_cfg,
                 load_procs=args.load_procs,
@@ -2172,6 +2214,8 @@ def main():
                 api=args.api,
                 model=args.model,
                 max_tokens=args.max_tokens,
+                warmup_rpm=args.warmup_rpm,
+                warmup_sec=args.warmup_sec,
                 enable_server_metrics=(args.engine != "llumnix"),
                 llumnix_cfg=llumnix_cfg,
                 load_procs=args.load_procs,
@@ -2265,6 +2309,8 @@ def main():
             api=args.api,
             model=args.model,
             max_tokens=args.max_tokens,
+            warmup_rpm=args.warmup_rpm,
+            warmup_sec=args.warmup_sec,
             enable_server_metrics=(args.engine != "llumnix"),
             llumnix_cfg=llumnix_cfg,
             load_procs=args.load_procs,
@@ -2344,6 +2390,8 @@ def main():
                 api=args.api,
                 model=args.model,
                 max_tokens=args.max_tokens,
+                warmup_rpm=args.warmup_rpm,
+                warmup_sec=args.warmup_sec,
                 enable_server_metrics=(args.engine != "llumnix"),
                 llumnix_cfg=llumnix_cfg,
                 load_procs=args.load_procs,
@@ -2412,6 +2460,8 @@ def main():
                 api=args.api,
                 model=args.model,
                 max_tokens=args.max_tokens,
+                warmup_rpm=args.warmup_rpm,
+                warmup_sec=args.warmup_sec,
                 enable_server_metrics=(args.engine != "llumnix"),
                 llumnix_cfg=llumnix_cfg,
                 load_procs=args.load_procs,
@@ -2482,6 +2532,8 @@ def main():
                 api=args.api,
                 model=args.model,
                 max_tokens=args.max_tokens,
+                warmup_rpm=args.warmup_rpm,
+                warmup_sec=args.warmup_sec,
                 enable_server_metrics=(args.engine != "llumnix"),
                 llumnix_cfg=llumnix_cfg,
                 load_procs=args.load_procs,
