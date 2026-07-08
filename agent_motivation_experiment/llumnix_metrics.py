@@ -59,8 +59,13 @@ ENGINE_METRICS = {
     "vllm:inter_token_latency_seconds_sum",
     "vllm:inter_token_latency_seconds_count",
     "vllm:request_queue_time_seconds_sum",
+    "vllm:request_queue_time_seconds_count",     # +count -> avg queueing time
     "vllm:request_prefill_time_seconds_sum",
+    "vllm:request_prefill_time_seconds_count",
     "vllm:request_decode_time_seconds_sum",
+    "vllm:request_decode_time_seconds_count",
+    "vllm:prefix_cache_queries_total",           # KV/prefix cache hit rate =
+    "vllm:prefix_cache_hits_total",              #   hits/queries
 }
 
 SCHEDULER_METRICS = {
@@ -70,6 +75,17 @@ SCHEDULER_METRICS = {
     "scheduler_rescheduling_failed_total",
     "scheduler_cms_refresh_metadata_duration_milliseconds_sum",
     "scheduler_cms_refresh_status_duration_milliseconds_sum",
+    # per-instance CMS phase split (exposed on the SCHEDULER endpoint, keyed by
+    # instance_id) -> prefill vs decode request counts, projected KV load signal.
+    "instance_cms_running_requests",
+    "instance_cms_waiting_requests",
+    "instance_cms_decode_batch_size",
+    "instance_cms_all_prefills_tokens_num",
+    "instance_cms_all_decodes_tokens_num",
+    "instance_cms_kv_cache_usage_ratio_projected",
+    "instance_cms_inflight_dispatch_prefill_requests",
+    "instance_cms_inflight_dispatch_decode_requests",
+    "instance_cms_scheduler_waiting_to_decode_requests",
 }
 
 GATEWAY_METRICS = {

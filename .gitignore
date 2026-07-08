@@ -4,3 +4,8 @@ __pycache__/
 *.log
 *.csv
 sglang/
+
+# Experiment run outputs (large: metrics/server_metrics jsonl, agent_logs, plots).
+# Cross-run figures live under results/aggregate_analysis/ but the whole tree is
+# multi-GB, so it is not version-controlled.
+results/
