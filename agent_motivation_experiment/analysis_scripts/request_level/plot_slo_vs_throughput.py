@@ -87,7 +87,11 @@ def condition_stats(run_dir):
     dur = r["end_time"].max() - t0
 
     bl = lambda c: r[c].fillna(False).astype(bool) if c in r.columns else pd.Series(False, index=r.index)
-    cls = r[~(bl("is_error") | bl("is_timeout") | bl("is_server_terminated"))].copy()
+    rejected = bl("is_rejected")
+    # admission rejects are NOT run-boundary noise: keep them as a separate
+    # category (they count as violations in the offered-goodput view)
+    cls = r[~(bl("is_error") | bl("is_timeout") | bl("is_server_terminated")) & ~rejected].copy()
+    rej = r[rejected].copy()
     tbt = pd.to_numeric(cls["tbt_mean_ms"], errors="coerce")
     cls["violate"] = (pd.to_numeric(cls["first_token_latency"], errors="coerce") > TTFT_SLO_S) | (tbt > TBT_SLO_MS)
 
@@ -95,6 +99,11 @@ def condition_stats(run_dir):
     full = 100.0 * (~cls["violate"]).mean() if len(cls) else np.nan
     sw = cls[(cls["rel"] >= STEADY_LO) & (cls["rel"] < hi)]
     steady = 100.0 * (~sw["violate"]).mean() if len(sw) else np.nan
+    # offered view: rejected requests are violations (they got no service)
+    rej_w = rej[(rej["rel"] >= STEADY_LO) & (rej["rel"] < hi)]
+    n_off = len(sw) + len(rej_w)
+    steady_offered = 100.0 * (~sw["violate"]).sum() / n_off if n_off else np.nan
+    reject_pct = 100.0 * len(rej_w) / n_off if n_off else 0.0
 
     ok = r[r["success"].astype(bool)].copy()
     ok["rel_end"] = ok["end_time"] - t0
@@ -134,7 +143,8 @@ def condition_stats(run_dir):
         queued = _steady_stats(gt[:n], np.clip(gv[:n] - run_v[:n], 0, None), STEADY_LO, srv_hi)
     else:
         queued = (np.nan,) * 3
-    return dict(full=full, steady=steady, tokps=tokps, kv=kv, running=running, queued=queued)
+    return dict(full=full, steady=steady, steady_offered=steady_offered,
+                reject_pct=reject_pct, tokps=tokps, kv=kv, running=running, queued=queued)
 
 
 def _tput_axis(ax, x, tok):
@@ -174,7 +184,10 @@ def main():
         rows.append(s)
         print(f"{s['rate']:6.2f} {args.rate_unit}: attain_steady={s['steady']:5.1f}% "
               f"full={s['full']:5.1f}%  tok/s={s['tokps']:7.0f}  KVμ={s['kv'][0]:5.1f}%  "
-              f"runμ={s['running'][0]:6.0f} queμ={s['queued'][0]:6.0f}")
+              f"runμ={s['running'][0]:6.0f} queμ={s['queued'][0]:6.0f}"
+              + (f"  rej={s['reject_pct']:4.1f}% offered={s['steady_offered']:5.1f}%"
+                 if s["reject_pct"] > 0 else ""))
+    any_rejects = any(r["reject_pct"] > 0 for r in rows)
     x = [r["rate"] for r in rows]
     tok = [r["tokps"] for r in rows]
     xlabel = f"Offered rate ({args.rate_unit})"
@@ -185,6 +198,11 @@ def main():
         # 1) steady-only
         fig, ax = plt.subplots(figsize=(7.0, 4.4))
         ax.plot(x, [r["steady"] for r in rows], "o-", color=BLUE, label="SLO attainment")
+        if any_rejects:
+            ax.plot(x, [r["steady_offered"] for r in rows], "D-", color="#9467bd",
+                    label="SLO attainment (offered: rejects = violations)")
+            ax.plot(x, [r["reject_pct"] for r in rows], "x--", color="#ff7f0e",
+                    label="Rejection rate")
         ax.set_xlabel(xlabel); ax.set_xticks(x)
         ax.set_ylabel("SLO attainment (%)", color=BLUE); ax.set_ylim(-3, 105)
         ax.tick_params(axis="y", colors=BLUE); ax.grid(axis="y", ls=":", lw=0.6, alpha=0.6)

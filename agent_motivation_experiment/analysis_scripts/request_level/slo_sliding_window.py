@@ -49,13 +49,18 @@ def classify(run_dir):
     r["rel"] = r["start_time"] - t0
 
     boolcol = lambda c: r[c].fillna(False).astype(bool) if c in r.columns else pd.Series(False, index=r.index)
-    excluded_mask = boolcol("is_error") | boolcol("is_timeout") | boolcol("is_server_terminated")
+    rejected_mask = boolcol("is_rejected")
+    # admission rejects (is_rejected also sets is_error per the workload
+    # invariant) are their own category — counted as violations in the
+    # offered-goodput view, never silently excluded as errors
+    excluded_mask = (boolcol("is_error") | boolcol("is_timeout") | boolcol("is_server_terminated")) & ~rejected_mask
     excl_detail = {
-        "error": int(boolcol("is_error").sum()),
+        "error": int((boolcol("is_error") & ~rejected_mask).sum()),
         "timeout": int(boolcol("is_timeout").sum()),
         "server_terminated": int((boolcol("is_server_terminated") & ~boolcol("is_error") & ~boolcol("is_timeout")).sum()),
     }
-    cls = r[~excluded_mask].copy()
+    n_rejected = int(rejected_mask.sum())
+    cls = r[~excluded_mask & ~rejected_mask].copy()
 
     ttft_viol = cls["first_token_latency"] > TTFT_SLO_S
     tbt = pd.to_numeric(cls["tbt_mean_ms"], errors="coerce")
@@ -66,7 +71,7 @@ def classify(run_dir):
         "tbt_only": int((~ttft_viol & tbt_viol).sum()),
         "both": int((ttft_viol & tbt_viol).sum()),
     }
-    return cls, excluded_mask.sum(), excl_detail, detail, r["rel"].max()
+    return cls, excluded_mask.sum(), excl_detail, detail, r["rel"].max(), n_rejected
 
 
 def windows(cls, dur):
@@ -94,7 +99,7 @@ def main():
     summary, per_win = [], {}
     for d in dirs:
         rpm = int(d.split("rpm_")[1]); reqps = rpm / 60.0
-        cls, n_excl, excl_detail, viol_detail, dur = classify(d)
+        cls, n_excl, excl_detail, viol_detail, dur, n_rej = classify(d)
         w = windows(cls, dur)
         per_win[rpm] = w
         w.to_csv(os.path.join(args.out_dir, f"slo_windows_rpm_{rpm}.csv"), index=False)
@@ -102,6 +107,8 @@ def main():
         summary.append(dict(offered_reqps=reqps, classified=len(cls),
                             attain=n_at, violate=n_vi,
                             attain_pct=100 * n_at / max(1, len(cls)),
+                            rejected=n_rej,
+                            attain_pct_offered=100 * n_at / max(1, len(cls) + n_rej),
                             excluded=int(n_excl), **{f"excl_{k}": v for k, v in excl_detail.items()},
                             **{f"viol_{k}": v for k, v in viol_detail.items()}))
     sm = pd.DataFrame(summary)

@@ -211,6 +211,32 @@ def _llumnix_http_session():
     return _HTTP_SESSION
 
 
+class LlumnixRejectedError(RuntimeError):
+    """Llumnix gateway/scheduler admission rejection.
+
+    Raised when the gateway answers 503 `no available inference worker`
+    (scheduler returned 429 no-available-endpoint, e.g. the EXP-07
+    `--admission-kv-usage-threshold` hard filter) or 429 `rate limit
+    exceeded`. Recognized by `_detect_admission_rejection`, so the call is
+    recorded as is_rejected=True instead of a generic error, and the
+    non-streaming fallback retry is skipped (no double submission).
+    """
+
+    def __init__(self, status_code: int, body: str):
+        self.status_code = status_code
+        self.body = body
+        super().__init__(
+            f"llumnix admission rejected (HTTP {status_code}): {body[:200]}")
+
+
+def _raise_if_llumnix_rejected(resp) -> None:
+    if resp.status_code in (429, 503):
+        body = resp.text
+        if ("no available inference worker" in body
+                or "rate limit exceeded" in body):
+            raise LlumnixRejectedError(resp.status_code, body)
+
+
 class LlumnixCompletionsLLM:
     """Minimal /v1/completions client with a ChatOpenAI-compatible surface.
 
@@ -256,6 +282,7 @@ class LlumnixCompletionsLLM:
             stream=True,
             timeout=self.timeout,
         )
+        _raise_if_llumnix_rejected(resp)
         resp.raise_for_status()
         for raw in resp.iter_lines(decode_unicode=True):
             if not raw:
@@ -279,6 +306,7 @@ class LlumnixCompletionsLLM:
             json=self._payload(messages, stream=False),
             timeout=self.timeout,
         )
+        _raise_if_llumnix_rejected(resp)
         resp.raise_for_status()
         obj = resp.json()
         text = obj["choices"][0].get("text", "")
@@ -553,8 +581,17 @@ def _detect_admission_rejection(obj: Any) -> tuple[bool, str]:
         or "admission_reason" in text
         or (str(status_code) == "429" and "abort" in finish_type)
     )
+    # Llumnix admission path (EXP-07 KV-threshold filter): scheduler answers
+    # 429 no-available-endpoint, gateway surfaces 503
+    # {"error":{"code":503,"message":"no available inference worker"}} (or
+    # 429 "rate limit exceeded"), and LlumnixCompletionsLLM wraps it in
+    # LlumnixRejectedError whose str() lands in `text`.
+    llumnix_rejected = (
+        "llumnix admission rejected" in text
+        or "no available inference worker" in text
+    )
 
-    if not (halo_rejected or admission_rejected):
+    if not (halo_rejected or admission_rejected or llumnix_rejected):
         return False, ""
 
     if not reason and isinstance(message, str):
@@ -564,7 +601,12 @@ def _detect_admission_rejection(obj: Any) -> tuple[bool, str]:
             reason = message.split("Admission rejected:", 1)[1].split("(", 1)[0].strip()
 
     if not reason:
-        reason = "HALO_REJECTED" if halo_rejected else "ADMISSION_REJECTED"
+        if halo_rejected:
+            reason = "HALO_REJECTED"
+        elif llumnix_rejected:
+            reason = "KV_THRESHOLD"
+        else:
+            reason = "ADMISSION_REJECTED"
     return True, str(reason)
 
 
