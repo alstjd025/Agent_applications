@@ -172,9 +172,10 @@ def main():
             ax.set_title(f"{rate} req/s offered")
             ax.set_ylim(-3, 105); ax.grid(axis="y", ls=":", lw=0.6, alpha=0.6)
         axes[0][0].set_ylabel("% of steady-window requests")
-        axes[0][0].legend(loc="center left")
-        fig.suptitle("EXP-07 — SLO attainment vs KV-occupancy admission threshold\n"
-                     "(offered view: rejected requests count as violations)", y=1.02)
+        h, l = axes[0][0].get_legend_handles_labels()
+        fig.legend(h, l, loc="lower center", bbox_to_anchor=(0.5, 0.99), ncol=3)
+        fig.suptitle("EXP-07 — SLO attainment vs KV-occupancy admission threshold "
+                     "(offered view: rejected requests count as violations)", y=1.10)
         fig.tight_layout()
         out = os.path.join(args.out_dir, "exp07_attain_vs_theta.png")
         fig.savefig(out, dpi=150, bbox_inches="tight"); plt.close(fig)
@@ -199,10 +200,12 @@ def main():
                 ax2.set_ylabel("Output tokens/s", color="#d62728")
             ax2.tick_params(axis="y", colors="#d62728")
             if rate == rates[0]:
-                lines = ax.get_lines() + ax2.get_lines()
-                ax.legend(lines, [l.get_label() for l in lines], loc="upper left")
+                shared_lines = ax.get_lines() + ax2.get_lines()
+                shared_lines.append(ax.collections[0])  # p10-p90 band patch
         axes[0][0].set_ylabel("KV cache usage (%)", color="#2ca02c")
-        fig.suptitle("EXP-07 — KV usage & throughput vs admission threshold", y=1.0)
+        fig.legend(shared_lines, [l.get_label() for l in shared_lines],
+                   loc="lower center", bbox_to_anchor=(0.5, 0.99), ncol=3)
+        fig.suptitle("EXP-07 — KV usage & throughput vs admission threshold", y=1.10)
         fig.tight_layout()
         out = os.path.join(args.out_dir, "exp07_kv_tput_vs_theta.png")
         fig.savefig(out, dpi=150, bbox_inches="tight"); plt.close(fig)
@@ -221,8 +224,9 @@ def main():
             ax.set_xlabel("admission threshold θ"); ax.set_title(f"{rate} req/s offered")
             ax.set_yscale("log"); ax.grid(axis="y", ls=":", lw=0.6, alpha=0.6)
         axes[0][0].set_ylabel("per-request mean TBT (ms, log)")
-        axes[0][0].legend()
-        fig.suptitle("EXP-07 — decode TBT vs admission threshold (admitted requests)", y=1.0)
+        h, l = axes[0][0].get_legend_handles_labels()
+        fig.legend(h, l, loc="lower center", bbox_to_anchor=(0.5, 0.99), ncol=3)
+        fig.suptitle("EXP-07 — decode TBT vs admission threshold (admitted requests)", y=1.10)
         fig.tight_layout()
         out = os.path.join(args.out_dir, "exp07_tbt_vs_theta.png")
         fig.savefig(out, dpi=150, bbox_inches="tight"); plt.close(fig)
