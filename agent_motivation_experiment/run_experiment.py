@@ -1836,6 +1836,13 @@ def main():
     # Some request-level workloads do not need --baseline-dir (see
     # NO_BASELINE_DIR_WORKLOADS).
     needs_baseline_dir = args.workload not in NO_BASELINE_DIR_WORKLOADS
+    if needs_baseline_dir and args.engine == "llumnix" and not args.baseline_dir:
+        # Llumnix runs are analyzed with absolute SLOs (TTFT/TBT thresholds), not
+        # baseline*tau. Without a baseline the τ job-timeout simply stays disabled
+        # (job_timeout_sec=0 path in the task pool), so don't hard-require it.
+        print("[llumnix] no --baseline-dir: τ job-timeouts disabled; "
+              "absolute-SLO analysis assumed")
+        needs_baseline_dir = False
 
     concurrency_list = [int(x.strip()) for x in args.concurrency_list.split(",")]
     rate_list = [float(x.strip()) for x in args.rate_list.split(",")]

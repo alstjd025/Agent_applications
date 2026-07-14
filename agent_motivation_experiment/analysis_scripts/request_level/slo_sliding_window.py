@@ -44,7 +44,7 @@ PAPER = {"font.family": "serif", "font.size": 9, "axes.labelsize": 10,
 
 def classify(run_dir):
     df = pd.read_csv(os.path.join(run_dir, "metrics.csv"))
-    r = df[df.agent == "request"].copy()
+    r = df[df.agent != "job_summary"].copy()   # request/chain_call rows
     t0 = r["start_time"].min()
     r["rel"] = r["start_time"] - t0
 
