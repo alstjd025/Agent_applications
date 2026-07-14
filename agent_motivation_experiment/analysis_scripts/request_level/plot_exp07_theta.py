@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""EXP-07: KV-occupancy-threshold admission — per-rate views over theta.
+"""EXP-07: KV-occupancy-threshold admission — per-theta condition analysis.
 
-Conditions are results/*exp07_kvadm_th<TTTT>_rpm_<RPM>/ where theta =
-TTTT/1000 (0 = admission off). SLO and steady-window definitions follow the
-exp04/05 analysis (TTFT<=5s arrival-anchored, meanTBT<=50ms, steady window
-[60s, dur-20s]); admission rejects are a separate category counted as
-violations in the OFFERED view and excluded from the ADMITTED view.
+X-axis is the admission threshold theta (categories, permissive -> strict:
+off, 0.8, 0.6, 0.45, 0.3), one line per offered rate. SLO and steady-window
+definitions match slo_sliding_window.py / plot_slo_vs_throughput.py:
+TTFT <= 5 s (arrival-anchored) AND meanTBT <= 50 ms; steady window
+[60 s, dur-20 s] by arrival; errors/timeouts/run-end-cut excluded and
+reported; REJECTED requests are their own category and count as violations
+in the offered view.
 
-Outputs (out-dir):
-  kvadm_summary.csv
-  kvadm_goodput_vs_theta.png   attain_offered / attain_admitted / reject%  per rate
-  kvadm_kv_vs_theta.png        steady KV usage mean + p10-p90 band per rate
-  kvadm_tbt_vs_theta.png       TBT p50/p99 (admitted, steady) per rate
+Outputs (in --out-dir):
+  exp07_theta_summary.csv
+  exp07_attain_vs_theta.png     attain_offered / attain_admitted / rejection%
+  exp07_kv_tput_vs_theta.png    KV usage (mean + p10-p90) + token throughput
+  exp07_tbt_vs_theta.png        per-request meanTBT p50 / p99 (+ TTFT p50)
 """
 
 import argparse
@@ -26,14 +28,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-TTFT_SLO_S, TBT_SLO_MS = 5.0, 50.0
-STEADY_LO, DRAIN_S = 60.0, 20.0
+TTFT_SLO_S = 5.0
+TBT_SLO_MS = 50.0
+STEADY_LO = 60.0
+DRAIN_S = 20.0
 ENGINE_PORTS = (8000, 8001, 8002, 8003)
 
 PAPER = {"font.family": "serif", "font.size": 9, "axes.labelsize": 10,
          "axes.titlesize": 9.5, "legend.fontsize": 8, "legend.frameon": False,
-         "lines.linewidth": 1.4, "lines.markersize": 5}
-RATE_COLOR = {50: "#2ca02c", 60: "#1f77b4", 90: "#d62728"}
+         "lines.linewidth": 1.4}
+RATE_COLORS = {50: "#2ca02c", 60: "#1f77b4", 90: "#d62728"}
 
 
 def kv_series(run_dir):
@@ -47,13 +51,15 @@ def kv_series(run_dir):
             rec = json.loads(line)
             if not rec.get("ok"):
                 continue
-            v = [x for k, x in rec.items()
-                 if k.split("|")[0] == "vllm:kv_cache_usage_perc" and isinstance(x, (int, float))]
-            if not v:
+            vals = [v for k, v in rec.items()
+                    if k.split("|")[0] == "vllm:kv_cache_usage_perc"
+                    and isinstance(v, (int, float))]
+            if not vals:
                 continue
             if t0 is None:
                 t0 = rec["t"]
-            ts.append(rec["t"] - t0); vs.append(sum(v))
+            ts.append(rec["t"] - t0)
+            vs.append(sum(vals))
         if ts:
             per.append((np.array(ts), np.array(vs)))
     if not per:
@@ -72,17 +78,19 @@ def condition_stats(run_dir):
     hi = dur - DRAIN_S
 
     bl = lambda c: r[c].fillna(False).astype(bool) if c in r.columns else pd.Series(False, index=r.index)
-    rej = bl("is_rejected")
-    excl = (bl("is_error") | bl("is_timeout") | bl("is_server_terminated")) & ~rej
-    cls = r[~excl & ~rej].copy()
+    rejected = bl("is_rejected")
+    excl = (bl("is_error") | bl("is_timeout") | bl("is_server_terminated")) & ~rejected
+    cls = r[~excl & ~rejected].copy()
+    rej = r[rejected]
+
     tbt = pd.to_numeric(cls["tbt_mean_ms"], errors="coerce")
-    cls["violate"] = (pd.to_numeric(cls["first_token_latency"], errors="coerce") > TTFT_SLO_S) | (tbt > TBT_SLO_MS)
+    ttft = pd.to_numeric(cls["first_token_latency"], errors="coerce")
+    cls["violate"] = (ttft > TTFT_SLO_S) | (tbt > TBT_SLO_MS)
 
     sw = cls[(cls["rel"] >= STEADY_LO) & (cls["rel"] < hi)]
-    rj = r[rej & (r["rel"] >= STEADY_LO) & (r["rel"] < hi)]
+    rj = rej[(rej["rel"] >= STEADY_LO) & (rej["rel"] < hi)]
     n_att = int((~sw["violate"]).sum())
     n_off = len(sw) + len(rj)
-    swt = pd.to_numeric(sw["tbt_mean_ms"], errors="coerce").dropna()
 
     ok = r[r["success"].astype(bool)].copy()
     ok["rel_end"] = ok["end_time"] - t0
@@ -91,99 +99,132 @@ def condition_stats(run_dir):
 
     kt, kv = kv_series(run_dir)
     m = (kt >= STEADY_LO) & (kt <= (kt.max() if len(kt) else 0) - DRAIN_S)
-    kvs = kv[m] if m.any() else np.array([np.nan])
+    kv_stats = ((float(kv[m].mean()), float(np.percentile(kv[m], 10)),
+                 float(np.percentile(kv[m], 90))) if m.any() else (np.nan,) * 3)
 
+    tbt_sw = pd.to_numeric(sw["tbt_mean_ms"], errors="coerce").dropna()
+    ttft_sw = pd.to_numeric(sw["first_token_latency"], errors="coerce").dropna()
     return dict(
-        classified=len(sw), rejected=len(rj), attain=n_att,
         attain_admitted=100.0 * n_att / max(1, len(sw)),
         attain_offered=100.0 * n_att / max(1, n_off),
         reject_pct=100.0 * len(rj) / max(1, n_off),
-        tokps=tokps,
-        tbt_p50=float(swt.quantile(0.5)) if len(swt) else np.nan,
-        tbt_p99=float(swt.quantile(0.99)) if len(swt) else np.nan,
-        kv_mean=float(np.nanmean(kvs)), kv_p10=float(np.nanpercentile(kvs, 10)),
-        kv_p90=float(np.nanpercentile(kvs, 90)),
+        classified=len(sw), rejected=len(rj), excluded=int(excl.sum()),
+        tokps=tokps, kv_mean=kv_stats[0], kv_p10=kv_stats[1], kv_p90=kv_stats[2],
+        tbt_p50=tbt_sw.quantile(0.5) if len(tbt_sw) else np.nan,
+        tbt_p99=tbt_sw.quantile(0.99) if len(tbt_sw) else np.nan,
+        ttft_p50=ttft_sw.quantile(0.5) if len(ttft_sw) else np.nan,
     )
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--glob", default="results/*exp07_kvadm_th*_rpm_*")
+    ap.add_argument("--min-rpm", type=int, default=3000,
+                    help="skip smoke dirs below this rpm")
     ap.add_argument("--out-dir", default="results/aggregate_analysis/exp07")
-    ap.add_argument("--exclude-rpm", default="300", help="comma list of rpm to skip (smoke)")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
-    skip = {int(x) for x in args.exclude_rpm.split(",") if x}
 
     rows = []
     for d in sorted(glob.glob(args.glob)):
         m = re.search(r"th(\d{4})_rpm_(\d+)$", d)
-        if not m or int(m.group(2)) in skip:
+        if not m:
             continue
         theta, rpm = int(m.group(1)) / 1000.0, int(m.group(2))
+        if rpm < args.min_rpm:
+            continue
         s = condition_stats(d)
-        s.update(rate=rpm / 60.0, theta=theta, run=os.path.basename(d))
+        s.update(theta=theta, rate=rpm // 60, run=os.path.basename(d))
         rows.append(s)
-        print(f"{s['rate']:3.0f} req/s th={theta if theta else 'off':>5}: "
+        print(f"rate={s['rate']:>2} theta={'off' if theta == 0 else theta:>4}: "
               f"offered={s['attain_offered']:5.1f}% admitted={s['attain_admitted']:5.1f}% "
               f"rej={s['reject_pct']:5.1f}% tok/s={s['tokps']:6.0f} KVμ={s['kv_mean']:5.1f}% "
               f"TBTp50={s['tbt_p50']:5.1f} p99={s['tbt_p99']:6.1f}")
-    t = pd.DataFrame(rows).sort_values(["rate", "theta"])
-    t.to_csv(os.path.join(args.out_dir, "kvadm_summary.csv"), index=False)
+    t = pd.DataFrame(rows)
+    t.to_csv(os.path.join(args.out_dir, "exp07_theta_summary.csv"), index=False)
 
-    # theta axis: real thetas ascending, 'off'(0) plotted at the right edge
-    def axis_pos(th):
-        return 0.95 if th == 0 else th
+    cats = [0.0, 0.8, 0.6, 0.45, 0.3]          # permissive -> strict
+    labels = ["off", "0.8", "0.6", "0.45", "0.3"]
+    xpos = {th: i for i, th in enumerate(cats)}
 
-    def per_rate(ax, col, fmt, label_fn=None, band=None):
-        for rate, g in t.groupby("rate"):
-            g = g.copy()
-            g["x"] = g["theta"].map(axis_pos)
-            g = g.sort_values("x")
-            c = RATE_COLOR.get(int(rate), "0.4")
-            ax.plot(g["x"], g[col], fmt, color=c,
-                    label=(label_fn(rate) if label_fn else f"{rate:.0f} req/s"))
-            if band:
-                ax.fill_between(g["x"], g[band[0]], g[band[1]], color=c, alpha=0.15)
-        xs = sorted({axis_pos(th) for th in t["theta"]})
-        ax.set_xticks(xs, [("off" if x == 0.95 else f"{x:g}") for x in xs])
-        ax.set_xlabel("admission threshold θ (hot KV usage ratio)")
-        ax.grid(axis="y", ls=":", lw=0.6, alpha=0.6)
+    def per_rate(rate, col):
+        sub = t[t["rate"] == rate]
+        xs = [xpos[th] for th in sub["theta"] if th in xpos]
+        order = np.argsort(xs)
+        vals = sub[col].to_numpy()
+        return np.array(xs)[order], vals[np.argsort([xpos[th] for th in sub["theta"]])]
 
+    rates = sorted(t["rate"].unique())
     with plt.rc_context(PAPER):
-        fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.2))
-        per_rate(axes[0], "attain_offered", "o-")
-        axes[0].set_ylabel("SLO attainment, offered (%)"); axes[0].set_ylim(-3, 105)
-        axes[0].set_title("Offered goodput (rejects = violations)"); axes[0].legend()
-        per_rate(axes[1], "attain_admitted", "s-")
-        axes[1].set_ylabel("SLO attainment, admitted (%)"); axes[1].set_ylim(-3, 105)
-        axes[1].set_title("Admitted-only attainment")
-        per_rate(axes[2], "reject_pct", "x--")
-        axes[2].set_ylabel("Rejection rate (%)"); axes[2].set_ylim(-3, 105)
-        axes[2].set_title("Rejection rate")
-        fig.suptitle("EXP-07 — KV-occupancy threshold admission (chat, steady window)", y=1.02)
+        # 1) attainment + rejection
+        fig, axes = plt.subplots(1, len(rates), figsize=(4.2 * len(rates), 4.0),
+                                 sharey=True, squeeze=False)
+        for ax, rate in zip(axes[0], rates):
+            x, off = per_rate(rate, "attain_offered")
+            _, adm = per_rate(rate, "attain_admitted")
+            _, rj = per_rate(rate, "reject_pct")
+            c = RATE_COLORS.get(rate, "0.3")
+            ax.plot(x, off, "D-", color=c, label="SLO attainment (offered)")
+            ax.plot(x, adm, "o--", color=c, alpha=0.45, label="SLO attainment (admitted only)")
+            ax.plot(x, rj, "x:", color="#ff7f0e", label="Rejection rate")
+            ax.set_xticks(range(len(cats))); ax.set_xticklabels(labels)
+            ax.set_xlabel("admission threshold θ (hot KV usage)")
+            ax.set_title(f"{rate} req/s offered")
+            ax.set_ylim(-3, 105); ax.grid(axis="y", ls=":", lw=0.6, alpha=0.6)
+        axes[0][0].set_ylabel("% of steady-window requests")
+        axes[0][0].legend(loc="center left")
+        fig.suptitle("EXP-07 — SLO attainment vs KV-occupancy admission threshold\n"
+                     "(offered view: rejected requests count as violations)", y=1.02)
         fig.tight_layout()
-        out = os.path.join(args.out_dir, "kvadm_goodput_vs_theta.png")
+        out = os.path.join(args.out_dir, "exp07_attain_vs_theta.png")
         fig.savefig(out, dpi=150, bbox_inches="tight"); plt.close(fig)
         print("wrote:", out)
 
-        fig, ax = plt.subplots(figsize=(7.0, 4.4))
-        per_rate(ax, "kv_mean", "o-", band=("kv_p10", "kv_p90"))
-        ax.set_ylabel("hot KV usage (%)"); ax.set_ylim(0, 105); ax.legend()
-        ax.set_title("Steady KV usage vs θ (band = p10–p90 over time)")
+        # 2) KV usage + throughput
+        fig, axes = plt.subplots(1, len(rates), figsize=(4.2 * len(rates), 4.0), squeeze=False)
+        for ax, rate in zip(axes[0], rates):
+            x, kvm = per_rate(rate, "kv_mean")
+            _, k10 = per_rate(rate, "kv_p10")
+            _, k90 = per_rate(rate, "kv_p90")
+            _, tok = per_rate(rate, "tokps")
+            ax.plot(x, kvm, "o-", color="#2ca02c", label="KV usage (steady mean)")
+            ax.fill_between(x, k10, k90, color="#2ca02c", alpha=0.18, label="KV p10–p90")
+            ax.set_ylim(0, 105); ax.set_xticks(range(len(cats))); ax.set_xticklabels(labels)
+            ax.set_xlabel("admission threshold θ"); ax.set_title(f"{rate} req/s offered")
+            ax.grid(axis="y", ls=":", lw=0.6, alpha=0.6)
+            ax2 = ax.twinx()
+            ax2.plot(x, tok, "^-", color="#d62728", label="Output tokens/s")
+            ax2.set_ylim(0, max(t["tokps"]) * 1.15)
+            if rate == rates[-1]:
+                ax2.set_ylabel("Output tokens/s", color="#d62728")
+            ax2.tick_params(axis="y", colors="#d62728")
+            if rate == rates[0]:
+                lines = ax.get_lines() + ax2.get_lines()
+                ax.legend(lines, [l.get_label() for l in lines], loc="upper left")
+        axes[0][0].set_ylabel("KV cache usage (%)", color="#2ca02c")
+        fig.suptitle("EXP-07 — KV usage & throughput vs admission threshold", y=1.0)
         fig.tight_layout()
-        out = os.path.join(args.out_dir, "kvadm_kv_vs_theta.png")
+        out = os.path.join(args.out_dir, "exp07_kv_tput_vs_theta.png")
         fig.savefig(out, dpi=150, bbox_inches="tight"); plt.close(fig)
         print("wrote:", out)
 
-        fig, ax = plt.subplots(figsize=(7.0, 4.4))
-        per_rate(ax, "tbt_p99", "^-")
-        per_rate(ax, "tbt_p50", "v--", label_fn=lambda r: None)
-        ax.axhline(TBT_SLO_MS, color="0.4", ls=":", label=f"TBT SLO {TBT_SLO_MS:.0f}ms")
-        ax.set_ylabel("mean-TBT per request (ms)"); ax.legend()
-        ax.set_title("Admitted TBT p99 (solid) / p50 (dashed) vs θ")
+        # 3) TBT / TTFT
+        fig, axes = plt.subplots(1, len(rates), figsize=(4.2 * len(rates), 4.0),
+                                 sharey=True, squeeze=False)
+        for ax, rate in zip(axes[0], rates):
+            x, p50 = per_rate(rate, "tbt_p50")
+            _, p99 = per_rate(rate, "tbt_p99")
+            ax.plot(x, p50, "o-", color="#1f77b4", label="meanTBT p50")
+            ax.plot(x, p99, "s--", color="#1f77b4", alpha=0.5, label="meanTBT p99")
+            ax.axhline(TBT_SLO_MS, color="0.4", ls=":", label=f"TBT SLO {TBT_SLO_MS:.0f}ms")
+            ax.set_xticks(range(len(cats))); ax.set_xticklabels(labels)
+            ax.set_xlabel("admission threshold θ"); ax.set_title(f"{rate} req/s offered")
+            ax.set_yscale("log"); ax.grid(axis="y", ls=":", lw=0.6, alpha=0.6)
+        axes[0][0].set_ylabel("per-request mean TBT (ms, log)")
+        axes[0][0].legend()
+        fig.suptitle("EXP-07 — decode TBT vs admission threshold (admitted requests)", y=1.0)
         fig.tight_layout()
-        out = os.path.join(args.out_dir, "kvadm_tbt_vs_theta.png")
+        out = os.path.join(args.out_dir, "exp07_tbt_vs_theta.png")
         fig.savefig(out, dpi=150, bbox_inches="tight"); plt.close(fig)
         print("wrote:", out)
 
