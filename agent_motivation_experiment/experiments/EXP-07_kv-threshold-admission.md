@@ -1,6 +1,6 @@
 # EXP-07 — KV-occupancy thresholding admission (motivation: 정적 수위 임계의 한계)
 
-**Status**: PREPARED (implementation + assets done; sweep not yet run) ·
+**Status**: DONE (12/12 conditions, 2026-07-14; results §4) ·
 **Date**: 2026-07-14 ·
 **Branches**: llumnix `feat/kv-admission-threshold`, Agent_applications `feat/exp07-kv-admission`
 
@@ -84,6 +84,58 @@ KV-tank 유량 분석(ANALYSIS_kv-tank-flow.md)의 대조군 실험. **"현재 K
 - TBT p50/p99 vs θ — "θ가 못 지키는 SLO" 논거
 - `instance_cms_kv_cache_usage_ratio_projected`/hot 시계열 — 필터가 본 신호 기록
 
-## 4. 결과
+## 4. 결과 (2026-07-14 sweep 완료; 12조건 전부 정상 수집)
 
-(미실행 — sweep 후 기입)
+분석: `analysis_scripts/request_level/plot_exp07_theta.py` →
+`results/aggregate_analysis/exp07/` (summary CSV + 그림 3장).
+정의: steady window [60s, dur−20s], TTFT≤5s & meanTBT≤50ms,
+**offered = reject를 위반으로 카운트**, admitted = 수용된 것 중 SLO 충족.
+
+| rate | θ | attain_offered | attain_admitted | reject | KVμ | TBT p50/p99 (ms) |
+|---|---|---|---|---|---|---|
+| 60 | off | 51.1% | 51.1% | 0% | 74.9% | 49.9 / 70.9 |
+| 60 | 0.8 | 89.8% | 91.2% | 1.6% | 68.6% | 45.0 / 57.7 |
+| 60 | **0.6** | **95.1%** | 99.5% | 4.4% | 55.2% | 35.7 / 46.9 |
+| 60 | 0.45 | 88.6% | 99.8% | 11.2% | 42.5% | 27.9 / 38.1 |
+| 60 | 0.3 | 84.5% | 99.9% | 15.4% | 29.2% | 20.7 / 29.3 |
+| 90 | off | **1.5%** | 1.5% | 0% | 86.4% | 62.5 / 82.7 |
+| 90 | 0.8 | 59.2% | 82.4% | 28.1% | 75.0% | 46.1 / 70.3 |
+| 90 | **0.6** | **65.7%** | 96.7% | 32.0% | 57.5% | 34.8 / 64.4 |
+| 90 | 0.45 | 65.2% | 98.8% | 33.9% | 43.9% | 27.3 / 52.5 |
+| 90 | 0.3 | 59.0% | 99.7% | 40.9% | 30.1% | 19.7 / 34.6 |
+| 50 | off | 99.9% | 99.9% | 0% | 43.8% | 30.6 / 40.3 |
+| 50 | 0.3 | 91.7% | 99.9% | 8.2% | 28.6% | 21.2 / 27.9 |
+
+### 관찰 (정직하게 — 예상과 다른 부분 포함)
+
+1. **admission 자체의 가치는 압도적으로 확인**: off 조건에서 60 req/s는 51%,
+   90 req/s는 **1.5%**로 붕괴. θ=0.6은 이를 95.1% / 65.7%로 회복.
+2. **정적 θ가 예상보다 선방**: 90 req/s에서 θ=0.6의 good throughput
+   ≈ 0.657×90 ≈ **59 req/s** — 시스템 실효 용량(≈57–59 req/s, 60×θ0.6에서
+   0.951×60=57)에 사실상 도달. deep overload에서는 offered-goodput 기준으로
+   최적 근처다. θ\*의 rate 의존성도 이 그리드에선 관찰 안 됨(둘 다 0.6).
+3. **가설 "KV 수위는 TBT를 제어 못 한다"는 기각**: TBT p50이 θ에 단조 반응
+   (60 req/s: 49.9→20.7ms). admission이 decode 밀도를 함께 조이므로 hot-KV
+   점유율이 이 워크로드에선 decode 부하의 유효한 프록시.
+4. **실측된 정적 θ의 실제 결함 3가지**:
+   - (a) **feasible 부하 false-positive**: 50 req/s(무개입 99.9%)에서 θ=0.3이
+     멀쩡한 요청 8.2%를 거절 → 91.7%. 보수적 고정 θ는 경부하에서 순손실.
+   - (b) **오프라인 튜닝 의존 + 민감도**: θ\*=0.6은 sweep으로야 알 수 있고,
+     그리드 한 칸(±0.15~0.2) 어긋나면 5–10%p 손실 (60: 0.8→89.8 / 0.45→88.6).
+     운영에선 workload/SLO가 바뀔 때마다 재튜닝 필요.
+   - (c) **knee에서 잔여 위반**: 60×θ0.6에서도 4.9%p 위반 잔존 (TBT p99
+     46.9ms — SLO 바로 아래; 신호 staleness 0.5–1s 사이로 버스트가 새어
+     들어와 순간 과밀 발생). 100% 회복은 어떤 θ에서도 불가.
+5. **utilization 관점**: attain-최적 θ=0.6의 hot 수위는 ~55% — SLO를 지키는
+   대가로 pool 절반 가까이를 hot으로 못 씀 (단, §1 주의대로 나머지는 idle
+   캐시로 유용).
+6. exp05 대비 참고: 3.1-70B에서 60 req/s off 수위가 74.9%로 exp05(3-70B)의
+   66%보다 높게 이동 — θ 그리드를 실측 위에 얹은 판단이 유효했음.
+
+### flow-기반 후속(가설)의 타깃
+
+이 데이터가 남긴 개선 여지: (a)와 (b) — **부하를 보고 스스로 동작점을 찾는
+컨트롤러**(수요·공급 feedforward)라면 경부하 false-positive가 구조적으로 없고
+오프라인 θ sweep이 불필요하다; (c) — 도착 시점 수요(prompt 길이)를 아는
+feedforward는 staleness 구간의 버스트 누수를 줄일 수 있다. "정적 θ보다 높은
+peak"가 아니라 **"튜닝 없이 / 전 부하 구간에서 θ\*-근접"**이 올바른 비교 축.
