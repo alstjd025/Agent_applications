@@ -1,0 +1,81 @@
+---
+# EXP-10 E1: transcript recording run.
+# swe_bench_coding_tool_delay at 0.5 jobs/s for 60 min, admission OFF,
+# single load proc (multi-proc appends could interleave the ~22KB JSONL
+# lines), recording every successful call's full prompt + timings to
+# results/exp10_transcript/transcript_swe_calls.jsonl for literal replay.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: __JOBNAME__
+  namespace: llumnix
+spec:
+  backoffLimit: 0
+  completions: 1
+  template:
+    metadata:
+      labels:
+        app: bench-runner-exp10
+    spec:
+      serviceAccountName: bench-runner
+      restartPolicy: Never
+      containers:
+        - name: runner
+          image: llumnix-registry.cn-beijing.cr.aliyuncs.com/llumnix/vllm:20260306-165123
+          workingDir: /work
+          env:
+            - { name: NVIDIA_VISIBLE_DEVICES, value: "void" }
+            - { name: HF_HOME, value: /hf-cache }
+            - { name: HF_HUB_OFFLINE, value: "1" }
+            - { name: HF_DATASETS_OFFLINE, value: "1" }
+            - { name: TRANSCRIPT, value: "/work/results/exp10_transcript/transcript_swe_calls.jsonl" }
+            - { name: RESULT_UID, value: "3092" }
+            - { name: RESULT_GID, value: "1999" }
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -uo pipefail
+              ln -sf /usr/local/bin/k3s /usr/local/bin/kubectl
+              kubectl version --client >/dev/null 2>&1 && echo "[runner] kubectl ok"
+              PYBIN=/work/.venv/bin/python
+              "$PYBIN" -c "import langchain_openai, datasets, tiktoken" \
+                && echo "[runner] venv deps ok" || { echo "[runner] venv missing deps"; exit 1; }
+              echo "[runner] exp10 record: 0.5 jobs/s x 60 min -> ${TRANSCRIPT}"
+              "$PYBIN" run_experiment.py \
+                --engine llumnix --in-cluster \
+                --workload swe_bench_coding_tool_delay \
+                --mode single \
+                --lambda-val 0.5 \
+                --duration-min 60 \
+                --load-procs 1 \
+                --load-threads 1024 \
+                --restart-server --restart-per-condition \
+                --record-transcript "${TRANSCRIPT}" \
+                --workload-config '{"num_conversations": 1000}' \
+                --model meta-llama/Meta-Llama-3.1-70B-Instruct \
+                --chain-min 4 --chain-max 12 \
+                --warmup-rpm 15 --warmup-sec 60 \
+                --output-dir /work/results \
+                --session-name "__SESSION__" \
+                --metrics-interval 1.0
+              rc=$?
+              chown -R "${RESULT_UID}:${RESULT_GID}" /work/results 2>/dev/null || true
+              echo "[runner] done rc=$rc"
+              exit $rc
+          volumeMounts:
+            - { name: work, mountPath: /work }
+            - { name: k3s, mountPath: /usr/local/bin/k3s, readOnly: true }
+            - { name: hf-cache, mountPath: /hf-cache }
+      volumes:
+        - name: work
+          hostPath:
+            path: /home/nxclab/llumnix_reproduce/Agent_applications/agent_motivation_experiment
+            type: Directory
+        - name: k3s
+          hostPath:
+            path: /usr/local/bin/k3s
+            type: File
+        - name: hf-cache
+          hostPath:
+            path: /NHNHOME/huggingface
+            type: Directory
