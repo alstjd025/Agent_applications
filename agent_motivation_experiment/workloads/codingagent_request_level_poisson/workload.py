@@ -181,7 +181,10 @@ class Workload:
             halo_ttft_slo=context.halo_ttft_slo if halo_on else None,
             halo_tbt_slo=context.halo_tbt_slo if halo_on else None,
             halo_e2e_slo=context.halo_e2e_slo if halo_on else None,
-            timeout=3600.0 if disable_to else None,
+            # 4h dead-connection net: with the gateway SSE timeout removed
+            # (EXP-10), a request can legitimately wait out the whole
+            # backlog drain (~30min at lambda=20); 1h left no margin.
+            timeout=14400.0 if disable_to else None,
         )
 
         # Minimal single-call state for the shared invoke path. chain_length=1

@@ -53,7 +53,7 @@ spec:
                 --lambda-list "${LAMBDA_LIST}" \
                 --duration-min "${DURATION_MIN}" \
                 --load-procs "${LOAD_PROCS}" \
-                --load-threads 1024 \
+                --load-threads 2048 \
                 --restart-per-condition \
                 --transcript-file "${TRANSCRIPT}" \
                 --disable-timeouts \
