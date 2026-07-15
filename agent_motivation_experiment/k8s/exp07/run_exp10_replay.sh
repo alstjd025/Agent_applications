@@ -56,10 +56,11 @@ case "${1:-}" in
   sweep)
     [ -s "$TRANSCRIPT" ] || { echo "[exp10] transcript missing -- run 'record' first"; exit 1; }
     check_admission_off
+    LAMBDAS="${2:-$LAMBDAS}"   # optional override, e.g. `sweep 10,12,16,20` for re-runs
     run_job bench-runner-exp10-sweep runner-exp10.template.yaml \
       exp10_replay 300m -e "s/__LAMBDAS__/$LAMBDAS/" -e "s/__DURMIN__/$DURMIN/"
     echo "[exp10] SWEEP DONE $(date -u +%H:%M)"
     ;;
   *)
-    echo "usage: $0 {record|smoke|sweep}"; exit 1 ;;
+    echo "usage: $0 {record|smoke|sweep [lambda,list]}"; exit 1 ;;
 esac
