@@ -91,7 +91,50 @@ request_id 100%). 실측 입력 **평균 22.4k tok/req** (p50 21.6k, max 38.8k �
 no-endpoint 503을 클라이언트가 같은 시그니처로 분류한 것** (θ=0 확인). steady
 window 밖이라 분석 무영향. 모든 run 공통의 주의사항으로 남김.
 
-### 인프라 이슈 2건과 조치 (λ≥10 조건 재실행 사유)
+### 최종 재실행 — 타임아웃 완전 제거 (λ=10/12/16/20, 정본 데이터)
+
+"throughput을 제대로 보려면 timeout을 제거하라"는 결정에 따라 **gateway를
+재빌드**해 SSE read timeout(300s 상수)과 response-header timeout(15m)을
+24h로 올리고(`GATEWAY_SSE_READ_TIMEOUT` env, 커밋 ea14d62 + 빌드 shim
+`patches/sglang-go-compat/`), 부하기 스레드 16k·클라 cap 4h로 올려 λ≥10을
+재실행했다. **이제 요청을 죽이는 주체가 어디에도 없다** (400/600s kill 0건,
+성공 요청 e2e 최대 353s+ 실측, gateway 재시작 0).
+
+| λ | tok/s (300s-cap) | **tok/s (no-timeout)** | KVμ | runμ | waitμ | 엔진 ITLμ |
+|---|---|---|---|---|---|---|
+| 10 | 2,087 | **2,009** | 99% | 347 | 1,242 | 159ms |
+| 12 | 1,659 | **1,699** | 99% | 344 | 1,821 | 201ms |
+| 16 | 1,121 | **1,055** | 99% | 399 | 3,100 | 315ms |
+| 20 | 530 | **800** | 99% | 400 | 4,236 | 390ms |
+
+**대조실험 결론: kill을 제거해도 붕괴 곡선이 거의 그대로다** (λ=20만 530→800
+소폭 회복). 즉 이전에 세운 "doomed-work(죽을 요청에 prefill 낭비)" 가설은
+부차 요인이었다. 시간 분해가 진범을 지목한다: 완료 요청 기준 prefill은
+1–2s로 미미, **decode 자체가 느려진다** (per-req decode 56→141s).
+
+**두-영역(two-regime) ITL 법칙** (전 11λ, 엔진 카운터 실측):
+
+- **영역 1 — KV-바운드** (KV<~92%, 큐≈0): ITL ≈ 10+20.6·KV[Mtok]
+  (기존 TBT–KV 법칙; λ=1–6 구간 20→104ms가 이걸 따름).
+- **영역 2 — 큐-바운드** (KV 99% 고정, 큐 성장): **ITL ≈ 55ms + 77.7µs ×
+  waiting_queue_length (r=0.980)**. running(≈400)과 KV(99%)가 완전히 같은데
+  ITL만 104→390ms로 커지는 유일한 공변수가 큐 길이. λ=20에선 step당 ~340ms가
+  순수 오버헤드 — 엔진이 매 decode step마다 4.4k 대기열을 스캔하는
+  스케줄러/llumlet 레이어 비용(요청당 ~78µs/step)으로 보인다(상관 기반 추정;
+  코드 레벨 확증은 후속). preemption(감소 추세)·prefix-hit(75→66%)은 배제됨.
+
+**함의**: 무제어 과부하는 GPU 물리가 아니라 **엔진 자신의 per-step 스케줄링
+오버헤드로 throughput을 파괴한다** (tok/s ≈ running/ITL ∝ 1/Q). admission
+control이 지키는 것은 latency SLO만이 아니라 **엔진의 유효 처리량 그 자체** —
+큐를 짧게 유지하는 것이 throughput 보존 조건이다.
+
+데이터 계보: `results/exp10_oom_archive/`(gateway 4Gi OOM 오염),
+`results/exp10_gwtimeout_archive/`(300s-cap), 현행 `*_exp10_replay_lambda_*`
+= no-timeout 정본 (λ≤8은 최초 sweep 그대로 — kill 미발생 구간이라 유효).
+λ=20 ITL CDF 라인 부재는 steady window 도착분 중 스트리밍 완주가 0건이라
+표본이 없는 것(그 자체가 붕괴 증거).
+
+### 인프라 이슈 2건과 조치 (경과 기록; 위 최종 재실행의 전사)
 
 1. **gateway OOMKilled crashloop** — 최초 sweep의 λ≥10 조건에서 gateway가
    4Gi limit에 OOM(exit 137, λ=20 중 4회 재시작). gateway 메모리는 in-flight
