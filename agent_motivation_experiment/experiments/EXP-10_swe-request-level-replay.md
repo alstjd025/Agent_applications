@@ -1,6 +1,6 @@
 # EXP-10 — SWE open-loop request-level replay λ sweep (admission 없음)
 
-**날짜**: 2026-07-15 · **상태**: running · **브랜치**: `feat/exp07-kv-admission`
+**날짜**: 2026-07-15 · **상태**: done · **브랜치**: `feat/exp07-kv-admission`
 
 ## 왜 (motivation)
 
@@ -81,4 +81,60 @@ literal replay하므로 녹화가 선행된다.
 
 ## 결과
 
-(완료 후 기입)
+**녹화(E1)**: 13,218라인 (1,743 jobs × 6 stages, 전 라인 파싱 OK, 고유
+request_id 100%). 실측 입력 **평균 22.4k tok/req** (p50 21.6k, max 38.8k —
+체인 누적 프롬프트), 출력 평균 566 tok. 8-proc 샤딩 기준 worker당 1,652라인
+→ 최고 λ=20에서도 순환 <1 (replay_index 전부 r01 확인).
+
+**스모크**: λ=1×2분, TTFT p50 0.34s / meanTBT p50 10.2ms. 시작 0.3초 내 2건이
+`KV_THRESHOLD`로 기록 — **admission이 아니라 cold-restart 직후 엔진 등록 전
+no-endpoint 503을 클라이언트가 같은 시그니처로 분류한 것** (θ=0 확인). steady
+window 밖이라 분석 무영향. 모든 run 공통의 주의사항으로 남김.
+
+### λ sweep (steady [60s, 460s], 측정 도착률 = offered 정확히 일치)
+
+| λ (req/s) | steady attain | 전구간 attain | tok/s | KVμ | 비고 |
+|---|---|---|---|---|---|
+| 1–4 | **100%** | 94–100% | 628–2,246 | 6–38% | 위반은 warmup/drain 구간뿐 |
+| 5 | **66.9%** | 66.9% | 2,632 | 73.6% | TBT 위반 개시 (598/707건이 tbt-only) |
+| 6 | 14.4% | 20.0% | **2,822 (peak)** | 91.3% | ITL p50=49.6ms — 50ms 교차점 |
+| 8 | 1.5% | 1.8% | 1,978 | 76.2% | TTFT 큐잉 합류 (both-위반 1,508) |
+| 10–12 | 0% | 0% | 1,762→835 | 89→49% | client 오류 폭증 (아래) |
+| 16–20 | 0% | 0% | 298→**80** | 25→20% | **gateway OOM crashloop** |
+
+- **붕괴 2단계 재현 + 제3단계 발견**: (1) λ=5~6 TBT 위반(KV 수위), (2) λ=8+
+  prefill/큐잉 TTFT 붕괴 — 여기까진 EXP-06과 동형. (3) **λ≥16: gateway가
+  OOMKilled(exit 137)로 crashloop** (λ=20 조건 중 4회 재시작 실측). 22k-tok
+  본문(~90KB)이 pending 큐에 무한 누적 → RemoteDisconnected/reset가 오류의
+  대부분. 무제어 과부하는 SLO를 넘어 **control plane 자체를 죽인다** —
+  admission의 존재 이유가 데이터플레인 보호만이 아님.
+- **토큰 처리량 congestion collapse**: 2,822 tok/s(λ=6 peak) → 80 tok/s
+  (λ=20, peak의 2.8%). chat(EXP-04/05)보다 훨씬 가파름.
+- **TBT–KV 법칙 3번째 검증점** (run-레벨, pool 2.34Mtok): λ=4: 예측 28.0 vs
+  실측 29.8ms · λ=5: 45.4 vs 44.4 · λ=6: 53.9 vs 49.6 — open-loop SWE에서도
+  기울기 유지.
+
+### EXP-06 오버레이 (측정 call 도착률 축) — 핵심 발견
+
+`exp10_vs_exp06_callrate.png`:
+
+1. **knee는 릴리즈 방식과 무관하게 동일**: attain 67%가 되는 지점이 양쪽 모두
+   ~5 calls/s (exp10 λ=5→66.9%, exp06 1 jobs/s=5.34 calls/s→66.7%).
+   용량은 용량 — 도착 과정이 바꾸지 못한다.
+2. **초과 수요에서만 갈라진다**: closed-loop(EXP-06)은 chain 되먹임이
+   도착률을 자기억제 (5 jobs/s 제안에도 실측 11.5 calls/s에서 포화, attain
+   바닥 ~22%). open-loop은 제안 수요가 그대로 도착해 attain 0% + gateway
+   crash까지 감. **즉 EXP-06의 "부드러운 바닥"은 시스템이 견딘 게 아니라
+   폐루프가 수요를 숨긴 것** — job-level 실험의 rejection/붕괴 지표는 실수요
+   대비 과소표시라는 EXP-09 §chain-kill 관찰의 sweep 전체 버전.
+
+### 산출물
+
+`results/aggregate_analysis/exp10_slo/`: slo_summary.csv, slo_sliding_grid.png,
+slo_vs_throughput_{steady,full}.png, kv/inflight_vs_throughput.png,
+exp10_itl_cdf_rates.png + exp10_itl_percentiles.csv,
+exp10_vs_exp06_callrate.{png,csv}. 생성:
+`plot_slo_vs_throughput.py / slo_sliding_window.py / plot_itl_cdf_rates.py`
+(공통 `--rate-key lambda_ --rate-div 1` 옵션 추가), `plot_exp10_overlay.py`.
+transcript: `results/exp10_transcript/transcript_swe_calls.jsonl` (1.5GB,
+커밋 금지 — 재현 시 E1 재녹화).

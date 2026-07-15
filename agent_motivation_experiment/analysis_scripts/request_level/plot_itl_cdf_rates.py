@@ -37,17 +37,20 @@ def main():
     ap.add_argument("--rate-div", type=float, default=60.0,
                     help="rpm divisor for the rate label (60 -> req/s)")
     ap.add_argument("--rate-unit", default="req/s")
+    ap.add_argument("--rate-key", default="rpm_",
+                    help="dirname token preceding the rate value (e.g. 'lambda_')")
     ap.add_argument("--tag", default="exp05")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
     cache_dir = os.path.join(args.out_dir, "itl_cache")
     os.makedirs(cache_dir, exist_ok=True)
 
-    dirs = sorted(glob.glob(args.glob), key=lambda x: int(x.split("rpm_")[1]))
+    dirs = sorted(glob.glob(args.glob),
+                  key=lambda x: float(x.split(args.rate_key)[1]))
     rates, pct_rows, data = [], [], {}
     for d in dirs:
-        rpm = int(d.split("rpm_")[1])
-        cpath = os.path.join(cache_dir, f"rpm{rpm}.npy")
+        rpm = float(d.split(args.rate_key)[1])
+        cpath = os.path.join(cache_dir, f"{args.rate_key}{rpm:g}.npy")
         if os.path.isfile(cpath):
             a = np.load(cpath)
         else:

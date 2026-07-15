@@ -91,18 +91,25 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--glob", default="results/exp04_final_8192conc/*rpm_*")
     ap.add_argument("--out-dir", default="results/aggregate_analysis/exp04_slo")
+    ap.add_argument("--rate-key", default="rpm_",
+                    help="dirname token preceding the rate value (e.g. 'lambda_')")
+    ap.add_argument("--rate-div", type=float, default=60.0,
+                    help="divide the parsed value by this to get req/s "
+                         "(60 for rpm dirs, 1 for lambda dirs)")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
-    dirs = [d for d in sorted(glob.glob(args.glob), key=lambda x: int(x.split("rpm_")[1]))
+    dirs = [d for d in sorted(glob.glob(args.glob),
+                              key=lambda x: float(x.split(args.rate_key)[1]))
             if os.path.isdir(d)]
 
     summary, per_win = [], {}
     for d in dirs:
-        rpm = int(d.split("rpm_")[1]); reqps = rpm / 60.0
+        rpm = float(d.split(args.rate_key)[1]); reqps = rpm / args.rate_div
         cls, n_excl, excl_detail, viol_detail, dur, n_rej = classify(d)
         w = windows(cls, dur)
-        per_win[rpm] = w
-        w.to_csv(os.path.join(args.out_dir, f"slo_windows_rpm_{rpm}.csv"), index=False)
+        per_win[reqps] = w
+        w.to_csv(os.path.join(args.out_dir,
+                              f"slo_windows_{args.rate_key}{rpm:g}.csv"), index=False)
         n_at, n_vi = int((~cls["violate"]).sum()), int(cls["violate"].sum())
         summary.append(dict(offered_reqps=reqps, classified=len(cls),
                             attain=n_at, violate=n_vi,
@@ -120,11 +127,11 @@ def main():
         n = len(per_win)
         ncol = 4; nrow = (n + ncol - 1) // ncol
         fig, axes = plt.subplots(nrow, ncol, figsize=(4.0 * ncol, 3.0 * nrow), squeeze=False)
-        for i, (rpm, w) in enumerate(sorted(per_win.items())):
+        for i, (reqps_i, w) in enumerate(sorted(per_win.items())):
             ax = axes[i // ncol][i % ncol]
             ax.plot(w["t_mid"], w["attain"] / WIN_S, color="#1f77b4", label="SLO attain (/s)")
             ax.plot(w["t_mid"], w["violate"] / WIN_S, color="#d62728", label="SLO violate (/s)")
-            ax.set_title(f"{rpm / 60:.0f} req/s offered")
+            ax.set_title(f"{reqps_i:g} req/s offered")
             ax.set_xlabel("arrival time (s)"); ax.grid(axis="y", ls=":", lw=0.5, alpha=0.5)
             if i % ncol == 0:
                 ax.set_ylabel("requests/s")

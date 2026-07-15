@@ -172,15 +172,21 @@ def main():
     ap.add_argument("--out-dir", default="results/aggregate_analysis/exp04_slo")
     ap.add_argument("--rate-unit", default="req/s",
                     help="x-axis unit label (e.g. 'req/s' or 'jobs/s')")
+    ap.add_argument("--rate-key", default="rpm_",
+                    help="dirname token preceding the rate value (e.g. 'lambda_')")
+    ap.add_argument("--rate-div", type=float, default=60.0,
+                    help="divide the parsed value by this to get the rate "
+                         "(60 for rpm dirs, 1 for lambda dirs)")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
-    dirs = [d for d in sorted(glob.glob(args.glob), key=lambda x: int(x.split("rpm_")[1]))
+    dirs = [d for d in sorted(glob.glob(args.glob),
+                              key=lambda x: float(x.split(args.rate_key)[1]))
             if os.path.isdir(d)]
     rows = []
     for d in dirs:
-        rpm = int(d.split("rpm_")[1])
+        val = float(d.split(args.rate_key)[1])
         s = condition_stats(d)
-        s["rate"] = rpm / 60.0
+        s["rate"] = val / args.rate_div
         rows.append(s)
         print(f"{s['rate']:6.2f} {args.rate_unit}: attain_steady={s['steady']:5.1f}% "
               f"full={s['full']:5.1f}%  tok/s={s['tokps']:7.0f}  KVμ={s['kv'][0]:5.1f}%  "
