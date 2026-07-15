@@ -42,6 +42,24 @@ PAPER = {"font.family": "serif", "font.size": 9, "axes.labelsize": 10,
          "lines.linewidth": 1.4}
 
 
+# The stock gateway aborts any request whose first SSE byte hasn't arrived
+# within 300s (forwarder ReadTimeout, compile-time constant) and returns 400;
+# the client's non-stream fallback then eats another 300s, so these surface
+# as errors at ~600s with output_tokens=0. Such a request *waited out* the
+# gateway — it is a TTFT violation in the offered view, not run-boundary
+# noise. Latency floor 295s keeps Halo 400-rejects / real errors excluded.
+GW_TIMEOUT_MIN_S = 295.0
+
+
+def gw_timeout_mask(r, boolcol):
+    msg = r["error_msg"].fillna("") if "error_msg" in r.columns else pd.Series("", index=r.index)
+    lat = pd.to_numeric(r.get("latency"), errors="coerce").fillna(0)
+    return (boolcol("is_error") & ~boolcol("is_rejected") & ~boolcol("is_timeout")
+            & ~boolcol("is_server_terminated")
+            & msg.str.contains("400 Client Error", regex=False)
+            & (lat >= GW_TIMEOUT_MIN_S))
+
+
 def classify(run_dir):
     df = pd.read_csv(os.path.join(run_dir, "metrics.csv"))
     r = df[df.agent != "job_summary"].copy()   # request/chain_call rows
@@ -50,19 +68,23 @@ def classify(run_dir):
 
     boolcol = lambda c: r[c].fillna(False).astype(bool) if c in r.columns else pd.Series(False, index=r.index)
     rejected_mask = boolcol("is_rejected")
+    gw_mask = gw_timeout_mask(r, boolcol)
     # admission rejects (is_rejected also sets is_error per the workload
     # invariant) are their own category — counted as violations in the
-    # offered-goodput view, never silently excluded as errors
-    excluded_mask = (boolcol("is_error") | boolcol("is_timeout") | boolcol("is_server_terminated")) & ~rejected_mask
+    # offered-goodput view, never silently excluded as errors. Gateway
+    # 300s-timeout kills are reclassified as TTFT violations (see above).
+    excluded_mask = ((boolcol("is_error") | boolcol("is_timeout") | boolcol("is_server_terminated"))
+                     & ~rejected_mask & ~gw_mask)
     excl_detail = {
-        "error": int((boolcol("is_error") & ~rejected_mask).sum()),
+        "error": int((boolcol("is_error") & ~rejected_mask & ~gw_mask).sum()),
         "timeout": int(boolcol("is_timeout").sum()),
         "server_terminated": int((boolcol("is_server_terminated") & ~boolcol("is_error") & ~boolcol("is_timeout")).sum()),
     }
     n_rejected = int(rejected_mask.sum())
     cls = r[~excluded_mask & ~rejected_mask].copy()
 
-    ttft_viol = cls["first_token_latency"] > TTFT_SLO_S
+    ttft_viol = (cls["first_token_latency"] > TTFT_SLO_S) | gw_timeout_mask(cls, (
+        lambda c: cls[c].fillna(False).astype(bool) if c in cls.columns else pd.Series(False, index=cls.index)))
     tbt = pd.to_numeric(cls["tbt_mean_ms"], errors="coerce")
     tbt_viol = tbt > TBT_SLO_MS          # NaN -> False (TTFT-only judgement)
     cls["violate"] = ttft_viol | tbt_viol
@@ -70,6 +92,7 @@ def classify(run_dir):
         "ttft_only": int((ttft_viol & ~tbt_viol).sum()),
         "tbt_only": int((~ttft_viol & tbt_viol).sum()),
         "both": int((ttft_viol & tbt_viol).sum()),
+        "gw_timeout": int(gw_mask.sum()),
     }
     return cls, excluded_mask.sum(), excl_detail, detail, r["rel"].max(), n_rejected
 

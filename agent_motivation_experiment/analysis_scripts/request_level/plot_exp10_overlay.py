@@ -49,9 +49,10 @@ def steady_stats(run_dir: str, offered_label: float) -> dict:
     bl = lambda c: (win[c].fillna(False).astype(bool)
                     if c in win.columns else pd.Series(False, index=win.index))
     rejected = bl("is_rejected")
-    excluded = (bl("is_error") | bl("is_timeout") | bl("is_server_terminated")) & ~rejected
+    gw = _slo.gw_timeout_mask(win, bl)   # gateway 300s kills -> TTFT violations
+    excluded = (bl("is_error") | bl("is_timeout") | bl("is_server_terminated")) & ~rejected & ~gw
     cls = win[~excluded & ~rejected]
-    ttft_viol = cls["first_token_latency"] > _slo.TTFT_SLO_S
+    ttft_viol = (cls["first_token_latency"] > _slo.TTFT_SLO_S) | gw.reindex(cls.index, fill_value=False)
     tbt_viol = pd.to_numeric(cls["tbt_mean_ms"], errors="coerce") > _slo.TBT_SLO_MS
     n_at = int((~(ttft_viol | tbt_viol)).sum())
     return dict(

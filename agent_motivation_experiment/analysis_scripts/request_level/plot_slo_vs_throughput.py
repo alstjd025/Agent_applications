@@ -38,6 +38,13 @@ import pandas as pd
 TTFT_SLO_S, TBT_SLO_MS = 5.0, 50.0
 STEADY_LO = 60.0
 DRAIN_S = 20.0
+
+import importlib.util as _ilu
+_spec = _ilu.spec_from_file_location(
+    "_slomod", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "slo_sliding_window.py"))
+_slomod = _ilu.module_from_spec(_spec); _spec.loader.exec_module(_slomod)
+_slo_gw_timeout = _slomod.gw_timeout_mask
 ENGINE_PORTS = (8000, 8001, 8002, 8003)
 
 PAPER = {"font.family": "serif", "font.size": 9, "axes.labelsize": 10,
@@ -89,11 +96,15 @@ def condition_stats(run_dir):
     bl = lambda c: r[c].fillna(False).astype(bool) if c in r.columns else pd.Series(False, index=r.index)
     rejected = bl("is_rejected")
     # admission rejects are NOT run-boundary noise: keep them as a separate
-    # category (they count as violations in the offered-goodput view)
-    cls = r[~(bl("is_error") | bl("is_timeout") | bl("is_server_terminated")) & ~rejected].copy()
+    # category (they count as violations in the offered-goodput view).
+    # Gateway 300s-SSE-timeout kills (400 after >=295s wait) are TTFT
+    # violations, not exclusions — see slo_sliding_window.gw_timeout_mask.
+    gw = _slo_gw_timeout(r, bl)
+    cls = r[(~(bl("is_error") | bl("is_timeout") | bl("is_server_terminated")) | gw) & ~rejected].copy()
     rej = r[rejected].copy()
     tbt = pd.to_numeric(cls["tbt_mean_ms"], errors="coerce")
-    cls["violate"] = (pd.to_numeric(cls["first_token_latency"], errors="coerce") > TTFT_SLO_S) | (tbt > TBT_SLO_MS)
+    cls["violate"] = ((pd.to_numeric(cls["first_token_latency"], errors="coerce") > TTFT_SLO_S)
+                      | (tbt > TBT_SLO_MS) | gw.reindex(cls.index, fill_value=False))
 
     hi = dur - DRAIN_S
     full = 100.0 * (~cls["violate"]).mean() if len(cls) else np.nan
