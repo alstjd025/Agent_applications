@@ -91,28 +91,47 @@ request_id 100%). 실측 입력 **평균 22.4k tok/req** (p50 21.6k, max 38.8k �
 no-endpoint 503을 클라이언트가 같은 시그니처로 분류한 것** (θ=0 확인). steady
 window 밖이라 분석 무영향. 모든 run 공통의 주의사항으로 남김.
 
-### λ sweep (steady [60s, 460s], 측정 도착률 = offered 정확히 일치)
+### 인프라 이슈 2건과 조치 (λ≥10 조건 재실행 사유)
 
-| λ (req/s) | steady attain | 전구간 attain | tok/s | KVμ | 비고 |
-|---|---|---|---|---|---|
-| 1–4 | **100%** | 94–100% | 628–2,246 | 6–38% | 위반은 warmup/drain 구간뿐 |
-| 5 | **66.9%** | 66.9% | 2,632 | 73.6% | TBT 위반 개시 (598/707건이 tbt-only) |
-| 6 | 14.4% | 20.0% | **2,822 (peak)** | 91.3% | ITL p50=49.6ms — 50ms 교차점 |
-| 8 | 1.5% | 1.8% | 1,978 | 76.2% | TTFT 큐잉 합류 (both-위반 1,508) |
-| 10–12 | 0% | 0% | 1,762→835 | 89→49% | client 오류 폭증 (아래) |
-| 16–20 | 0% | 0% | 298→**80** | 25→20% | **gateway OOM crashloop** |
+1. **gateway OOMKilled crashloop** — 최초 sweep의 λ≥10 조건에서 gateway가
+   4Gi limit에 OOM(exit 137, λ=20 중 4회 재시작). gateway 메모리는 in-flight
+   요청 수에 비례(엔진 waiting queue의 요청마다 연결+~90KB 본문+LRS 상태
+   유지, gateway 자체 pending 게이지는 0)하는데 이 워크로드의 큐가 수천 개라
+   4Gi를 초과. **연구 대상이 아닌 인프라 artifact로 판정** →
+   `patch-gateway-memory.sh`로 limit 4→64Gi 상향 후 **λ=10/12/16/20 재실행**
+   (오염 run은 `results/exp10_oom_archive/`). λ≤8은 OOM 미발생으로 유효.
+2. **gateway 300s SSE-read-timeout** — OOM 제거 후 드러난 스택 속성. 첫
+   토큰이 300초(forwarder `ReadTimeout`, 컴파일타임 상수) 내에 안 오면
+   gateway가 abort+400, 클라 non-stream fallback까지 합쳐 ~600s에 오류로
+   표면화. **스택 속성으로 수용하기로 결정** (exp05/06도 같은 상한 아래였고
+   이 워크로드가 처음 발현시킨 것). 분석에서 해당 시그니처(400+latency≥295s)
+   를 error 제외가 아닌 **TTFT 위반**으로 재분류 (`gw_timeout_mask`,
+   `viol_gw_timeout` 컬럼) — 300초를 기다린 요청은 offered 관점에서 위반.
 
-- **붕괴 2단계 재현 + 제3단계 발견**: (1) λ=5~6 TBT 위반(KV 수위), (2) λ=8+
-  prefill/큐잉 TTFT 붕괴 — 여기까진 EXP-06과 동형. (3) **λ≥16: gateway가
-  OOMKilled(exit 137)로 crashloop** (λ=20 조건 중 4회 재시작 실측). 22k-tok
-  본문(~90KB)이 pending 큐에 무한 누적 → RemoteDisconnected/reset가 오류의
-  대부분. 무제어 과부하는 SLO를 넘어 **control plane 자체를 죽인다** —
-  admission의 존재 이유가 데이터플레인 보호만이 아님.
-- **토큰 처리량 congestion collapse**: 2,822 tok/s(λ=6 peak) → 80 tok/s
-  (λ=20, peak의 2.8%). chat(EXP-04/05)보다 훨씬 가파름.
+### λ sweep (steady [60s, 460s]; λ=10–20은 64Gi 재실행 데이터)
+
+| λ (req/s) | steady attain | 전구간 attain | tok/s | KVμ | queμ | 비고 |
+|---|---|---|---|---|---|---|
+| 1–4 | **100%** | 94–100% | 628–2,246 | 6–38% | ~0 | 위반은 warmup/drain 구간뿐 |
+| 5 | **66.9%** | 66.9% | 2,632 | 73.6% | 3 | TBT 위반 개시 (598/707이 tbt-only) |
+| 6 | 14.4% | 20.0% | **2,822 (peak)** | 91.3% | 95 | ITL p50=49.6ms — 50ms 교차점 |
+| 8 | 1.5% | 1.8% | 1,978 | 76.2% | 645 | TTFT 큐잉 합류 (both 1,508) |
+| 10 | 0% | 1.2% | 928 | 47% | 1,349 | gw_timeout 1,228건 개시 |
+| 12 | 0% | 0% | 670 | 47% | 2,588 | 위반 대부분 ttft (gw_timeout 4,198) |
+| 16–20 | 0% | 0% | 453→269 | 49→43% | 3,919→4,268 | gateway 안정 (재시작 0), 순수 큐잉 붕괴 |
+
+- **붕괴 3단계**: (1) λ=5–6 TBT 위반(KV 수위), (2) λ=8+ TTFT 큐잉,
+  (3) λ≥10 대기 300s 초과분이 gateway timeout으로 잘려나가며 attain 0%.
+  엔진 waiting queue는 λ=20에서 평균 4,268개까지 성장.
+- **토큰 처리량 congestion collapse**: 2,822 tok/s(λ=6 peak) → 269 tok/s
+  (λ=20, peak의 9.5%). 과부하에서 KV는 43–49%로 오히려 낮음 — 엔진이 큐
+  회전(prefill+abort)에 시간을 쓰고 decode를 못 채우는 thrash 상태.
 - **TBT–KV 법칙 3번째 검증점** (run-레벨, pool 2.34Mtok): λ=4: 예측 28.0 vs
   실측 29.8ms · λ=5: 45.4 vs 44.4 · λ=6: 53.9 vs 49.6 — open-loop SWE에서도
   기울기 유지.
+- 주의: λ=20의 측정 도착률은 13.5 calls/s로 offered보다 낮음 — 체류시간
+  ~600s × 8,192 부하기 스레드 상한(8192/600≈13.7)에 걸린 client-side cap.
+  λ≤16은 미해당(측정=offered). attain 결론엔 무영향.
 
 ### EXP-06 오버레이 (측정 call 도착률 축) — 핵심 발견
 
@@ -123,10 +142,10 @@ window 밖이라 분석 무영향. 모든 run 공통의 주의사항으로 남�
    용량은 용량 — 도착 과정이 바꾸지 못한다.
 2. **초과 수요에서만 갈라진다**: closed-loop(EXP-06)은 chain 되먹임이
    도착률을 자기억제 (5 jobs/s 제안에도 실측 11.5 calls/s에서 포화, attain
-   바닥 ~22%). open-loop은 제안 수요가 그대로 도착해 attain 0% + gateway
-   crash까지 감. **즉 EXP-06의 "부드러운 바닥"은 시스템이 견딘 게 아니라
-   폐루프가 수요를 숨긴 것** — job-level 실험의 rejection/붕괴 지표는 실수요
-   대비 과소표시라는 EXP-09 §chain-kill 관찰의 sweep 전체 버전.
+   바닥 ~22%). open-loop은 제안 수요가 그대로 도착해 attain 0%로 떨어지고
+   토큰 처리량도 peak의 10%로 붕괴. **즉 EXP-06의 "부드러운 바닥"은 시스템이
+   견딘 게 아니라 폐루프가 수요를 숨긴 것** — job-level 실험의 rejection/붕괴
+   지표는 실수요 대비 과소표시라는 EXP-09 §chain-kill 관찰의 sweep 전체 버전.
 
 ### 산출물
 
