@@ -86,14 +86,19 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--glob", default="results/*exp03_70b_ratesweep_rpm_*")
     ap.add_argument("--out-dir", default="results/aggregate_analysis/exp03_plots")
+    ap.add_argument("--rate-key", default="rpm_",
+                    help="dirname token preceding the rate value (e.g. 'lambda_')")
+    ap.add_argument("--rate-div", type=float, default=60.0,
+                    help="divide the parsed value by this to get req/s")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
-    dirs = sorted(glob.glob(args.glob), key=lambda x: int(x.split("rpm_")[1]))
+    dirs = sorted(glob.glob(args.glob),
+                  key=lambda x: float(x.split(args.rate_key)[1]))
     colors = plt.cm.tab10(np.arange(4))
 
     written = []
     for run in dirs:
-        rpm = int(run.split("rpm_")[1]); reqps = rpm / 60.0
+        rpm = float(run.split(args.rate_key)[1]); reqps = rpm / args.rate_div
         recs = {p: _load(os.path.join(run, "server_metrics", f"engine_{p}.jsonl"))
                 for p in ENGINE_PORTS}
         with plt.rc_context(PAPER):
@@ -136,10 +141,10 @@ def main():
             for row in ax:
                 for pnl in row:
                     pnl.grid(axis="y", ls=":", lw=0.5, alpha=0.5)
-            fig.suptitle(f"Per-engine latency vs load imbalance — offered {reqps:.0f} req/s",
+            fig.suptitle(f"Per-engine latency vs load imbalance — offered {reqps:g} req/s",
                          y=1.0)
             fig.tight_layout()
-            out = os.path.join(args.out_dir, f"latency_rpm_{rpm}.png")
+            out = os.path.join(args.out_dir, f"latency_{args.rate_key}{rpm:g}.png")
             fig.savefig(out, dpi=140, bbox_inches="tight")
             plt.close(fig)
             written.append(out)

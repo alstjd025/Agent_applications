@@ -91,8 +91,9 @@ def _note(ax, msg):
             fontsize=8, color="0.5", style="italic")
 
 
-def plot_llumnix(run, rpm, out_dir):
-    reqps = rpm / 60.0
+def plot_llumnix(run, rpm, out_dir, tag=None, rate_div=60.0):
+    reqps = rpm / rate_div
+    tag = tag or f"rpm_{rpm:g}"
     gw = _load(os.path.join(run, "server_metrics", "gateway.jsonl"))
     sc = _load(os.path.join(run, "server_metrics", "scheduler.jsonl"))
     with plt.rc_context(PAPER):
@@ -137,13 +138,14 @@ def plot_llumnix(run, rpm, out_dir):
             _note(b, "request_total/rescheduling not captured\n(needs collector re-run)")
         fig.suptitle(f"Llumnix layer — offered {reqps:.0f} req/s", y=1.0)
         fig.tight_layout()
-        out = os.path.join(out_dir, f"llumnix_rpm_{rpm}.png")
+        out = os.path.join(out_dir, f"llumnix_{tag}.png")
         fig.savefig(out, dpi=140, bbox_inches="tight"); plt.close(fig)
     return out
 
 
-def plot_engine(run, rpm, out_dir):
-    reqps = rpm / 60.0
+def plot_engine(run, rpm, out_dir, tag=None, rate_div=60.0):
+    reqps = rpm / rate_div
+    tag = tag or f"rpm_{rpm:g}"
     recs = {p: _load(os.path.join(run, "server_metrics", f"engine_{p}.jsonl")) for p in ENGINE_PORTS}
     colors = plt.cm.tab10(np.arange(4))
     with plt.rc_context(PAPER):
@@ -222,7 +224,7 @@ def plot_engine(run, rpm, out_dir):
         fig.suptitle(f"Engine layer — offered {reqps:.0f} req/s "
                      f"(per engine 8000-8003)", y=1.0)
         fig.tight_layout()
-        out = os.path.join(out_dir, f"engine_rpm_{rpm}.png")
+        out = os.path.join(out_dir, f"engine_{tag}.png")
         fig.savefig(out, dpi=140, bbox_inches="tight"); plt.close(fig)
     return out
 
@@ -231,14 +233,20 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--glob", default="results/*exp02b_ratesweep_rpm_*")
     ap.add_argument("--out-dir", default="results/aggregate_analysis/exp02b_plots")
+    ap.add_argument("--rate-key", default="rpm_",
+                    help="dirname token preceding the rate value (e.g. 'lambda_')")
+    ap.add_argument("--rate-div", type=float, default=60.0,
+                    help="divide the parsed value by this to get req/s")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
-    dirs = sorted(glob.glob(args.glob), key=lambda x: int(x.split("rpm_")[1]))
+    dirs = sorted(glob.glob(args.glob),
+                  key=lambda x: float(x.split(args.rate_key)[1]))
     written = []
     for run in dirs:
-        rpm = int(run.split("rpm_")[1])
-        written.append(plot_llumnix(run, rpm, args.out_dir))
-        written.append(plot_engine(run, rpm, args.out_dir))
+        rpm = float(run.split(args.rate_key)[1])
+        tag = f"{args.rate_key}{rpm:g}"
+        written.append(plot_llumnix(run, rpm, args.out_dir, tag, args.rate_div))
+        written.append(plot_engine(run, rpm, args.out_dir, tag, args.rate_div))
     print("wrote:")
     for w in written:
         print(" ", w)
