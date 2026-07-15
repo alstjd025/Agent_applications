@@ -85,13 +85,20 @@ def main():
     rpms = sorted({rpm for th, rpm in runs if th in thetas})
     print("thetas:", thetas, "rates:", [r / 60 for r in rpms])
 
+    cache_dir = os.path.join(args.out_dir, "itl_cache")
+    os.makedirs(cache_dir, exist_ok=True)
     data, pct_rows = {}, []
     for th in thetas:
         for rpm in rpms:
             d = runs.get((th, rpm))
             if not d:
                 continue
-            a = itl_samples(d)
+            cpath = os.path.join(cache_dir, f"th{int(th*1000):04d}_rpm{rpm}.npy")
+            if os.path.isfile(cpath):
+                a = np.load(cpath)
+            else:
+                a = itl_samples(d)
+                np.save(cpath, a)
             data[(th, rpm)] = a
             if len(a):
                 pct_rows.append(dict(theta=th, rate=rpm / 60.0, n=len(a),
@@ -117,8 +124,12 @@ def main():
                 ax.plot(xs, np.arange(1, len(xs) + 1) / len(xs),
                         color=COLORS.get(th, "0.5"),
                         label=("no admission" if th == 0 else f"θ={th:g}"))
-            ax.axvline(50, color="0.5", ls=":", lw=0.9)
+            ax.axvline(50, color="k", ls="--", lw=1.3, alpha=0.85)
             ax.set_xscale("log"); ax.set_xlim(5, 3000); ax.set_ylim(0, 1.02)
+            ax.set_xticks([10, 20, 50, 100, 200, 500, 1000],
+                          ["10", "20", "50", "100", "200", "500", "1000"], fontsize=7.5)
+            ax.set_xticks([], minor=True)
+            ax.text(50, 0.03, " 50ms", fontsize=7, color="k", ha="left")
             ax.set_title(f"{rpm / 60:g} jobs/s offered")
             ax.grid(axis="both", ls=":", lw=0.5, alpha=0.5)
             if i % ncol == 0:
