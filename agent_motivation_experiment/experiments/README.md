@@ -66,6 +66,7 @@ restart** (not just once at the start).
 | 07 | [EXP-07_kv-threshold-admission.md](EXP-07_kv-threshold-admission.md) | done | KV 점유율 θ admission (chat, 3 rate × θ) — θ\*=0.6, 예상 밖 근사-최적 |
 | 08 | [EXP-08_kv-threshold-full-sweep.md](EXP-08_kv-threshold-full-sweep.md) | done | θ=0.6 chat 전체 sweep — 용량 클램프 min(1, 60/rate) 밀착 |
 | 09 | [EXP-09_swe-kv-admission-sweep.md](EXP-09_swe-kv-admission-sweep.md) | done | SWE × 4θ — 전이 성립, chain-kill 4.6×, ITL CDF와 SLO-정의 의존 |
+| 10 | [EXP-10_swe-request-level-replay.md](EXP-10_swe-request-level-replay.md) | running | SWE open-loop request-level replay λ sweep (admission 없음) — 되먹임 제거한 순수 붕괴 곡선 |
 
 분석 노트: [ANALYSIS_kv-tank-flow.md](ANALYSIS_kv-tank-flow.md) (KV 수조/유량),
 [ANALYSIS_why-not-full-kv.md](ANALYSIS_why-not-full-kv.md) (TBT–KV 선형 법칙),
