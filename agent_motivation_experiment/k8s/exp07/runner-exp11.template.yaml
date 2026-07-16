@@ -57,6 +57,7 @@ spec:
                 --workload-config '{"num_conversations": 1000}' \
                 --model meta-llama/Meta-Llama-3.1-70B-Instruct \
                 --warmup-rpm 1200 --warmup-sec 60 \
+                --post-duration-grace 60 \
                 --output-dir /work/results \
                 --session-name "__SESSION__" \
                 --metrics-interval 1.0

@@ -46,6 +46,7 @@ case "${1:-}" in
     ;;
   sweep)
     check_stack
+    RATES="${2:-$RATES}"   # optional override, e.g. `sweep 9000,10500` for re-runs
     run_job bench-runner-exp11-sweep exp11_chat 360m \
       -e "s/__RATES__/$RATES/" -e "s/__DURMIN__/$DURMIN/"
     echo "[exp11] SWEEP DONE $(date -u +%H:%M)"
