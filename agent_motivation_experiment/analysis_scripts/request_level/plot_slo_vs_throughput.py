@@ -85,7 +85,7 @@ def _steady_stats(t, v, lo, hi):
     return float(w.mean()), float(np.percentile(w, 10)), float(np.percentile(w, 90))
 
 
-def condition_stats(run_dir, steady_anchor="end"):
+def condition_stats(run_dir, steady_anchor="end", steady_max_s=None):
     df = pd.read_csv(os.path.join(run_dir, "metrics.csv"), low_memory=False)
     r = df[df.agent != "job_summary"].copy()   # request/chain_call rows
     r = r[pd.to_numeric(r.get("start_time"), errors="coerce").notna()]
@@ -100,6 +100,9 @@ def condition_stats(run_dir, steady_anchor="end"):
         # with the idle drain phase. Arrival anchoring keeps the window on
         # the load phase only. (Default "end" preserves historical numbers.)
         dur = min(dur, r["rel"].max())
+    if steady_max_s is not None:
+        # cross-experiment standard window: cap at steady_max_s from t0
+        dur = min(dur, steady_max_s)
 
     bl = lambda c: r[c].fillna(False).astype(bool) if c in r.columns else pd.Series(False, index=r.index)
     rejected = bl("is_rejected")
@@ -203,6 +206,10 @@ def main():
                     help="steady-window end: last completion (historical) or "
                          "last arrival (load phase only; use when a long "
                          "post-submission drain tail exists)")
+    ap.add_argument("--steady-max-s", type=float, default=None,
+                    help="cap the steady-window end at this many seconds from "
+                         "the first arrival (e.g. 360 to recut a 10-min run "
+                         "to the exp05-equivalent [60,340] window)")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
     dirs = [d for d in sorted(glob.glob(args.glob),
@@ -211,7 +218,8 @@ def main():
     rows = []
     for d in dirs:
         val = float(d.split(args.rate_key)[1])
-        s = condition_stats(d, steady_anchor=args.steady_anchor)
+        s = condition_stats(d, steady_anchor=args.steady_anchor,
+                            steady_max_s=args.steady_max_s)
         s["rate"] = val / args.rate_div
         rows.append(s)
         print(f"{s['rate']:6.2f} {args.rate_unit}: attain_steady={s['steady']:5.1f}% "
