@@ -305,6 +305,11 @@ class MetricsTracker:
     # record_chain_call  (NEW - primary method for synthetic chain agent)
     # ------------------------------------------------------------------
 
+    # Global kill-switch for --post-duration-grace: once a grace cut has
+    # written synthetic run-end rows for the abandoned in-flight requests,
+    # their still-running threads must not append a second (real) row later.
+    grace_closed = False
+
     def record_chain_call(
         self,
         agent_name: str,  # typically "chain_call"
@@ -332,6 +337,7 @@ class MetricsTracker:
         stream_fallback_used: bool = False,
         tbt_summary: Optional[Dict[str, Any]] = None,
         tbt_detail: Optional[Dict[str, Any]] = None,
+        force: bool = False,
     ):
         """Record a single call within a synthetic chain job.
 
@@ -360,6 +366,8 @@ class MetricsTracker:
             tbt_summary: Summary dict from ``summarize_tbt_ms()``.
             tbt_detail: Raw TBT detail dict (written to JSONL sidecar).
         """
+        if MetricsTracker.grace_closed and not force:
+            return None
         common = self._compute_common_fields(
             start_time, end_time, input_tokens, output_tokens, first_token_time
         )

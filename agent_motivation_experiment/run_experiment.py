@@ -124,6 +124,7 @@ def _mp_load_worker(cfg: dict) -> Optional[dict]:
         warmup_rpm=cfg.get("warmup_rpm", 0.0),
         warmup_sec=cfg.get("warmup_sec", 60.0),
         disable_timeouts=cfg["disable_timeouts"],
+        post_duration_grace=cfg.get("post_duration_grace", 0.0),
     )
     mode = cfg["mode"]
     if mode == "rate":
@@ -370,6 +371,7 @@ class MotivationExperimentRunner:
         load_threads: int = 1024,
         warmup_rpm: float = 0.0,
         warmup_sec: float = 60.0,
+        post_duration_grace: float = 0.0,
         dataset=None,
         mp_args=None,
         mp_workload_config=None,
@@ -421,6 +423,7 @@ class MotivationExperimentRunner:
         self.transcript_record_path = transcript_record_path
         # Disable client-side request aborts (request-level workload).
         self.disable_timeouts = disable_timeouts
+        self.post_duration_grace = post_duration_grace
 
         # HALO: probe the server once at construction. Server is assumed
         # to be up by the time main() instantiates the runner (every
@@ -706,6 +709,48 @@ class MotivationExperimentRunner:
 
         self._print_summary(stats, mode="concurrency", level=concurrency)
 
+    def _grace_cut_pending(self, ex, pending, futinfo, stats):
+        """Bounded post-duration drain (--post-duration-grace).
+
+        Waits grace seconds for in-flight requests, then records a synthetic
+        run-end-cut row (agent=grace_cut, is_server_terminated=True) for each
+        survivor so arrival accounting stays complete, flips the global
+        MetricsTracker kill-switch so the abandoned threads cannot append a
+        second row later, and returns without joining them — the next
+        condition's cold restart reaps the zombie connections. Single-process
+        standalone runs (no follow-up restart) may linger at interpreter exit
+        until the zombies' HTTP reads return; sweep/MP paths are unaffected
+        (the MP pool terminate kills the worker processes).
+        """
+        done, left = wait(pending, timeout=self.post_duration_grace)
+        for fut in done:
+            futinfo.pop(fut, None)
+            self._update_stats(stats, fut.result())
+        if left:
+            MetricsTracker.grace_closed = True
+            cut_tracker = MetricsTracker(
+                self.csv_path,
+                server_base_url=self.server_base_url,
+                enable_server_metrics=False,
+                tbt_jsonl_path=self.tbt_jsonl_path,
+            )
+            now = time.time()
+            for fut in left:
+                tid, sub = futinfo.get(fut, ("unknown", now))
+                cut_tracker.start_task(tid)
+                cut_tracker.record_chain_call(
+                    agent_name="grace_cut", start_time=sub, end_time=now,
+                    success=False, is_error=False, is_timeout=False,
+                    is_server_terminated=True, job_completed=False,
+                    error_msg="post-duration grace cut", force=True,
+                )
+                stats["server_terminated"] += 1
+                stats["completed"] += 1
+            self._console_write(
+                f"[grace] cut {len(left)} in-flight requests after "
+                f"{self.post_duration_grace:.0f}s grace (threads abandoned)")
+        ex.shutdown(wait=False)
+
     def _run_with_rate_duration(
         self,
         task_pool,
@@ -747,8 +792,10 @@ class MotivationExperimentRunner:
         experiment_start = time.monotonic()
         next_submit_time = time.monotonic()
 
+        MetricsTracker.grace_closed = False
+        futinfo = {}
+        ex = ThreadPoolExecutor(max_workers=max_workers)
         try:
-            with ThreadPoolExecutor(max_workers=max_workers) as ex:
                 while True:
                     now = time.monotonic()
                     elapsed = now - experiment_start
@@ -766,6 +813,8 @@ class MotivationExperimentRunner:
                             break
                         fut = ex.submit(self.run_single_job, task)
                         pending.add(fut)
+                        futinfo[fut] = (self.workload.task_log_info(task).task_id,
+                                        time.time())
                         stats["submitted"] += 1
                         in_warmup = (next_submit_time - experiment_start) < warmup_sec
                         next_submit_time += warmup_interval if in_warmup else interval
@@ -778,6 +827,7 @@ class MotivationExperimentRunner:
 
                         for fut in done:
                             result = fut.result()
+                            futinfo.pop(fut, None)
                             self._update_stats(stats, result)
 
                     # Update progress
@@ -797,6 +847,12 @@ class MotivationExperimentRunner:
                         sleep_s = next_submit_time - time.monotonic()
                         if sleep_s > 0 and (time.monotonic() - experiment_start) < total_sec:
                             time.sleep(min(sleep_s, 1.0))
+
+                # Bounded drain: see --post-duration-grace (0 = wait for all)
+                if self.post_duration_grace > 0:
+                    self._grace_cut_pending(ex, pending, futinfo, stats)
+                else:
+                    ex.shutdown(wait=True)
         finally:
             # Wait briefly for in-flight jobs to finish
             time.sleep(3)
@@ -841,8 +897,10 @@ class MotivationExperimentRunner:
         # First inter-arrival time
         next_submit_time = experiment_start + rng.expovariate(lam)
 
+        MetricsTracker.grace_closed = False
+        futinfo = {}
+        ex = ThreadPoolExecutor(max_workers=max_workers)
         try:
-            with ThreadPoolExecutor(max_workers=max_workers) as ex:
                 while True:
                     now = time.monotonic()
                     elapsed = now - experiment_start
@@ -860,6 +918,8 @@ class MotivationExperimentRunner:
                             break
                         fut = ex.submit(self.run_single_job, task)
                         pending.add(fut)
+                        futinfo[fut] = (self.workload.task_log_info(task).task_id,
+                                        time.time())
                         stats["submitted"] += 1
                         next_submit_time += rng.expovariate(lam)
                         now = time.monotonic()
@@ -871,6 +931,7 @@ class MotivationExperimentRunner:
 
                         for fut in done:
                             result = fut.result()
+                            futinfo.pop(fut, None)
                             self._update_stats(stats, result)
 
                     # Update progress
@@ -889,6 +950,12 @@ class MotivationExperimentRunner:
                         sleep_s = next_submit_time - time.monotonic()
                         if sleep_s > 0 and (time.monotonic() - experiment_start) < duration_sec:
                             time.sleep(min(sleep_s, 1.0))
+
+                # Bounded drain: see --post-duration-grace (0 = wait for all)
+                if self.post_duration_grace > 0:
+                    self._grace_cut_pending(ex, pending, futinfo, stats)
+                else:
+                    ex.shutdown(wait=True)
         finally:
             time.sleep(3)
             if self._pbar:
@@ -1031,6 +1098,7 @@ class MotivationExperimentRunner:
                 "max_tokens": self.max_tokens,
                 "load_threads": self.load_threads,
                 "disable_timeouts": self.disable_timeouts,
+                "post_duration_grace": self.post_duration_grace,
                 "workload_name": getattr(self._mp_args, "workload", None),
                 "args": self._mp_args,
                 "workload_config": self._mp_workload_config,
@@ -1518,6 +1586,20 @@ def main():
             "Honored by all workloads."
         ),
     )
+    parser.add_argument(
+        "--post-duration-grace",
+        type=float,
+        default=0.0,
+        help=(
+            "Seconds to wait for in-flight requests after the load phase "
+            "ends, then abandon the rest: each is recorded as a synthetic "
+            "run-end-cut row (agent=grace_cut, is_server_terminated=True) "
+            "and its thread is left to be reaped by the next condition's "
+            "cold restart. 0 (default) keeps the old full-drain behavior. "
+            "Cuts the 10-30min post-duration drain of deep-overload "
+            "no-timeout conditions."
+        ),
+    )
 
     # Trace-replay (--mode trace-replay): drive arrival timing from a
     # canonical arrival trace (see traces/TRACE_FORMAT.md). Trace governs
@@ -1942,6 +2024,7 @@ def main():
             halo_e2e_slo=halo_e2e_slo,
             transcript_record_path=args.record_transcript,
             disable_timeouts=args.disable_timeouts,
+                post_duration_grace=args.post_duration_grace,
             engine=args.engine,
             api=args.api,
             model=args.model,
@@ -2025,6 +2108,7 @@ def main():
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
                 disable_timeouts=args.disable_timeouts,
+                post_duration_grace=args.post_duration_grace,
                 engine=args.engine,
                 api=args.api,
                 model=args.model,
@@ -2118,6 +2202,7 @@ def main():
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
                 disable_timeouts=args.disable_timeouts,
+                post_duration_grace=args.post_duration_grace,
                 engine=args.engine,
                 api=args.api,
                 model=args.model,
@@ -2217,6 +2302,7 @@ def main():
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
                 disable_timeouts=args.disable_timeouts,
+                post_duration_grace=args.post_duration_grace,
                 engine=args.engine,
                 api=args.api,
                 model=args.model,
@@ -2312,6 +2398,7 @@ def main():
             halo_e2e_slo=halo_e2e_slo,
             transcript_record_path=args.record_transcript,
             disable_timeouts=args.disable_timeouts,
+                post_duration_grace=args.post_duration_grace,
             engine=args.engine,
             api=args.api,
             model=args.model,
@@ -2393,6 +2480,7 @@ def main():
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
                 disable_timeouts=args.disable_timeouts,
+                post_duration_grace=args.post_duration_grace,
                 engine=args.engine,
                 api=args.api,
                 model=args.model,
@@ -2463,6 +2551,7 @@ def main():
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
                 disable_timeouts=args.disable_timeouts,
+                post_duration_grace=args.post_duration_grace,
                 engine=args.engine,
                 api=args.api,
                 model=args.model,
@@ -2535,6 +2624,7 @@ def main():
                 halo_e2e_slo=halo_e2e_slo,
                 transcript_record_path=args.record_transcript,
                 disable_timeouts=args.disable_timeouts,
+                post_duration_grace=args.post_duration_grace,
                 engine=args.engine,
                 api=args.api,
                 model=args.model,
