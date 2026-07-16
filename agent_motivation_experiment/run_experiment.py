@@ -736,6 +736,11 @@ class MotivationExperimentRunner:
             )
             now = time.time()
             for fut in left:
+                if fut.done():
+                    # finished in the gap between wait() returning and the
+                    # kill-switch being set — its real row is already written
+                    self._update_stats(stats, fut.result())
+                    continue
                 tid, sub = futinfo.get(fut, ("unknown", now))
                 cut_tracker.start_task(tid)
                 cut_tracker.record_chain_call(
