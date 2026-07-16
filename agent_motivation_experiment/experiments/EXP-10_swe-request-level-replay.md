@@ -112,21 +112,52 @@ window 밖이라 분석 무영향. 모든 run 공통의 주의사항으로 남�
 부차 요인이었다. 시간 분해가 진범을 지목한다: 완료 요청 기준 prefill은
 1–2s로 미미, **decode 자체가 느려진다** (per-req decode 56→141s).
 
-**두-영역(two-regime) ITL 법칙** (전 11λ, 엔진 카운터 실측):
+**두-영역(two-regime) ITL 법칙** (전 11λ 엔진 카운터 + EXP-05 교차검증으로
+확정; 초기의 "큐 개수 × 78µs" 해석은 EXP-05 반례로 **수정됨**):
 
 - **영역 1 — KV-바운드** (KV<~92%, 큐≈0): ITL ≈ 10+20.6·KV[Mtok]
   (기존 TBT–KV 법칙; λ=1–6 구간 20→104ms가 이걸 따름).
-- **영역 2 — 큐-바운드** (KV 99% 고정, 큐 성장): **ITL ≈ 55ms + 77.7µs ×
-  waiting_queue_length (r=0.980)**. running(≈400)과 KV(99%)가 완전히 같은데
-  ITL만 104→390ms로 커지는 유일한 공변수가 큐 길이. λ=20에선 step당 ~340ms가
-  순수 오버헤드 — 엔진이 매 decode step마다 4.4k 대기열을 스캔하는
-  스케줄러/llumlet 레이어 비용(요청당 ~78µs/step)으로 보인다(상관 기반 추정;
-  코드 레벨 확증은 후속). preemption(감소 추세)·prefix-hit(75→66%)은 배제됨.
+- **영역 2 — 큐-바운드** (KV 포화 후): ITL이 대기 큐의 **요청 수가 아니라
+  토큰 질량**에 비례해 증가. exp10 내부 회귀는 78µs/대기요청(r=0.98)이지만
+  EXP-05는 같은 큐 개수(2.7k)에서 3.9µs/요청 — 20× 차이가 정확히 요청당
+  프롬프트 크기 비(22.4k vs 840 tok, 27×)로 설명된다: **토큰 단위로는 양쪽
+  모두 ~3–5 ns/(대기 토큰·step)** (exp05 4.6, exp10 1.7–3.3). 블록당
+  해시룩업 ~50–80ns ÷ 16 tok/블록과 정량 일치 — 매 step 스케줄링 시도가
+  대기 프롬프트의 prefix-cache 블록 해시를 재조회하는 비용이 유력 후보
+  (코드/프로파일링 확증은 후속, EXP-11 후보).
+- 배제된 가설: doomed-work(무-timeout 대조실험으로 곡선 불변), preemption
+  (422→139로 감소), prefix-hit 붕괴(75→66%로 완만), KV 총량(99% 고정인데
+  ITL 159→390ms).
 
-**함의**: 무제어 과부하는 GPU 물리가 아니라 **엔진 자신의 per-step 스케줄링
-오버헤드로 throughput을 파괴한다** (tok/s ≈ running/ITL ∝ 1/Q). admission
-control이 지키는 것은 latency SLO만이 아니라 **엔진의 유효 처리량 그 자체** —
-큐를 짧게 유지하는 것이 throughput 보존 조건이다.
+**EXP-05가 무너지지 않은 이유 (tok/s ≡ running/ITL 항등식으로 분해)**:
+
+| | EXP-05 @100req/s (1.67×용량) | EXP-10 @λ=20 (4×용량) |
+|---|---|---|
+| running (KV pool ÷ 요청당 고유토큰) | 2,699 (≈2.34M/0.8k) | 400 (≈2.34M/5.8k) |
+| 엔진 ITLμ | 123ms | 390ms |
+| tok/s = run/ITL | **22,030 (평탄)** | **800 (붕괴)** |
+
+chat은 과부하에서 running이 1.7k→2.7k로 **자라며** ITL 상승(+40ms)을 흡수
+(work-conserving 포화 평탄역). SWE 장문은 (a) 요청당 고유 KV가 커서 running이
+400에 **고정**되고, (b) 대기 토큰 질량(94M vs 2.3M, 40×)이 step당 오버헤드를
+키워 ITL이 3배가 되니, 곱으로 tok/s가 무너진다. 추가로 EXP-05는 최대
+1.67×용량까지만 밀었는데 그 영역에선 EXP-10도 -6%뿐(λ=8) — 붕괴는 ≥2×에서
+시작되는 영역이고 chat은 거기까지 간 적이 없다.
+
+**함의**: 무제어 과부하는 GPU 물리가 아니라 **대기 큐가 엔진 스텝 루프에
+부과하는 토큰-질량 비례 오버헤드**로 throughput을 파괴한다. admission
+control이 지키는 것은 latency SLO만이 아니라 엔진의 유효 처리량 그 자체 —
+특히 장문(agent) 워크로드에서 큐를 짧게 유지하는 것이 throughput 보존 조건.
+
+**릴리즈 조건 감사 (no-timeout 11조건 전수)**: steady 측정 도착률 = offered
+정확히 일치(λ=20 → 20.00/s; 스레드 16k 상향 후 client cap 해소), inter-arrival
+CV 0.94–1.02(=Poisson), replay 순환 0(전 조건 r01), task_id 중복 0, 입력
+토큰 μ 20.2–22.3k(transcript 22.4k와 일치, 조건 간 균질), gateway pending 0
+(도착이 즉시 엔진 waiting에 적재 — open-loop 끝단까지 보존). **발견된 결함
+1건**: `--warmup-rpm`이 poisson 모드에선 no-op이라 첫 60초도 λ 그대로 진행
+(rate 모드 전용 경로). 영향 없음 — steady window가 [60s,·)라 어차피 제외되고,
+전 조건 동일 거동이라 비교성 유지, open-loop 순수성엔 오히려 부합. tau=2.0이
+run_config에 남지만 `--disable-timeouts`로 불활성.
 
 데이터 계보: `results/exp10_oom_archive/`(gateway 4Gi OOM 오염),
 `results/exp10_gwtimeout_archive/`(300s-cap), 현행 `*_exp10_replay_lambda_*`
