@@ -230,32 +230,68 @@ def plot_engine(run, rpm, out_dir, tag=None, rate_div=60.0):
 
 
 
-def plot_tokens(run, rpm, out_dir, tag=None, rate_div=60.0):
-    """Per-engine prefill / decode throughput, separate panels and scales.
+def _windowed_mean(recs, sum_key, cnt_key, t0=None):
+    """Interval mean of a histogram metric: d(sum)/d(count) per tick."""
+    ts, ss, cs, base = [], [], [], t0
+    for r in recs:
+        if not r.get("ok"):
+            continue
+        sv = [v for k, v in r.items() if k.split("|")[0] == sum_key]
+        cv = [v for k, v in r.items() if k.split("|")[0] == cnt_key]
+        if not sv or not cv:
+            continue
+        if base is None:
+            base = r["t"]
+        ts.append(r["t"] - base); ss.append(sum(sv)); cs.append(sum(cv))
+    t, sa, ca = np.array(ts), np.array(ss), np.array(cs)
+    if len(t) < 2:
+        return np.array([]), np.array([])
+    ds, dc = np.diff(sa), np.diff(ca)
+    m = dc > 0
+    tm = (t[:-1] + np.diff(t) / 2)[m]
+    mv = ds[m] / dc[m]
+    if SMOOTH > 1 and len(mv) >= SMOOTH:
+        mv = np.convolve(mv, np.ones(SMOOTH) / SMOOTH, mode="same")
+    return tm, mv
 
-    2x4 grid: top row = prefill (prompt) tok/s, bottom row = decode
-    (generation) tok/s, one column per engine — no overlaying, so each
-    series keeps its own visual scale. NB vllm:prompt_tokens_total counts
-    ALL scheduled prompt tokens including prefix-cache HITS (cheap attach),
+
+def plot_tokens(run, rpm, out_dir, tag=None, rate_div=60.0):
+    """Per-engine token throughput + latency, separate panels and scales.
+
+    4x4 grid, one column per engine: prefill (prompt) tok/s, decode
+    (generation) tok/s, mean TTFT (engine-side: from engine receipt incl.
+    its waiting queue), mean ITL. NB vllm:prompt_tokens_total counts ALL
+    scheduled prompt tokens including prefix-cache HITS (cheap attach),
     so the prefill row is volume, not pure compute.
     """
     reqps = rpm / rate_div
     tag = tag or f"rpm_{rpm:g}"
     recs = {p: _load(os.path.join(run, "server_metrics", f"engine_{p}.jsonl"))
             for p in ENGINE_PORTS}
-    colors = plt.cm.tab10(np.arange(4))
     with plt.rc_context(PAPER):
-        fig, axes = plt.subplots(2, len(ENGINE_PORTS), figsize=(16, 6.5),
+        fig, axes = plt.subplots(4, len(ENGINE_PORTS), figsize=(16, 11),
                                  sharex=True)
-        for col, (c, p) in enumerate(zip(colors, ENGINE_PORTS)):
-            for row, (key, lab, lc) in enumerate((
-                    ("vllm:prompt_tokens_total",
-                     "prefill tok/s\n(incl. cache hits)", "#9467bd"),
-                    ("vllm:generation_tokens_total", "decode tok/s", "#2ca02c"))):
+        for col, p in enumerate(ENGINE_PORTS):
+            rows = (
+                ("rate", "vllm:prompt_tokens_total", None,
+                 "prefill tok/s\n(incl. cache hits)", "#9467bd", 1.0),
+                ("rate", "vllm:generation_tokens_total", None,
+                 "decode tok/s", "#2ca02c", 1.0),
+                ("mean", "vllm:time_to_first_token_seconds_sum",
+                 "vllm:time_to_first_token_seconds_count",
+                 "mean TTFT (s)\n(engine-side)", "#1f77b4", 1.0),
+                ("mean", "vllm:inter_token_latency_seconds_sum",
+                 "vllm:inter_token_latency_seconds_count",
+                 "mean ITL (ms)", "#d62728", 1000.0),
+            )
+            for row, (kind, k1, k2, lab, lc, scale) in enumerate(rows):
                 axis = axes[row][col]
-                t, r, _ = rate_recs(recs[p], key)
+                if kind == "rate":
+                    t, v, _ = rate_recs(recs[p], k1)
+                else:
+                    t, v = _windowed_mean(recs[p], k1, k2)
                 if len(t):
-                    axis.plot(t, r, color=lc, lw=0.9)
+                    axis.plot(t, v * scale, color=lc, lw=0.9)
                 else:
                     _note(axis, "not captured")
                 if row == 0:
@@ -263,9 +299,9 @@ def plot_tokens(run, rpm, out_dir, tag=None, rate_div=60.0):
                 if col == 0:
                     axis.set_ylabel(lab)
                 axis.grid(axis="y", ls=":", lw=0.5, alpha=0.5)
-                if row == 1:
+                if row == len(rows) - 1:
                     axis.set_xlabel("time (s)")
-        fig.suptitle(f"Per-engine token throughput (separate scales) — "
+        fig.suptitle(f"Per-engine token throughput & latency (separate scales) — "
                      f"offered {reqps:g} req/s")
         fig.tight_layout()
         out = os.path.join(out_dir, f"tokens_{tag}.png")
