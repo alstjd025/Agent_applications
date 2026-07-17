@@ -231,13 +231,13 @@ def plot_engine(run, rpm, out_dir, tag=None, rate_div=60.0):
 
 
 def plot_tokens(run, rpm, out_dir, tag=None, rate_div=60.0):
-    """Separate-scale prefill / decode throughput panels (one condition).
+    """Per-engine prefill / decode throughput, separate panels and scales.
 
-    Panel D of the engine figure puts both on one axis, where decode
-    (~1e3 tok/s) is visually flattened under prefill (~1e5 tok/s). Here each
-    gets its own panel and y-scale. NB vllm:prompt_tokens_total counts ALL
-    scheduled prompt tokens including prefix-cache HITS (cheap attach), so
-    the prefill panel is volume, not pure compute.
+    2x4 grid: top row = prefill (prompt) tok/s, bottom row = decode
+    (generation) tok/s, one column per engine — no overlaying, so each
+    series keeps its own visual scale. NB vllm:prompt_tokens_total counts
+    ALL scheduled prompt tokens including prefix-cache HITS (cheap attach),
+    so the prefill row is volume, not pure compute.
     """
     reqps = rpm / rate_div
     tag = tag or f"rpm_{rpm:g}"
@@ -245,30 +245,28 @@ def plot_tokens(run, rpm, out_dir, tag=None, rate_div=60.0):
             for p in ENGINE_PORTS}
     colors = plt.cm.tab10(np.arange(4))
     with plt.rc_context(PAPER):
-        fig, axes = plt.subplots(2, 1, figsize=(11, 7), sharex=True)
-        for axis, key, lab in (
-                (axes[0], "vllm:prompt_tokens_total",
-                 "prefill (prompt) tok/s — incl. prefix-cache hits"),
-                (axes[1], "vllm:generation_tokens_total",
-                 "decode (generation) tok/s")):
-            agg_t, agg = None, None
-            for c, p in zip(colors, ENGINE_PORTS):
+        fig, axes = plt.subplots(2, len(ENGINE_PORTS), figsize=(16, 6.5),
+                                 sharex=True)
+        for col, (c, p) in enumerate(zip(colors, ENGINE_PORTS)):
+            for row, (key, lab, lc) in enumerate((
+                    ("vllm:prompt_tokens_total",
+                     "prefill tok/s\n(incl. cache hits)", "#9467bd"),
+                    ("vllm:generation_tokens_total", "decode tok/s", "#2ca02c"))):
+                axis = axes[row][col]
                 t, r, _ = rate_recs(recs[p], key)
-                if not len(t):
-                    continue
-                axis.plot(t, r, color=c, lw=0.9, alpha=0.7, label=f"eng {p}")
-                if agg is None:
-                    agg_t, agg = t, r.astype(float)
+                if len(t):
+                    axis.plot(t, r, color=lc, lw=0.9)
                 else:
-                    m = min(len(agg), len(r))
-                    agg_t, agg = agg_t[:m], agg[:m] + r[:m]
-            if agg is not None:
-                axis.plot(agg_t, agg, color="k", lw=1.6, label="fleet Σ")
-            axis.set_ylabel(lab)
-            axis.grid(axis="y", ls=":", lw=0.5, alpha=0.5)
-            axis.legend(ncol=3, fontsize=6.5)
-        axes[1].set_xlabel("time (s)")
-        fig.suptitle(f"Token throughput, separate scales — offered {reqps:g} req/s")
+                    _note(axis, "not captured")
+                if row == 0:
+                    axis.set_title(f"engine {p}", fontsize=9)
+                if col == 0:
+                    axis.set_ylabel(lab)
+                axis.grid(axis="y", ls=":", lw=0.5, alpha=0.5)
+                if row == 1:
+                    axis.set_xlabel("time (s)")
+        fig.suptitle(f"Per-engine token throughput (separate scales) — "
+                     f"offered {reqps:g} req/s")
         fig.tight_layout()
         out = os.path.join(out_dir, f"tokens_{tag}.png")
         fig.savefig(out, dpi=140, bbox_inches="tight"); plt.close(fig)
