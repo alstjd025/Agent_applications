@@ -61,8 +61,8 @@ restart** (not just once at the start).
 
 ## Index
 
-> **EXP-05→09 아크 전체 요약(인사이트·방법·세팅)**:
-> [SUMMARY_exp05-09_kv-admission.md](SUMMARY_exp05-09_kv-admission.md)
+> **EXP-05→12 아크 전체 요약(인사이트·방법·세팅·표준)**:
+> [SUMMARY_exp05-12_kv-admission.md](SUMMARY_exp05-12_kv-admission.md)
 
 | # | File | Status | One-line |
 |---|---|---|---|
