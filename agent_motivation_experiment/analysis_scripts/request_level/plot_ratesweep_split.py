@@ -229,6 +229,52 @@ def plot_engine(run, rpm, out_dir, tag=None, rate_div=60.0):
     return out
 
 
+
+def plot_tokens(run, rpm, out_dir, tag=None, rate_div=60.0):
+    """Separate-scale prefill / decode throughput panels (one condition).
+
+    Panel D of the engine figure puts both on one axis, where decode
+    (~1e3 tok/s) is visually flattened under prefill (~1e5 tok/s). Here each
+    gets its own panel and y-scale. NB vllm:prompt_tokens_total counts ALL
+    scheduled prompt tokens including prefix-cache HITS (cheap attach), so
+    the prefill panel is volume, not pure compute.
+    """
+    reqps = rpm / rate_div
+    tag = tag or f"rpm_{rpm:g}"
+    recs = {p: _load(os.path.join(run, "server_metrics", f"engine_{p}.jsonl"))
+            for p in ENGINE_PORTS}
+    colors = plt.cm.tab10(np.arange(4))
+    with plt.rc_context(PAPER):
+        fig, axes = plt.subplots(2, 1, figsize=(11, 7), sharex=True)
+        for axis, key, lab in (
+                (axes[0], "vllm:prompt_tokens_total",
+                 "prefill (prompt) tok/s — incl. prefix-cache hits"),
+                (axes[1], "vllm:generation_tokens_total",
+                 "decode (generation) tok/s")):
+            agg_t, agg = None, None
+            for c, p in zip(colors, ENGINE_PORTS):
+                t, r, _ = rate_recs(recs[p], key)
+                if not len(t):
+                    continue
+                axis.plot(t, r, color=c, lw=0.9, alpha=0.7, label=f"eng {p}")
+                if agg is None:
+                    agg_t, agg = t, r.astype(float)
+                else:
+                    m = min(len(agg), len(r))
+                    agg_t, agg = agg_t[:m], agg[:m] + r[:m]
+            if agg is not None:
+                axis.plot(agg_t, agg, color="k", lw=1.6, label="fleet Σ")
+            axis.set_ylabel(lab)
+            axis.grid(axis="y", ls=":", lw=0.5, alpha=0.5)
+            axis.legend(ncol=3, fontsize=6.5)
+        axes[1].set_xlabel("time (s)")
+        fig.suptitle(f"Token throughput, separate scales — offered {reqps:g} req/s")
+        fig.tight_layout()
+        out = os.path.join(out_dir, f"tokens_{tag}.png")
+        fig.savefig(out, dpi=140, bbox_inches="tight"); plt.close(fig)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--glob", default="results/*exp02b_ratesweep_rpm_*")
@@ -247,6 +293,7 @@ def main():
         tag = f"{args.rate_key}{rpm:g}"
         written.append(plot_llumnix(run, rpm, args.out_dir, tag, args.rate_div))
         written.append(plot_engine(run, rpm, args.out_dir, tag, args.rate_div))
+        written.append(plot_tokens(run, rpm, args.out_dir, tag, args.rate_div))
     print("wrote:")
     for w in written:
         print(" ", w)

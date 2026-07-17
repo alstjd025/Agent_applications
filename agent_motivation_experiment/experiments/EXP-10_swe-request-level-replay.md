@@ -165,6 +165,30 @@ run_config에 남지만 `--disable-timeouts`로 불활성.
 λ=20 ITL CDF 라인 부재는 steady window 도착분 중 스트리밍 완주가 0건이라
 표본이 없는 것(그 자체가 붕괴 증거).
 
+### 연산 구성비 — prefill이 forward 예산을 지배 (tokens_lambda_N.png)
+
+표준 창에서 실연산 prefill(= counted × (1−prefix-hit)) vs decode [tok/s]:
+
+| 조건 | counted prefill | hit% | **실연산 prefill** | decode | 비 |
+|---|---|---|---|---|---|
+| SWE λ=10 | 84.4k | 69% | 25.9k | 2.76k | **9.4:1** |
+| SWE λ=20 | 28.8k | 66% | 9.7k | 1.37k | 7.1:1 |
+| chat 100req/s (exp12) | 42.5k | 42% | 24.8k | 22.2k | 1.1:1 |
+
+- **수준(level)의 이해**: SWE는 forward 토큰의 ~90%가 prefill(chat은 ~50%).
+  흥미롭게도 실연산 prefill 양은 chat@100과 SWE@10이 거의 같다(~25k/s) —
+  같은 prefill 부하에서 chat은 배치 2,700으로 22k decode를 뽑고 SWE는 배치
+  ~370이라 2.8k에 그친다. 즉 낮은 decode 정점은 ①KV-바운드 배치(7×)가
+  주요인이고 ②prefill 점유(step 시간 상승)가 가중 요인.
+- **추세(trend)의 반증**: λ=10→20에서 실연산 prefill이 25.9k→9.7k로
+  **줄어드는데** decode도 2.76k→1.37k로 같이 준다 — "prefill이 예산을 먹어서
+  고λ에서 더 떨어진다"는 방향이 맞지 않고, 남는 설명이 큐-질량 항.
+- **그림 판독 주의**: `tokens_lambda_N.png` 오른쪽 절반(제출 종료 후 drain)의
+  "prefill만 200k+/s, decode 0" 구간은 **run-종료 아티팩트**다 — 클라이언트가
+  종료 이벤트로 끊기면서 "스케줄→prefill→첫 토큰→클라 단절→abort→다음"의
+  prefill-abort 공회전이 백로그를 소진할 때까지 돈다(표준 창 밖; grace 도입
+  이전 run들이라 길게 남음). 부하 구간의 실제 구성비는 위 표가 정본.
+
 ### 인프라 이슈 2건과 조치 (경과 기록; 위 최종 재실행의 전사)
 
 1. **gateway OOMKilled crashloop** — 최초 sweep의 λ≥10 조건에서 gateway가
