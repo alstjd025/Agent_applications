@@ -154,6 +154,7 @@ When testing admission-control rejection behavior:
 | `workloads/swe_bench_coding_parallel_tool_delay/` | SWE-bench workload with parallel execution rounds and deterministic tool-call intervals |
 | `workloads/codingagent_request_level_poisson/` | Request-level Poisson workload — replays recorded agent calls as independent requests |
 | `workloads/sharegpt_request_level_poisson/` | Request-level Poisson workload — downloads ShareGPT and sends multi-turn chat turns as independent requests (direct; no transcript/baseline; absolute-SLO goodput) |
+| `workloads/searcharena_request_level_poisson/` | Request-level Poisson workload — reconstructs deep-research synthesis requests (K search-grounded notes + question) from Search Arena; mid-length input (~3.6k tok), direct/absolute-SLO like sharegpt |
 | `metrics_tracker.py` | Writes `metrics.csv` and `tbt_events.jsonl` |
 | `agent_logger.py` | Writes per-job prompt/response logs |
 | `analysis_scripts/job_level/parse_application_metrics.py` | Builds application analysis CSVs (job workloads) |

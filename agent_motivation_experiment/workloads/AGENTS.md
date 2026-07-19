@@ -165,6 +165,33 @@ Key invariants:
   transcript based; absolute-SLO goodput parsing for this workload is not
   yet implemented.
 
+## Search Arena Deep-Research Request-level Workload
+
+`searcharena_request_level_poisson/` is the same direct, absolute-SLO,
+flat request-level Poisson shape as the ShareGPT flavor, but each
+request is a reconstructed **deep-research synthesis request** built
+from `lmarena-ai/search-arena-24k` (English-only): a fixed synthesis
+system prompt + K search-grounded "research notes" (assistant answers
+from other conversations) + one real user question. It is the suite's
+**mid-length workload** (input mean ~3.2k tok vs chat 0.7k / SWE 21.8k),
+single-turn and chain-free so mix experiments can isolate the
+input-length axis.
+
+Key invariants (beyond the ShareGPT ones, which all apply):
+
+- The dataset holds **no retrieved web bodies** (citation URLs only), so
+  requests are reconstructions — precedent and rationale documented in
+  the workload's `AGENTS.md` (JitServe/NSDI'26 builds its deep-research
+  workload from the same dataset).
+- K ~ log-uniform int in `[k_min, k_max]` (default [2,12]) is the single
+  length knob; notes sampled without replacement, never from the
+  question's own conversation.
+- Tasks are lightweight index specs; text pools stay resident once per
+  load process and prompts are assembled on demand in `run_job`
+  (byte-identical for a given `request_id` across replays/shards/runs).
+- `request_id = sa-{index:06d}`; `SYSTEM_PROMPT` must stay stable across
+  compared runs.
+
 ## Halo-compatible Workloads
 
 Project Halo (request-level since 2026-05-19) admits/rejects **each

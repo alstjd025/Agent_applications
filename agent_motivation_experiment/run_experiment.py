@@ -200,11 +200,12 @@ NODE_PROFILES: Dict[str, Dict[str, object]] = {
 # Workloads that do NOT require --baseline-dir:
 #   - codingagent_request_level_poisson carries its per-request baseline
 #     inside the transcript file.
-#   - sharegpt_request_level_poisson uses absolute SLO thresholds and has
-#     no per-request baseline at all.
+#   - sharegpt_request_level_poisson and searcharena_request_level_poisson
+#     use absolute SLO thresholds and have no per-request baseline at all.
 NO_BASELINE_DIR_WORKLOADS = {
     "codingagent_request_level_poisson",
     "sharegpt_request_level_poisson",
+    "searcharena_request_level_poisson",
 }
 
 

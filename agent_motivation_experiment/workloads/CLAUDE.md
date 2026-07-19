@@ -128,9 +128,9 @@ Key invariants:
 
 ## Request-level Workloads
 
-`codingagent_request_level_poisson/` and `sharegpt_request_level_poisson/`
-are flat, open-loop request streams (one LLM request per task, Poisson
-arrivals — no job/chain).
+`codingagent_request_level_poisson/`, `sharegpt_request_level_poisson/`
+and `searcharena_request_level_poisson/` are flat, open-loop request
+streams (one LLM request per task, Poisson arrivals — no job/chain).
 
 - `codingagent_request_level_poisson` replays a transcript JSONL verbatim
   (the transcript carries its per-request `baseline × tau` baseline) and
@@ -139,10 +139,15 @@ arrivals — no job/chain).
   from HuggingFace and sends requests straight away — no transcript, no
   baseline. Goodput is judged by **absolute SLO thresholds**, so `tau` is
   unused and all client-side aborts are disabled.
+- `searcharena_request_level_poisson` is the same direct/absolute-SLO
+  shape but reconstructs **deep-research synthesis requests** (K
+  search-grounded notes + question) from `lmarena-ai/search-arena-24k`
+  (English-only) — the suite's **mid-length workload** (input mean ~3.2k
+  tok vs chat 0.7k / SWE 21.8k), single-turn and chain-free.
 
-See [AGENTS.md](AGENTS.md) §"Request-level Poisson Workload" and
-§"ShareGPT Request-level Workload", plus each workload folder's own
-`AGENTS.md`.
+See [AGENTS.md](AGENTS.md) §"Request-level Poisson Workload",
+§"ShareGPT Request-level Workload" and §"Search Arena Deep-Research
+Request-level Workload", plus each workload folder's own `AGENTS.md`.
 
 ## Adding A Workload
 
