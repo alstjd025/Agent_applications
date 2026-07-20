@@ -78,7 +78,7 @@ restart** (not just once at the start).
 | 10 | [EXP-10_swe-request-level-replay.md](EXP-10_swe-request-level-replay.md) | done | SWE open-loop request-level replay λ sweep (admission 없음) — 되먹임 제거한 순수 붕괴 곡선 |
 | 11 | [EXP-11_chat-deep-overload.md](EXP-11_chat-deep-overload.md) | done | chat deep-overload — 기울기 ~3ns/tok 일치로 법칙 워크로드-불변 확인; chat은 질량 축적 20× 느려 붕괴역 도달 불가 |
 | 12 | [EXP-12_chat-baseline-31.md](EXP-12_chat-baseline-31.md) | done | chat baseline 3.1-70B 재실험 (exp05 대체; 단일 모델화, 표준 창 [60,340]) |
-| 13 | [EXP-13_searcharena-deep-research-sweep.md](EXP-13_searcharena-deep-research-sweep.md) | running | deep-research(중간 길이, 입력 ~4k tok) 무제어 rate sweep — mix용 baseline; 큐-질량 법칙 3번째 검증 |
+| 13 | [EXP-13_searcharena-deep-research-sweep.md](EXP-13_searcharena-deep-research-sweep.md) | done | deep-research(중간 길이, 입력 ~4k tok) 무제어 rate sweep — SLO knee 13 req/s·그 위 절벽, throughput은 붕괴 않고 포화-평탄(chat-side); 큐-질량 법칙 3번째 검증 |
 
 분석 노트: [ANALYSIS_kv-tank-flow.md](ANALYSIS_kv-tank-flow.md) (KV 수조/유량),
 [ANALYSIS_why-not-full-kv.md](ANALYSIS_why-not-full-kv.md) (TBT–KV 선형 법칙),

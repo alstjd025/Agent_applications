@@ -64,6 +64,55 @@ K개 + 실제 사용자 질문. 데이터셋 구조·재구성 근거·공개 �
 910/4055=22.4% 일치 → 시스템 블록이 캐시 서빙됨을 실증), TTFT 1s, KV peak
 5%. server_metrics(엔진4+scheduler+gateway+migration log) 정상 수집.
 
-## 결과
+## 결과 (2026-07-20 완료; 표준 창 [60,340], 12조건)
 
-(sweep 완료 후 기록)
+SLO 규칙 = TTFT≤5s(도착-앵커) AND meanTBT≤50ms; 에러/타임아웃/run-end-cut 제외.
+
+| req/s | SLO attain | out tok/s | TTFTμ | e2e p95 | KVμ | runΣ | queΣ | 종료컷% |
+|---|---|---|---|---|---|---|---|---|
+| 2–10 | **100%** | 615→2,892 | <1s | 12–28s | 2→23% | 13→135 | ~4 | 0.3–8% |
+| **13** | **86.9%** ← knee | 3,498 | 1.1s | 52s | 54% | 326 | 5 | 8.2% |
+| 16 | **0.9%** ← 절벽 | 3,533 | 13.0s | 90s | 90% | 549 | 202 | 22% |
+| 20 | 1.0% | 3,577 | 34.2s | 117s | 91% | 561 | 695 | 31% |
+| 30 | 0.0% | 3,580 | 64.9s | 168s | 91% | 563 | 2,017 | 32% |
+| 40 | 0.0% | 3,492 | 78.5s | 199s | 92% | 564 | 3,356 | 32% |
+
+### 핵심 발견
+
+1. **SLO knee ≈ 13 req/s, 그 위는 절벽** (86.9% → 0.9% between 13→16). KV가
+   13에서 54%→16에서 90%로 급등하며 대기열이 0→202로 터지는 지점과 일치.
+   예측(SLO knee 4–6)보다 훨씬 높았음 — prefix-cache로 요청당 실연산 prefill이
+   유니크 ~3.1k뿐이라 raw 용량이 컸다(smoke·전 조건에서 prefix-hit ~22% 확인).
+
+2. **가설 검증: throughput은 붕괴하지 않고 포화-평탄** (EXP-13의 핵심 질문).
+   output tok/s는 16 req/s부터 ~3.5k에서 평탄(40까지 −1%), prefill은 fleet Σ
+   ~60–70k tok/s로 평탄(engine_rpm_960.png 패널 D). **SWE(EXP-10)의 붕괴
+   (peak 3,031→1,036, −66%)와 질적으로 다르고 chat(EXP-12)의 평탄에 가깝다.**
+   → 중간 워크로드가 붕괴 축에서 chat-side 거동을 보임. 큐-질량 ITL 법칙의 3번째
+   데이터포인트: 질량 축적속도(surplus×요청당 토큰)가 SWE의 ~1/6이라 5분 창에서
+   throughput 파괴에 도달하지 못함(가설대로).
+
+3. **전형적 큐-바운드 과부하** (engine_rpm_960.png): running은 KV-cap에서
+   ~150/engine 고정, waiting은 0→130 선형 증가, 큐 대기시간 0→27초 선형 램프,
+   KV 100% peg. throughput 안정한데 goodput만 붕괴 = 본 프로젝트 모티브의 교과서적
+   실증.
+
+4. **중간 워크로드 확인(decode 축)**: output tok/s 포화값 ~3.5k = chat 19k와
+   SWE 2.5k **사이**(SWE 쪽). 반면 total(prefill+decode)은 ~60k로 chat 19k보다
+   높음 — deep-research가 prefill-heavy(입력:출력 ≈ 13:1)라 토큰 처리량은 크지만
+   decode 여력이 작다. 입력 4.1k가 SWE 영역에 가까운 것과 일관.
+
+### 산출물
+
+`results/aggregate_analysis/exp13_searcharena/`:
+- `slo_vs_throughput_steady.png` (표준 창 SLO attain + output tok/s — 정본 곡선),
+  `slo_vs_throughput_full.png`, `kv_vs_throughput.png`, `inflight_vs_throughput.png`
+- `persplit/engine_rpm_*.png` (엔진별 running/waiting/KV/prefill·decode/hit/queue),
+  `tokens_rpm_*.png`, `llumnix_rpm_*.png` (제어-평면)
+- `summary/lambda_summary.csv` (12조건 원표), `summary/*.png`
+
+### 예측 대비
+
+- knee 위치: **빗나감**(예측 4–6 → 실측 13) — prefix-cache 효과 과소평가.
+- 붕괴 여부: **적중**(예측 "SWE급 붕괴 미도달, chat-side" → 실측 포화-평탄).
+- decode 중간값: **적중**(chat–SWE 사이).
