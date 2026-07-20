@@ -7,9 +7,11 @@ baseline, absolute-SLO goodput, all client-side aborts disabled); the
 only difference is the request content: a reconstructed deep-research
 *synthesis* request ("K research notes + question -> comprehensive
 answer") whose input length sits between the chat (~0.7k tok) and SWE
-(~22k tok) workloads — measured mean 3,230 / p95 7,089 with the default
-K in [2, 12]. See `searcharena.py` and this folder's AGENTS.md for the
-dataset structure and the reconstruction rationale.
+(~22k tok) workloads — measured mean 4,055 / p95 7,914 with the default
+K in [2, 12] (a fixed ~910-tok deep-research system prompt is cached by
+the engine's prefix cache; ~3,145 tok of notes+question is new prefill).
+See `searcharena.py` and this folder's AGENTS.md for the dataset
+structure and the reconstruction rationale.
 
 Unlike sharegpt, tasks are lightweight index specs: the question/notes
 text pools stay resident once per process and the prompt is assembled on

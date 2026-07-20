@@ -173,7 +173,7 @@ request is a reconstructed **deep-research synthesis request** built
 from `lmarena-ai/search-arena-24k` (English-only): a fixed synthesis
 system prompt + K search-grounded "research notes" (assistant answers
 from other conversations) + one real user question. It is the suite's
-**mid-length workload** (input mean ~3.2k tok vs chat 0.7k / SWE 21.8k),
+**mid-length workload** (input mean ~4.1k tok vs chat 0.7k / SWE 21.8k),
 single-turn and chain-free so mix experiments can isolate the
 input-length axis.
 

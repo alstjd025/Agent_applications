@@ -142,8 +142,9 @@ streams (one LLM request per task, Poisson arrivals — no job/chain).
 - `searcharena_request_level_poisson` is the same direct/absolute-SLO
   shape but reconstructs **deep-research synthesis requests** (K
   search-grounded notes + question) from `lmarena-ai/search-arena-24k`
-  (English-only) — the suite's **mid-length workload** (input mean ~3.2k
-  tok vs chat 0.7k / SWE 21.8k), single-turn and chain-free.
+  (English-only) — the suite's **mid-length workload** (input mean ~4.1k
+  tok vs chat 0.7k / SWE 21.8k; ~910-tok system prompt cached + ~3.1k
+  unique tail), single-turn and chain-free.
 
 See [AGENTS.md](AGENTS.md) §"Request-level Poisson Workload",
 §"ShareGPT Request-level Workload" and §"Search Arena Deep-Research

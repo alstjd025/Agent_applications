@@ -12,12 +12,15 @@ lengths (Llama-3.1 tokenizer):
 | Workload | input mean | input p50/p95 | output mean |
 |---|---|---|---|
 | chat (`sharegpt_...`) | 674 | — | 404 |
-| **this (deep-research)** | **3,230** | **2,636 / 7,089** | model-determined (notes are ~620) |
+| **this (deep-research)** | **4,055** | **3,461 / 7,914** | model-determined |
 | SWE (`codingagent_...`) | 21,789 | — | 538 |
 
 (This-workload numbers measured on the actual implementation: 400
 assembled requests sampled from the default 60k-spec pool, Llama-3.1
-tokenizer; p99 10,197 / max 11,386.)
+tokenizer; p10 1,998 / p90 6,991 / p99 11,022. Input = a fixed ~910-tok
+deep-research `SYSTEM_PROMPT` — served from the engine's prefix cache as
+a shared hit — plus a per-request notes+question tail of mean ~3,145 tok
+that is genuinely new prefill.)
 
 It fills the length axis between chat and SWE **without a chain
 structure** — structurally identical to the chat workload (single-turn,
@@ -60,9 +63,11 @@ it with the dataset's own search-grounded answers standing in for the
 retrieved notes:
 
 ```text
-[system]  fixed research-synthesis instruction (~80 tok, SYSTEM_PROMPT
-          in searcharena.py: answer ONLY from the notes, cite [note n],
-          flag conflicts/missing info)
+[system]  fixed deep-research analyst instruction (~910 tok, SYSTEM_PROMPT
+          in searcharena.py: role, grounding rules — answer ONLY from the
+          notes, cite [note n], surface conflicts, flag missing info — and
+          a 4-section report structure). SAME bytes on every request, so
+          the engine's prefix cache serves it as a shared hit.
 [user]    Research notes:
 
           [note 1]
@@ -78,8 +83,18 @@ retrieved notes:
 - **K ~ log-uniform int in [k_min, k_max]** (default [2, 12], measured
   E[K]=5.37) — the single length knob. Default measured assembly
   (English pools, actual implementation, n=400):
-  **mean 3,230 / p10 1,173 / p50 2,636 / p90 6,166 / p95 7,089 /
-  p99 10,197 tok.**
+  **TOTAL input mean 4,055 / p10 1,998 / p50 3,461 / p90 6,991 /
+  p95 7,914 / p99 11,022 tok**; of which ~910 tok is the cached system
+  prompt and **mean ~3,145 tok is the unique notes+question tail (new
+  prefill)**.
+- **Prefix-cache profile is realistic-by-design.** The fixed ~910-tok
+  system block is byte-identical across all requests → served from
+  vLLM's prefix cache as a shared hit; only the per-request tail is
+  re-prefilled. This mirrors real deep-research serving (a large fixed
+  methodology/format system prompt cached, unique retrieved material
+  re-prefilled) instead of the earlier tiny-prompt shape where almost
+  nothing was cacheable. Per-request *compute* is still dominated by the
+  unique ~3.1k-tok tail, so capacity is governed by that, not the total.
 - Notes are sampled **without replacement**, excluding notes from the
   question's own conversation (a question never ships with its own
   recorded answer).
@@ -103,8 +118,8 @@ retrieved notes:
    dataset contains no retrieved bodies, their served requests (single
    mean 1,911 / P95 7,573; compound mean 12,223 tok) are necessarily
    reconstructions too.
-2. **Length anchor**: our default p95 (7,089) matches JitServe's
-   single-request P95 (7,573), and our mean (3.2k) sits inside their
+2. **Length anchor**: our default p95 (7,914) matches JitServe's
+   single-request P95 (7,573), and our mean (4.1k) sits inside their
    single→compound range (1.9k–12.2k), near the geometric middle of our
    own chat (0.7k) and SWE (21.8k) workloads (~3.8k).
 3. **Content is 100% real data** (real questions, real search-grounded
@@ -118,7 +133,11 @@ retrieved notes:
    `language`/intent filters if semantic coherence ever matters);
    (c) this models the *synthesis stage* of deep research, not the full
    multi-round pipeline (a chained variant would overlap the SWE
-   workload's role and is intentionally out of scope).
+   workload's role and is intentionally out of scope);
+   (d) the ~910-tok system prompt is our own authored deep-research
+   instruction (not from the dataset), sized to be realistic and to give
+   a plausible cacheable-prefix fraction — it is fixed and disclosed, and
+   documented as a construction choice.
 
 ## Single-step / direct — no transcript, no baseline
 
