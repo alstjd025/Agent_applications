@@ -24,7 +24,9 @@ Design notes:
     at run teardown (see capture_migration_logs()).
 """
 
+import os
 import re
+import signal
 import subprocess
 import threading
 import time
@@ -241,14 +243,33 @@ class LlumnixMetricsCollector:
         if not self.capture_dispatch:
             return
         path = f"{self.out_dir.rstrip('/')}/scheduler_dispatch.log"
-        pattern = r"\[Schedule\] dispatch request|refreshInstanceMetadata|Generate rescheduling pairs|Received Migration"
+        pattern = (r"\[Schedule\] dispatch request|refreshInstanceMetadata|"
+                   r"Generate rescheduling pairs|Received Migration")
+        # Follow the NEWEST RUNNING scheduler pod, re-resolved on every attach.
+        # `kubectl logs -f deploy/scheduler` binds to whichever pod it picks at
+        # attach time; right after --restart-per-condition's rollout that can be
+        # the *terminating* old pod, which still emits periodic metadata lines
+        # but receives no traffic — producing a dispatch log with 0 dispatch
+        # lines (observed, EXP-14 mix smoke). The retry loop also survives pod
+        # churn mid-run: if the stream ends we re-resolve and re-attach.
+        script = (
+            f"while :; do "
+            f"  POD=$(kubectl -n {self.namespace} get pods -l app=scheduler "
+            f"        --sort-by=.metadata.creationTimestamp "
+            f"        -o jsonpath='{{range .items[?(@.status.phase==\"Running\")]}}"
+            f"{{.metadata.name}}{{\"\\n\"}}{{end}}' 2>/dev/null | tail -1); "
+            f"  [ -n \"$POD\" ] || {{ sleep 2; continue; }}; "
+            f"  kubectl logs -n {self.namespace} -f --tail=0 \"$POD\" 2>/dev/null "
+            f"    | grep -E --line-buffered '{pattern}'; "
+            f"  sleep 1; "
+            f"done"
+        )
         try:
             self._dispatch_fh = open(path, "w", encoding="utf-8")
             self._dispatch_proc = subprocess.Popen(
-                ["sh", "-c",
-                 f"kubectl logs -n {self.namespace} -f --tail=0 deploy/scheduler "
-                 f"2>/dev/null | grep -E --line-buffered '{pattern}'"],
+                ["sh", "-c", script],
                 stdout=self._dispatch_fh, stderr=subprocess.DEVNULL,
+                start_new_session=True,   # so we can kill the whole pipeline
             )
             print(f"[LlumnixMetrics] dispatch-log capture -> {path}")
         except Exception as e:
@@ -257,12 +278,21 @@ class LlumnixMetricsCollector:
 
     def _stop_dispatch_capture(self):
         if self._dispatch_proc is not None:
+            # The capture is a `while` loop wrapping a kubectl|grep pipeline, so
+            # terminating just the shell would orphan the children. It runs in
+            # its own session (start_new_session=True) -> kill the whole group.
             try:
-                self._dispatch_proc.terminate()
+                os.killpg(os.getpgid(self._dispatch_proc.pid), signal.SIGTERM)
+            except Exception:
+                try:
+                    self._dispatch_proc.terminate()
+                except Exception:
+                    pass
+            try:
                 self._dispatch_proc.wait(timeout=10)
             except Exception:
                 try:
-                    self._dispatch_proc.kill()
+                    os.killpg(os.getpgid(self._dispatch_proc.pid), signal.SIGKILL)
                 except Exception:
                     pass
             self._dispatch_proc = None
