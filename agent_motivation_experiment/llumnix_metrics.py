@@ -209,7 +209,8 @@ class LlumnixMetricsCollector:
     AsyncJSONLWriter. Start once at run start, stop at run teardown.
     """
 
-    def __init__(self, targets: List[ScrapeTarget], out_dir: str, interval: float = 1.0):
+    def __init__(self, targets: List[ScrapeTarget], out_dir: str, interval: float = 1.0,
+                 capture_dispatch: bool = True, namespace: str = "llumnix"):
         self.targets = targets
         self.out_dir = out_dir
         self.interval = interval
@@ -219,6 +220,58 @@ class LlumnixMetricsCollector:
             t.label: AsyncJSONLWriter(f"{out_dir.rstrip('/')}/{t.label}.jsonl")
             for t in targets
         }
+        # Scheduler dispatch-log streaming (per-request -> engine attribution)
+        self.capture_dispatch = capture_dispatch
+        self.namespace = namespace
+        self._dispatch_proc = None
+        self._dispatch_fh = None
+
+    def _start_dispatch_capture(self):
+        """Stream the scheduler's per-request dispatch decisions to a file.
+
+        The scheduler logs "[Schedule] dispatch request <uuid> to neutral
+        instance <instance_id>" per request and periodic
+        "[refreshInstanceMetadata] instanceID=.. api_server_port:80xx" lines.
+        Together they map a request to the engine that served it (joined with
+        the client-side request_ids.jsonl sidecar). The raw log is dominated by
+        per-tick filter spam, so we grep at the source and keep only the lines
+        the join needs. Best-effort: failures never break the run.
+        See experiments/DEV_request-engine-attribution.md.
+        """
+        if not self.capture_dispatch:
+            return
+        path = f"{self.out_dir.rstrip('/')}/scheduler_dispatch.log"
+        pattern = r"\[Schedule\] dispatch request|refreshInstanceMetadata|Generate rescheduling pairs|Received Migration"
+        try:
+            self._dispatch_fh = open(path, "w", encoding="utf-8")
+            self._dispatch_proc = subprocess.Popen(
+                ["sh", "-c",
+                 f"kubectl logs -n {self.namespace} -f --tail=0 deploy/scheduler "
+                 f"2>/dev/null | grep -E --line-buffered '{pattern}'"],
+                stdout=self._dispatch_fh, stderr=subprocess.DEVNULL,
+            )
+            print(f"[LlumnixMetrics] dispatch-log capture -> {path}")
+        except Exception as e:
+            print(f"[LlumnixMetrics] dispatch-log capture failed to start: {e}")
+            self._dispatch_proc = None
+
+    def _stop_dispatch_capture(self):
+        if self._dispatch_proc is not None:
+            try:
+                self._dispatch_proc.terminate()
+                self._dispatch_proc.wait(timeout=10)
+            except Exception:
+                try:
+                    self._dispatch_proc.kill()
+                except Exception:
+                    pass
+            self._dispatch_proc = None
+        if self._dispatch_fh is not None:
+            try:
+                self._dispatch_fh.close()
+            except Exception:
+                pass
+            self._dispatch_fh = None
 
     def start(self):
         if self.is_running:
@@ -226,6 +279,7 @@ class LlumnixMetricsCollector:
         self.is_running = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
+        self._start_dispatch_capture()
         print(
             f"[LlumnixMetrics] Started (interval={self.interval}s, "
             f"{len(self.targets)} targets -> {self.out_dir}/)"
@@ -237,6 +291,7 @@ class LlumnixMetricsCollector:
             self._thread.join(timeout=self.interval + 5)
         for w in self._writers.values():
             w.close()
+        self._stop_dispatch_capture()
         print("[LlumnixMetrics] Stopped")
 
     def _loop(self):

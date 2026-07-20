@@ -157,6 +157,16 @@ def _merge_load_shards(shard_dir: str, n: int, csv_out: str, tbt_out: str,
             if os.path.isfile(p):
                 with open(p, encoding="utf-8") as f:
                     shutil.copyfileobj(f, out)
+    # request_ids.jsonl: concat (per-request -> engine attribution sidecar;
+    # written next to each shard csv by invoke_with_tracking)
+    req_out = os.path.join(os.path.dirname(csv_out) or ".", "request_ids.jsonl")
+    req_shards = [os.path.join(shard_dir, f"request_ids.p{k}.jsonl") for k in range(n)]
+    if any(os.path.isfile(p) for p in req_shards):
+        with open(req_out, "w", encoding="utf-8") as out:
+            for p in req_shards:
+                if os.path.isfile(p):
+                    with open(p, encoding="utf-8") as f:
+                        shutil.copyfileobj(f, out)
     # errors.log: append
     with open(err_out, "a", encoding="utf-8") as out:
         for k in range(n):
@@ -206,6 +216,8 @@ NO_BASELINE_DIR_WORKLOADS = {
     "codingagent_request_level_poisson",
     "sharegpt_request_level_poisson",
     "searcharena_request_level_poisson",
+    # mixed_* delegates to the three above; none of them need a baseline dir.
+    "mixed_request_level_poisson",
 }
 
 

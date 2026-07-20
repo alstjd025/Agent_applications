@@ -19,6 +19,7 @@ Key design goals for the "Illusion of Efficiency" motivation experiment:
 
 import hashlib
 import json
+import os
 import time
 import uuid
 import random
@@ -262,6 +263,15 @@ class LlumnixCompletionsLLM:
         self.top_p = top_p
         self.max_tokens = max_tokens
         self.timeout = timeout
+        # Server-assigned request id of the most recent call ("cmpl-<uuid>").
+        # The Llumnix scheduler logs the same uuid in its dispatch line
+        # ("[Schedule] dispatch request <uuid> to neutral instance <id>"), so
+        # capturing it here is what makes per-request -> engine attribution
+        # possible (see experiments/DEV_request-engine-attribution.md).
+        # One LLM object is built per request in the request-level workloads
+        # and used sequentially within a chain, so this is not shared across
+        # concurrent calls.
+        self.last_request_id = None
 
     def _payload(self, messages: list, stream: bool) -> dict:
         return {
@@ -276,6 +286,7 @@ class LlumnixCompletionsLLM:
         }
 
     def stream(self, messages: list):
+        self.last_request_id = None
         resp = _llumnix_http_session().post(
             self.completions_url,
             json=self._payload(messages, stream=True),
@@ -298,9 +309,14 @@ class LlumnixCompletionsLLM:
                 text = obj["choices"][0].get("text", "")
             except (ValueError, KeyError, IndexError):
                 continue
+            if self.last_request_id is None:
+                rid = obj.get("id")
+                if rid:
+                    self.last_request_id = rid
             yield SimpleNamespace(content=text)
 
     def invoke(self, messages: list):
+        self.last_request_id = None
         resp = _llumnix_http_session().post(
             self.completions_url,
             json=self._payload(messages, stream=False),
@@ -309,6 +325,7 @@ class LlumnixCompletionsLLM:
         _raise_if_llumnix_rejected(resp)
         resp.raise_for_status()
         obj = resp.json()
+        self.last_request_id = obj.get("id")
         text = obj["choices"][0].get("text", "")
         return SimpleNamespace(content=text)
 
@@ -929,6 +946,38 @@ def invoke_with_tracking(
             tbt_summary=tbt_summary,
             tbt_detail=tbt_detail,
         )
+
+    # ---- Request-id sidecar (per-request -> engine attribution) ----
+    # The Llumnix scheduler logs "[Schedule] dispatch request <uuid> to
+    # neutral instance <instance_id>", so pairing our task_id with the
+    # server-assigned request id lets the analysis join a request to the
+    # engine that served it. Written to a SIDECAR file (never into
+    # metrics.csv) so the run output schema stays unchanged; the path is
+    # derived from the tracker's csv path so shards (metrics.p<k>.csv ->
+    # request_ids.p<k>.jsonl) work without threading a new path through
+    # RunContext and every workload. See
+    # experiments/DEV_request-engine-attribution.md.
+    tracker = state.get("metrics_tracker")
+    req_id = getattr(state.get("llm"), "last_request_id", None)
+    if tracker is not None and req_id:
+        csv_path = getattr(tracker, "csv_path", None)
+        if csv_path:
+            from metrics_tracker import MetricsTracker
+
+            base = os.path.basename(csv_path)
+            # "metrics.csv" -> "request_ids.jsonl";
+            # "metrics.p3.csv" -> "request_ids.p3.jsonl"
+            suffix = base[len("metrics"):-len(".csv")] if base.startswith("metrics") else ""
+            sidecar = os.path.join(
+                os.path.dirname(csv_path) or ".", f"request_ids{suffix}.jsonl"
+            )
+            MetricsTracker._get_jsonl_writer(sidecar).write({
+                "task_id": tracker.current_task_id,
+                "call_index": call_index,
+                "request_id": req_id,
+                "start_time": start_time,
+                "end_time": end_time,
+            })
 
     # ---- Transcript recording (literal-replay capture) ----
     # On a concurrency-1 baseline run with --record-transcript, append
