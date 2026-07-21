@@ -162,6 +162,26 @@ task_id 접두사(sg-/sa-/그외). 정본 그림: `results/aggregate_analysis/ex
 `per_class_attainment_mix{A,B,C}.png`, `exp14_summary.csv`(전 조건 원표).
 아카이브: `results/exp14_mixA_grid1_archive/`(초기 1–16 grid).
 
+### 후속: 클래스별 차등 SLO (재실험 없이 재분석)
+
+같은 run들을 **클래스마다 다른 SLO**로 재채점(`exp14_per_class_slo.py`,
+`results/aggregate_analysis/exp14_mix_slo_differentiated/`):
+chat TTFT≤5s&TBT≤50ms / deepresearch TTFT≤10s&TBT≤100ms / **swe E2E≤20s**.
+
+- **핵심 반전**: 균일 SLO에선 세 클래스가 *함께* 붕괴(H1 간섭)했지만, 차등 SLO에선
+  **클래스가 갈라진다** — 간섭이 latency를 함께 끌어올려도 *위반 여부*는 각 클래스의
+  예산이 정한다. mix A@30 req/s: deepresearch 55% / chat 10% / swe 1%
+  (`exp14_per_class_slo_mixA.png`). 느슨한 예산(deep-research)이 공유 열화를 더
+  오래 흡수 → **"보호할 클래스를 SLO로 고를 수 있다".**
+- 순서는 클래스 특성이 아니라 **SLO 예산 대비 healthy latency의 여유**가 결정:
+  deep-research(TTFT 0.3s vs 예산 10s = 큰 여유) > chat > swe.
+- **swe E2E≤20s 주의**: SWE healthy(저부하) E2E가 이미 12–19s라 20s는 ~1.3×로
+  빡빡함 → SWE는 저rate에서도 100% 못 찍음(mixC@8 62%, mixA@8 78%). 100% 근처를
+  원하면 30s(≈2×) 필요. 20s는 사용자 선택(빡센 배경-에이전트 예산 시나리오).
+- 산출물: `exp14_fleet_attainment_slo.png`(3비율 fleet),
+  `exp14_per_class_slo_mix{A,B,C}.png`, `per_engine_attainment_slo_mix{A,B,C}.png`,
+  `exp14_summary_slo.csv`.
+
 ### 방법론 메모
 
 - 초기 grid(1–16)는 prefix-cache 때문에 용량을 과소평가 → KV 기반 비율별 grid로
