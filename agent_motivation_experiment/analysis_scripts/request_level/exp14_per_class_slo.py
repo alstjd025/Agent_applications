@@ -42,7 +42,7 @@ from plot_per_engine_attainment import served_rows, class_of  # noqa: E402
 SLO_RULES = {
     "chat":         {"ttft": 5.0,  "tbt": 50.0},
     "deepresearch": {"ttft": 10.0, "tbt": 100.0},
-    "swe":          {"e2e": 20.0},
+    "swe":          {"e2e": float(os.environ.get("SWE_E2E_SLO_S", "20.0"))},
 }
 
 PAPER_STYLE = {
@@ -116,7 +116,7 @@ def main():
     os.makedirs(a.out_dir, exist_ok=True)
 
     rulestr = ("SLO: chat TTFT<=5s&TBT<=50ms | deepresearch TTFT<=10s&TBT<=100ms"
-               " | swe E2E<=20s")
+               f" | swe E2E<={SLO_RULES['swe']['e2e']:.0f}s")
     print(rulestr)
     summary = []
     fleet_by_mix = {}
