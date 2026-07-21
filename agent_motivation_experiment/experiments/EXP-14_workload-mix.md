@@ -102,6 +102,68 @@ EXP-13에서 불가능했던 "엔진별 SLO attainment"을 이번엔 측정한�
 3. **붕괴 전염 가설**: SWE가 단독에서 보인 throughput 붕괴가 mix에서도 나타나되,
    SWE 지분이 클수록(C) 강하게 나타난다. A/B에서는 EXP-13처럼 평탄에 가까울 것.
 
-## 결과
+## 결과 (2026-07-21 완료; 표준 창 [60,340], 비율별 grid)
 
-(실험 후 기록)
+SLO 규칙 = TTFT≤5s(도착-앵커) AND meanTBT≤50ms; 에러/컷 제외. 클래스는
+task_id 접두사(sg-/sa-/그외). 정본 그림: `results/aggregate_analysis/exp14_mix/`.
+
+### 세 비율의 fleet SLO attainment (knee 이동)
+
+| req/s | C(1:1:3) | A(1:1:1) | B(6:3:1) |
+|---|---|---|---|
+| 8/8/14 | 100 | 100 | 100 |
+| 13/14/26 | 89 | 100 | 100 |
+| 18/22/40 | 20 | 45 | 45 |
+| 24/30/55 | 6 | 10 | 7 |
+| 31/38/70 | 2 | 3 | 2 |
+| 40/47/85 | 0 | 1 | 0.6 |
+| —/57/100 | — | 0 | 0.2 |
+
+**SLO knee: C ≈ 13 < A ≈ 20 < B ≈ 38 req/s** — `exp14_fleet_attainment.png`에
+세 곡선이 깔끔히 분리. (각 열의 세 rate는 C/A/B grid가 다르므로 나란히 배치용;
+정확 knee는 각 곡선 참조.)
+
+### 핵심 발견 (가설 3개 모두 확증)
+
+1. **간섭(H1) 확증 — 클래스는 함께 무너진다.** 각 mix에서 chat/deepresearch/swe
+   attainment이 모든 rate에서 거의 동일: C@13 = 88/91/89, A@22 = 43/50/44,
+   B@40 = 46/44/41. **가벼운 chat(단독 knee 55 req/s)이 자기 특성이 아니라
+   공유 KV·큐 상태 때문에 mix knee에서 같이 붕괴.** 메커니즘: 무거운 SWE가 채운
+   큐 뒤에서 chat TTFT가 튐(C@18에서 chat TTFT 0.3s→5.5s = head-of-line).
+   `exp14_per_class_mix{A,B,C}.png`. (미세하게 deep-research가 심과부하에서 몇 %p
+   높음 — 출력이 짧아 더 빨리 빠짐.)
+
+2. **질량 지배(H2) 확증 — knee는 요청 비율이 아니라 토큰 질량을 따른다.** SWE
+   토큰 지분 C(92%) > A(82%) > B(65%)의 역순으로 knee C < A < B. 요청 비율로는
+   B가 chat 60%라 "가벼워" 보이지만 실제 용량을 정하는 건 SWE 토큰 질량.
+
+3. **붕괴 전염(H3) 확증 — throughput 붕괴 강도가 SWE 지분에 비례.** peak 후
+   심과부하 output tok/s:
+   - C: 5,758(@18) → 2,957(@40) = **−49%**
+   - A: 7,709(@30) → 4,601(@57) = **−40%**
+   - B: 12,625(@55) → 10,042(@100) = **−20%**
+
+   SWE 단독(EXP-10)의 throughput 붕괴가 mix에서 **용량 가중으로 재현**된다
+   (chat/deep-research 단독은 평탄이었음, EXP-12/13). B의 peak가 최고(12.6k)인
+   것은 60% chat = decode 친화적이기 때문.
+
+### 계측: per-request → 엔진 귀속 (신규, EXP-13 미해결분 해결)
+
+전 조건에서 client request-id sidecar ↔ scheduler dispatch 로그 조인 성공
+(매칭률 대부분 100%, 최저 92.3%). 이로써 **엔진별 SLO attainment**을 직접 계산
+(`per_engine_attainment_mix*.png`). mix A knee(22 req/s)에서 4엔진
+42.5/40.0/48.6/49.8% — spread ~10%p로 로드밸런싱 대칭 확인, straggler 없음.
+구현: [DEV_request-engine-attribution.md](DEV_request-engine-attribution.md).
+
+### 산출물
+
+`results/aggregate_analysis/exp14_mix/`: `exp14_fleet_attainment.png`(정본 3-비율
+곡선), `exp14_per_class_mix{A,B,C}.png`, `per_engine_attainment_mix{A,B,C}.png`,
+`per_class_attainment_mix{A,B,C}.png`, `exp14_summary.csv`(전 조건 원표).
+아카이브: `results/exp14_mixA_grid1_archive/`(초기 1–16 grid).
+
+### 방법론 메모
+
+- 초기 grid(1–16)는 prefix-cache 때문에 용량을 과소평가 → KV 기반 비율별 grid로
+  재설계(위 설계 절). "input_tokens ≠ 실연산" — 캐시 감안 시 KV가 정직한 부하 신호.
+- `--disable-timeouts`로 3클래스 무-kill 통일(SWE만 abort 걸리는 오염 제거).
