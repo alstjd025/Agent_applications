@@ -154,5 +154,49 @@ remaining 오름차순으로. 조건별로 원본/패치 스왑.
 - 요약 예상: chat attainment FIFO < EDF ≲ SRPF ≈ SJF; swe attainment SJF <
   SRPF ≲ EDF < FIFO; fleet(차등) FIFO < EDF ≲ SRPF ≲ SJF.
 
-## 결과
-(구현·smoke 후 기록)
+## 결과 (smoke 2026-07-22, mix A @ 22 req/s, 4정책, migration off)
+
+차등 SLO(chat 5s/50ms, dr 10s/100ms, swe E2E 20s), 표준 창 [60,340].
+
+| policy | chat | deepr | swe | fleet | out tok/s | 대기열Σ(mean) |
+|---|---|---|---|---|---|---|
+| FIFO | 40.8 | 100.0 | 1.9 | 50.0 | 7,342 | 6.2 |
+| EDF | 42.0 | 100.0 | 1.9 | 50.2 | 7,273 | 6.3 |
+| SJF | 41.8 | 98.7 | 1.9 | 49.8 | 7,185 | 6.3 |
+| SRPF | 37.4 | 99.3 | 1.7 | 48.4 | 7,205 | 6.1 |
+
+### 예측 대비: **빗나감 — 네 정책이 구별되지 않음**
+
+예측은 "chat↑(EDF/SJF/SRPF), swe 기아, fleet↑"였으나 **전 지표가 노이즈 수준**
+(chat 37–42, fleet 48–50, out tok/s 7.2–7.3k). 정책은 실제로 적용됐다(엔진 로그에
+`scheduler_cls: llumnix_sched.{SJF,SRPF}Scheduler`, `scheduling_policy: priority`
+확인) — **구현 문제가 아니라 조건 선택 문제.**
+
+### 원인 (진단 완료)
+
+1. **재정렬할 큐가 없었다.** 22 req/s에서 **대기열 = 6.2**(4엔진 합, max 145),
+   running = 703. 스케줄링 정책은 *waiting queue*의 순서를 정하는데, 큐가 사실상
+   비어 있으면 FIFO/EDF/SJF/SRPF가 모두 "도착 즉시 admit"으로 수렴한다.
+   EXP-14 mix A 기록을 다시 보면 queμ는 22→7, 30→618, 38→1877, 47→3447로,
+   **22는 KV는 100%인데 큐는 아직 안 쌓인 지점**이었다. cliff 민감도만 보고 고른
+   것이 실수.
+2. **이 지점의 SLO 실패는 admission이 아니라 decode-side다.** chat TTFT는
+   0.49–0.57s로 5s 예산 대비 여유가 크다 → chat 위반은 전부 **TBT>50ms**.
+   TBT는 같은 배치에서 동시에 도는 running 703개가 만드는 것이라 **admission
+   순서를 바꿔도 못 고친다**. SWE도 TTFT 0.86s인데 E2E 52s(예산 20s) — 역시
+   decode 시간이 지배.
+
+요약: **"KV 포화 = 스케줄러가 일할 거리가 있다"가 아니었다.** 엔진이 전부 admit해
+거대한 배치로 같이 느려지는 구간이라 순서 정책의 지렛대가 없었다.
+
+### 다음 (조건 재선정)
+
+스케줄링 정책이 의미를 가지려면 **대기열이 실재하는 지점**이어야 한다:
+- mix A **30 req/s**(queμ 618) 또는 **38 req/s**(1877). 38이 지렛대가 더 크지만
+  FIFO attain이 이미 3%라 개선 여지가 작을 수 있어, **30을 1순위**로 권장.
+- 그리고 chat 위반이 TBT-지배인 점을 감안하면, admission 재정렬로 개선되는 건
+  주로 **TTFT/E2E**다. 즉 **SWE E2E(20s)와 대기 시간이 큰 지점**에서 효과가
+  드러날 가능성이 높다.
+
+인프라(정책 전환기·gateway priority·커스텀 스케줄러)는 전부 검증 완료라 조건만
+바꿔 재실행하면 된다.
