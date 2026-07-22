@@ -189,6 +189,7 @@ class Workload:
             halo_tbt_slo=context.halo_tbt_slo if halo_on else None,
             halo_e2e_slo=context.halo_e2e_slo if halo_on else None,
             timeout=_HTTP_SAFETY_TIMEOUT_S,
+            slo_budget_ms=context.slo_budget_ms,
         )
 
         # Minimal single-call state for the shared invoke path. chain_length=1

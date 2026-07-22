@@ -32,6 +32,7 @@ See `mixplan.py` for how arrivals are assigned to classes deterministically.
 """
 
 import threading
+from dataclasses import replace
 from typing import Optional
 
 from workloads.base import JobResult, RunContext, TaskLogInfo
@@ -81,6 +82,8 @@ class Workload:
         self._mix = dict(DEFAULT_MIX)
         self._class_seq = []
         self._per_class_meta = {}
+        # EDF only: {class: SLO budget ms}; empty -> no priority sent.
+        self._slo_budget_ms = {}
 
     # -- helpers ---------------------------------------------------------
     def _load_delegates(self, weights):
@@ -104,6 +107,7 @@ class Workload:
             raise ValueError(f"unknown mix classes: {sorted(unknown)}")
         plan_len = int(workload_config.get("plan_length", DEFAULT_PLAN_LENGTH))
         seed = int(workload_config.get("sample_seed", args.seed))
+        self._slo_budget_ms = dict(workload_config.get("slo_budget_ms", {}) or {})
 
         self._mix = weights
         self._load_delegates(weights)
@@ -150,6 +154,14 @@ class Workload:
         delegate = self._delegates.get(cls)
         if delegate is None:
             raise RuntimeError(f"no delegate loaded for mix class {cls!r}")
+        # EDF (EXP-15): give this request its class's SLO budget so the
+        # completions client can stamp an absolute deadline as `priority`.
+        # Only the mix adapter knows the class, so the substitution happens
+        # here; the delegate and the engine stay class-agnostic. Absent
+        # config -> None -> no priority sent (FIFO/SJF/SRPF).
+        budget = self._slo_budget_ms.get(cls) if self._slo_budget_ms else None
+        if budget is not None:
+            context = replace(context, slo_budget_ms=int(budget))
         return delegate.run_job(task, context)
 
     def task_log_info(self, task: dict) -> TaskLogInfo:

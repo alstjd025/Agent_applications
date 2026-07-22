@@ -185,6 +185,7 @@ class Workload:
             # (EXP-10), a request can legitimately wait out the whole
             # backlog drain (~30min at lambda=20); 1h left no margin.
             timeout=14400.0 if disable_to else None,
+            slo_budget_ms=context.slo_budget_ms,
         )
 
         # Minimal single-call state for the shared invoke path. chain_length=1

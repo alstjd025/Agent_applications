@@ -45,6 +45,14 @@ class RunContext:
     # Output token cap for the completions API (vLLM defaults to 16). When
     # None, make_llm falls back to DEFAULT_MAX_TOKENS. Ignored by the chat API.
     max_tokens: Optional[int] = None
+    # EDF scheduling (EXP-15): this request's SLO budget in ms. When set, the
+    # completions client sends `priority = now_ms + slo_budget_ms` (an absolute
+    # deadline) and the engine's priority policy schedules earliest-deadline
+    # first. The mixed workload injects the per-class budget per request via
+    # dataclasses.replace before delegating. None (default) = send no priority,
+    # which is what FIFO needs and what SJF/SRPF want (those derive the
+    # priority inside the engine from prompt length / remaining prefill).
+    slo_budget_ms: Optional[int] = None
 
 
 @dataclass

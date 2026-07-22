@@ -91,6 +91,7 @@ def make_llm(
     halo_e2e_slo: Optional[float] = None,
     halo_bypass: bool = False,
     timeout: Optional[float] = None,
+    slo_budget_ms: Optional[int] = None,
 ):
     """Create a ChatOpenAI instance with proper timeout settings.
 
@@ -130,6 +131,7 @@ def make_llm(
             top_p=1.0,
             max_tokens=max_tokens if max_tokens is not None else DEFAULT_MAX_TOKENS,
             timeout=timeout if timeout is not None else PER_CALL_TIMEOUT,
+            slo_budget_ms=slo_budget_ms,
         )
 
     kwargs: dict = dict(
@@ -253,7 +255,8 @@ class LlumnixCompletionsLLM:
     STOP = ["<|eot_id|>", "<|end_of_text|>"]
 
     def __init__(self, base_url, model, seed=42, temperature=0.0, top_p=1.0,
-                 max_tokens=DEFAULT_MAX_TOKENS, timeout=PER_CALL_TIMEOUT):
+                 max_tokens=DEFAULT_MAX_TOKENS, timeout=PER_CALL_TIMEOUT,
+                 slo_budget_ms=None):
         # base_url already includes the /v1 suffix (added at the workload
         # call site), matching ChatOpenAI's convention.
         self.completions_url = base_url.rstrip("/") + "/completions"
@@ -263,6 +266,15 @@ class LlumnixCompletionsLLM:
         self.top_p = top_p
         self.max_tokens = max_tokens
         self.timeout = timeout
+        # EDF: when set, every request carries
+        #   priority = now_ms + slo_budget_ms  (absolute deadline)
+        # vLLM's priority policy schedules the lowest value (earliest deadline)
+        # first and preempts the latest deadline under KV pressure, i.e. exact
+        # EDF. Absolute deadlines are time-invariant so a static per-request
+        # value is correct — no per-step recomputation needed (that would be
+        # Least-Laxity-First). Requires the gateway to forward `priority`.
+        # Left None for FIFO/SJF/SRPF (SJF/SRPF derive priority in the engine).
+        self.slo_budget_ms = slo_budget_ms
         # Server-assigned request id of the most recent call ("cmpl-<uuid>").
         # The Llumnix scheduler logs the same uuid in its dispatch line
         # ("[Schedule] dispatch request <uuid> to neutral instance <id>"), so
@@ -274,7 +286,7 @@ class LlumnixCompletionsLLM:
         self.last_request_id = None
 
     def _payload(self, messages: list, stream: bool) -> dict:
-        return {
+        payload = {
             "model": self.model,
             "prompt": render_llama3_prompt(messages),
             "max_tokens": self.max_tokens,
@@ -284,6 +296,11 @@ class LlumnixCompletionsLLM:
             "stop": self.STOP,
             "stream": stream,
         }
+        if self.slo_budget_ms is not None:
+            # Computed here (at send time) so the deadline is anchored to this
+            # request's actual arrival, not to when the LLM object was built.
+            payload["priority"] = int(time.time() * 1000) + int(self.slo_budget_ms)
+        return payload
 
     def stream(self, messages: list):
         self.last_request_id = None
