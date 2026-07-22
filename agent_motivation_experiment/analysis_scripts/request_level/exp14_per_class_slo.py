@@ -80,6 +80,11 @@ def attain(sub):
     return 100.0 * (~sub["violate_pc"]).mean() if len(sub) else np.nan
 
 
+def out_tps(sr, window_s=280.0):
+    """Steady-window output token throughput (tok/s) over served rows."""
+    return pd.to_numeric(sr["output_tokens"], errors="coerce").sum() / window_s
+
+
 def load_condition(run_dir, with_engine=False):
     sr = served_rows(run_dir)
     if sr is None or sr.empty:
@@ -128,10 +133,13 @@ def main():
         # summary + per-class figure
         print(f"\n=== {label} ===")
         print(f"{'req/s':>6} | {'chat':>6} {'deepr':>6} {'swe':>6} | {'fleet':>6}")
-        rows_pc = {"chat": [], "deepresearch": [], "swe": [], "fleet": [], "rate": []}
+        rows_pc = {"chat": [], "deepresearch": [], "swe": [], "fleet": [],
+                   "rate": [], "tps": []}
         for rate, sr in data:
-            rec = {"mix": tag, "rate": rate, "n": len(sr), "fleet": attain(sr)}
+            rec = {"mix": tag, "rate": rate, "n": len(sr), "fleet": attain(sr),
+                   "out_tok_per_s": out_tps(sr)}
             rows_pc["rate"].append(rate); rows_pc["fleet"].append(attain(sr))
+            rows_pc["tps"].append(out_tps(sr))
             cells = []
             for c in ("chat", "deepresearch", "swe"):
                 v = attain(sr[sr["class"] == c])
@@ -154,6 +162,36 @@ def main():
             ax.set_title(f"Per-class differentiated SLO — mix {label}", pad=26)
             fig.tight_layout()
             p = os.path.join(a.out_dir, f"exp14_per_class_slo_{tag}.png")
+            fig.savefig(p, dpi=300); print("wrote:", p)
+
+        # slo_vs_throughput style: per-class + fleet attainment (left) +
+        # output token throughput (right), all under the differentiated SLO.
+        swe_slo = SLO_RULES["swe"]["e2e"]
+        with plt.rc_context(PAPER_STYLE):
+            fig, ax = plt.subplots(figsize=(5.6, 3.6))
+            for c in ("chat", "deepresearch", "swe"):
+                ax.plot(rows_pc["rate"], rows_pc[c], "-o", color=CLASS_COLORS[c],
+                        label=c, mec="white", mew=0.5)
+            ax.plot(rows_pc["rate"], rows_pc["fleet"], "--", color="0.35",
+                    label="fleet", lw=1.4)
+            ax.set_xlabel("Offered rate (req/s)")
+            ax.set_ylabel("SLO attainment (%)", color="0.2"); ax.set_ylim(-3, 105)
+            ax.grid(axis="y", ls=":", lw=0.7, alpha=0.6)
+            ax2 = ax.twinx()
+            ax2.plot(rows_pc["rate"], rows_pc["tps"], "-^", color="#8c564b",
+                     label="output tok/s", mec="white", mew=0.5, alpha=0.85)
+            ax2.set_ylabel("Output tokens/s", color="#8c564b")
+            ax2.tick_params(axis="y", colors="#8c564b")
+            ax2.set_ylim(bottom=0)
+            h1, l1 = ax.get_legend_handles_labels()
+            h2, l2 = ax2.get_legend_handles_labels()
+            ax.legend(h1 + h2, l1 + l2, loc="lower center",
+                      bbox_to_anchor=(0.5, 1.02), ncol=5, columnspacing=1.0)
+            ax.set_title(f"Mix {label} — per-class SLO (chat 5s/50ms, dr "
+                         f"10s/100ms, swe E2E {swe_slo:.0f}s) + throughput",
+                         pad=26, fontsize=8)
+            fig.tight_layout()
+            p = os.path.join(a.out_dir, f"slo_vs_throughput_slo_{tag}.png")
             fig.savefig(p, dpi=300); print("wrote:", p)
 
         # per-engine figure (fleet attainment per engine, per-class SLO applied)
