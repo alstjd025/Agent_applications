@@ -1,11 +1,15 @@
 #!/bin/bash
 # EXP-15 smoke: intra-engine scheduling policy comparison on ONE condition.
 #
-#   ./run_exp15_sched_smoke.sh            # all four policies, in order
-#   ./run_exp15_sched_smoke.sh srpf       # just one
+#   RATES=1800 ./run_exp15_sched_smoke.sh        # all four policies at 30 req/s
+#   RATES=2280 ./run_exp15_sched_smoke.sh srpf   # one policy at 38 req/s
 #
-# Condition: mix A (1:1:1) @ 22 req/s (rpm 1320) — the EXP-14 cliff, where KV is
-# saturated and a queue exists, so reordering can actually change the outcome.
+# Pick a rate where a WAITING QUEUE actually exists: scheduling policy orders
+# the waiting queue, so at 22 req/s (queue ~6) all four policies degenerated to
+# admit-on-arrival and were indistinguishable. EXP-14 mix A queue by rate:
+#   22 -> 7, 30 -> 618, 38 -> 1877, 47 -> 3447.
+#
+# Condition: mix A (1:1:1) at $RATES rpm.
 # 5-min run, migration OFF for every policy (isolates the intra-engine
 # scheduler; the FIFO arm is re-run here rather than reusing EXP-14, which had
 # migration ON, so the comparison is apples-to-apples).
@@ -17,7 +21,7 @@ set -uo pipefail
 cd "$(dirname "$0")"
 META=../../results/exp07_meta
 mkdir -p "$META"
-RATES=1320      # 22 req/s
+RATES=${RATES:-1800}   # rpm; 1800=30 req/s (queue ~618), 2280=38 req/s (~1877)
 DURMIN=5
 POLICIES=${*:-"fifo edf sjf srpf"}
 
@@ -34,7 +38,7 @@ run_policy() {
   local job="bench-runner-exp15-${pol}"
   local session="exp15_${pol}"
   echo "=================================================================="
-  echo "[exp15] policy=$pol  ($(date -u +%H:%M:%S))"
+  echo "[exp15] policy=$pol rate=$((RATES/60))req/s  ($(date -u +%H:%M:%S))"
   # 1) switch the engine scheduler (migration off) and let it restart
   python3 set_engine_sched.py --policy "$pol" --migration off --restart \
     | grep -E '^\[sched\]'
