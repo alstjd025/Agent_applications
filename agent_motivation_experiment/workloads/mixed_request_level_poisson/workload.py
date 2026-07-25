@@ -84,6 +84,10 @@ class Workload:
         self._per_class_meta = {}
         # EDF only: {class: SLO budget ms}; empty -> no priority sent.
         self._slo_budget_ms = {}
+        # DeadlineScheduler: {class: {"ttft_ms"|"tbt_ms"|"e2e_ms": ...}} absolute
+        # per-class SLO spec, folded into `priority` by the completions client.
+        self._slo = {}
+        self._priority_mode = "none"
 
     # -- helpers ---------------------------------------------------------
     def _load_delegates(self, weights):
@@ -108,6 +112,8 @@ class Workload:
         plan_len = int(workload_config.get("plan_length", DEFAULT_PLAN_LENGTH))
         seed = int(workload_config.get("sample_seed", args.seed))
         self._slo_budget_ms = dict(workload_config.get("slo_budget_ms", {}) or {})
+        self._slo = dict(workload_config.get("slo", {}) or {})
+        self._priority_mode = str(workload_config.get("priority_mode", "none"))
 
         self._mix = weights
         self._load_delegates(weights)
@@ -162,6 +168,15 @@ class Workload:
         budget = self._slo_budget_ms.get(cls) if self._slo_budget_ms else None
         if budget is not None:
             context = replace(context, slo_budget_ms=int(budget))
+        # DeadlineScheduler: inject this class's absolute SLO spec + mode so the
+        # completions client can fold it into `priority`. Only the mix adapter
+        # knows the class; the delegate/engine stay class-agnostic.
+        if self._priority_mode != "none":
+            context = replace(
+                context,
+                slo_spec=self._slo.get(cls),
+                priority_mode=self._priority_mode,
+            )
         return delegate.run_job(task, context)
 
     def task_log_info(self, task: dict) -> TaskLogInfo:

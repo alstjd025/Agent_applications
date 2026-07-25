@@ -186,6 +186,8 @@ class Workload:
             # backlog drain (~30min at lambda=20); 1h left no margin.
             timeout=14400.0 if disable_to else None,
             slo_budget_ms=context.slo_budget_ms,
+            slo_spec=context.slo_spec,
+            priority_mode=context.priority_mode,
         )
 
         # Minimal single-call state for the shared invoke path. chain_length=1

@@ -1846,6 +1846,14 @@ def main():
     parser.add_argument("--max-iterations", type=int, default=1)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--log-level", choices=["quiet", "info", "debug"], default="quiet")
+    # How the completions client stamps per-request `priority`:
+    #   none     -> send nothing (FIFO / SJF / SRPF; SJF/SRPF derive it engine-side)
+    #   edf      -> absolute deadline = now_ms + per-class slo_budget_ms
+    #   deadline -> relative first-token SLO from per-class `slo` spec, for the
+    #               DeadlineScheduler (Niyama port). See workloads/base.py.
+    # Threaded into workload_config so the mixed workload injects it per class.
+    parser.add_argument("--priority-mode", choices=["none", "edf", "deadline"],
+                        default="none")
 
     args = parser.parse_args()
 
@@ -1950,6 +1958,11 @@ def main():
 
     rng = random.Random(args.seed)
     workload_config = load_workload_config(args.workload_config)
+    # CLI --priority-mode wins over any value baked into the workload_config
+    # file, so the same mix config can be replayed under FIFO/EDF/DeadlineScheduler
+    # by flag alone. The per-class absolute SLO spec still lives in the config
+    # ("slo": {class: {ttft_ms|tbt_ms|e2e_ms}}).
+    workload_config["priority_mode"] = args.priority_mode
     workload = load_workload(args.workload)
 
     # Load workload dataset

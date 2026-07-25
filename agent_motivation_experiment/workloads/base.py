@@ -53,6 +53,17 @@ class RunContext:
     # which is what FIFO needs and what SJF/SRPF want (those derive the
     # priority inside the engine from prompt length / remaining prefill).
     slo_budget_ms: Optional[int] = None
+    # DeadlineScheduler (Niyama port): per-request ABSOLUTE SLO spec, e.g.
+    # {"ttft_ms": 5000, "tbt_ms": 50} or {"e2e_ms": 20000}. The completions
+    # client folds this into `priority = relative first-token-equivalent SLO
+    # (ms)` via the tier rule (TTFT present -> interactive; E2E only -> TTLT
+    # converted by e2e - out*tbt; none -> best-effort). Canonical rule:
+    # patches/vllm-sched/slo_tier.py. Injected per class by the mixed workload.
+    slo_spec: Optional[dict] = None
+    # How the completions client stamps `priority`: "none" (send nothing —
+    # FIFO/SJF/SRPF), "edf" (absolute deadline = now_ms + slo_budget_ms), or
+    # "deadline" (relative first-token SLO from slo_spec, for DeadlineScheduler).
+    priority_mode: str = "none"
 
 
 @dataclass

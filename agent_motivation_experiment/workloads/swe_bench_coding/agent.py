@@ -92,6 +92,8 @@ def make_llm(
     halo_bypass: bool = False,
     timeout: Optional[float] = None,
     slo_budget_ms: Optional[int] = None,
+    slo_spec: Optional[dict] = None,
+    priority_mode: str = "none",
 ):
     """Create a ChatOpenAI instance with proper timeout settings.
 
@@ -132,6 +134,8 @@ def make_llm(
             max_tokens=max_tokens if max_tokens is not None else DEFAULT_MAX_TOKENS,
             timeout=timeout if timeout is not None else PER_CALL_TIMEOUT,
             slo_budget_ms=slo_budget_ms,
+            slo_spec=slo_spec,
+            priority_mode=priority_mode,
         )
 
     kwargs: dict = dict(
@@ -254,9 +258,16 @@ class LlumnixCompletionsLLM:
     # template, so the server won't add these stops automatically).
     STOP = ["<|eot_id|>", "<|end_of_text|>"]
 
+    # Deadline-mode constants (mirror patches/vllm-sched/slo_tier.py). TBT is
+    # the per-token SLA budget used only for the E2E->first-token conversion of
+    # an e2e-only class that declares no tbt of its own. B200 (EXP-16):
+    # pure-decode step ITL median ~25ms.
+    DEFAULT_TBT_MS = 25.0
+    BESTEFFORT_SLO_MS = 30 * 24 * 3600 * 1000  # best-effort: huge but finite
+
     def __init__(self, base_url, model, seed=42, temperature=0.0, top_p=1.0,
                  max_tokens=DEFAULT_MAX_TOKENS, timeout=PER_CALL_TIMEOUT,
-                 slo_budget_ms=None):
+                 slo_budget_ms=None, slo_spec=None, priority_mode="none"):
         # base_url already includes the /v1 suffix (added at the workload
         # call site), matching ChatOpenAI's convention.
         self.completions_url = base_url.rstrip("/") + "/completions"
@@ -275,6 +286,10 @@ class LlumnixCompletionsLLM:
         # Least-Laxity-First). Requires the gateway to forward `priority`.
         # Left None for FIFO/SJF/SRPF (SJF/SRPF derive priority in the engine).
         self.slo_budget_ms = slo_budget_ms
+        # DeadlineScheduler: absolute per-request SLO spec + how to stamp
+        # priority. See RunContext.slo_spec / priority_mode and _payload().
+        self.slo_spec = slo_spec or {}
+        self.priority_mode = priority_mode
         # Server-assigned request id of the most recent call ("cmpl-<uuid>").
         # The Llumnix scheduler logs the same uuid in its dispatch line
         # ("[Schedule] dispatch request <uuid> to neutral instance <id>"), so
@@ -296,11 +311,46 @@ class LlumnixCompletionsLLM:
             "stop": self.STOP,
             "stream": stream,
         }
-        if self.slo_budget_ms is not None:
-            # Computed here (at send time) so the deadline is anchored to this
-            # request's actual arrival, not to when the LLM object was built.
-            payload["priority"] = int(time.time() * 1000) + int(self.slo_budget_ms)
+        prio = self._priority()
+        if prio is not None:
+            payload["priority"] = prio
         return payload
+
+    def _priority(self) -> Optional[int]:
+        """Compute the `priority` value to send, per `priority_mode`.
+
+          deadline : RELATIVE first-token-equivalent SLO (ms) from slo_spec via
+                     the tier rule (canonical: patches/vllm-sched/slo_tier.py).
+                     The DeadlineScheduler anchors it to engine-clock arrival.
+          edf      : ABSOLUTE deadline = now_ms + slo_budget_ms (time-invariant,
+                     stock vLLM priority policy = exact EDF). Computed at send
+                     time so it is anchored to this request's actual arrival.
+          none     : send nothing (FIFO/SJF/SRPF).
+        """
+        if self.priority_mode == "deadline":
+            spec = self.slo_spec or {}
+            ttft = spec.get("ttft_ms")
+            e2e = spec.get("e2e_ms")
+            tbt = spec.get("tbt_ms", self.DEFAULT_TBT_MS)
+            # Expected output length for the TTLT->first-token conversion: the
+            # class's measured average (Niyama's per-request num_decode_tokens
+            # role), NOT the generation cap. Falls back to max_tokens if unset.
+            out_len = float(spec.get("out_len") or self.max_tokens)
+            if ttft is not None:            # interactive tier
+                rel = float(ttft)
+            elif e2e is not None:           # e2e-only tier -> first-token-equiv
+                rel = max(1.0, float(e2e) - out_len * float(tbt))
+            else:                           # best-effort
+                rel = float(self.BESTEFFORT_SLO_MS)
+            # Pack the per-class TBT budget into the low 3 digits so the engine
+            # scheduler can use a per-request TBT for its decode-phase slack
+            # (phase 1.5). priority = slo_ms*1000 + tbt_ms. The deadline (slo_ms)
+            # dominates, so EDF ordering is preserved; the scheduler unpacks both.
+            tbt_ms = min(999, max(0, int(round(tbt))))
+            return int(round(rel)) * 1000 + tbt_ms
+        if self.priority_mode == "edf" and self.slo_budget_ms is not None:
+            return int(time.time() * 1000) + int(self.slo_budget_ms)
+        return None
 
     def stream(self, messages: list):
         self.last_request_id = None

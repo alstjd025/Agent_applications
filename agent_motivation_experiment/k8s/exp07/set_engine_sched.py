@@ -38,6 +38,10 @@ LWS = "neutral"
 MOUNT_PATH = "/opt/llumnix-sched"
 HOST_PATH = "/home/nxclab/llumnix_reproduce/patches/vllm-sched"
 VOL_NAME = "llumnix-sched"
+# writable mount for per-step instrumentation output (InstrumentedScheduler)
+OUT_MOUNT_PATH = "/sched-out"
+OUT_HOST_PATH = "/opt/llumnix-sched-out"
+OUT_VOL_NAME = "llumnix-sched-out"
 ANCHOR = "--async-scheduling"          # inject our args right after this flag
 INJECT = "  ${SCHED_EXTRA_ARGS} \\\n"
 
@@ -46,8 +50,14 @@ POLICY_ARGS = {
     "edf": "--scheduling-policy priority",
     "sjf": "--scheduling-policy priority --scheduler-cls llumnix_sched.SJFScheduler",
     "srpf": "--scheduling-policy priority --scheduler-cls llumnix_sched.SRPFScheduler",
+    # Niyama deadline-aware scheduler (deadline_sched.py). The client sends
+    # priority = slo_ms*1000 + tbt_ms (run_experiment.py --priority-mode deadline).
+    "deadline": "--scheduling-policy priority --scheduler-cls deadline_sched.DeadlineScheduler",
     # verification only: EDF + logs the priorities it receives
     "edf-debug": "--scheduling-policy priority --scheduler-cls llumnix_sched.EDFDebugScheduler",
+    # FIFO ordering (no policy change) + per-step decode-latency instrumentation.
+    # Requires SCHED_STEP_LOG env (set via --step-log) to actually write.
+    "instrumented": "--scheduler-cls llumnix_sched.InstrumentedScheduler",
 }
 
 
@@ -88,6 +98,14 @@ def ensure_mount(spec, container):
     if not any(m.get("name") == VOL_NAME for m in mounts):
         mounts.append({"name": VOL_NAME, "mountPath": MOUNT_PATH,
                        "readOnly": True})
+    # writable output mount so InstrumentedScheduler can drop sched_steps.jsonl
+    # straight onto the host (no collector, survives pod restart via append).
+    if not any(v.get("name") == OUT_VOL_NAME for v in vols):
+        vols.append({"name": OUT_VOL_NAME,
+                     "hostPath": {"path": OUT_HOST_PATH,
+                                  "type": "DirectoryOrCreate"}})
+    if not any(m.get("name") == OUT_VOL_NAME for m in mounts):
+        mounts.append({"name": OUT_VOL_NAME, "mountPath": OUT_MOUNT_PATH})
 
 
 def ensure_injected(container):
@@ -120,6 +138,7 @@ def show():
     env = {e["name"]: e.get("value") for e in c.get("env", [])}
     print("policy args :", repr(env.get("SCHED_EXTRA_ARGS")))
     print("PYTHONPATH  :", env.get("PYTHONPATH"))
+    print("step log    :", repr(env.get("SCHED_STEP_LOG")))
     print("migration   :", env.get("LLUMNIX_ENABLE_MIGRATION"))
     print("mount       :", any(m.get("name") == VOL_NAME
                                for m in c.get("volumeMounts", [])))
@@ -130,6 +149,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--policy", choices=sorted(POLICY_ARGS))
     ap.add_argument("--migration", choices=["on", "off"])
+    ap.add_argument("--step-log", metavar="PATH",
+                    help="for --policy instrumented: container path under "
+                         f"{OUT_MOUNT_PATH} to write sched_steps.jsonl "
+                         "(host: %s). Empty/unset disables logging."
+                         % OUT_HOST_PATH)
     ap.add_argument("--restart", action="store_true",
                     help="delete neutral-0 so the change takes effect now")
     ap.add_argument("--show", action="store_true")
@@ -148,6 +172,14 @@ def main():
     ensure_mount(spec, c)
     set_env(c, "PYTHONPATH", MOUNT_PATH)
     set_env(c, "SCHED_EXTRA_ARGS", POLICY_ARGS[a.policy])
+    # SCHED_STEP_LOG gates the per-step logging in InstrumentedScheduler.
+    # Set it for the instrumented policy (default filename if --step-log
+    # omitted); clear it otherwise so no stale log path leaks across policies.
+    if a.policy == "instrumented":
+        set_env(c, "SCHED_STEP_LOG",
+                a.step_log or f"{OUT_MOUNT_PATH}/sched_steps.jsonl")
+    else:
+        set_env(c, "SCHED_STEP_LOG", "")
     if a.migration:
         set_env(c, "LLUMNIX_ENABLE_MIGRATION", "1" if a.migration == "on" else "0")
     newly = ensure_injected(c)
