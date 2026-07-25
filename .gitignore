@@ -9,3 +9,5 @@ sglang/
 # Cross-run figures live under results/aggregate_analysis/ but the whole tree is
 # multi-GB, so it is not version-controlled.
 results/
+# Cloned dataset repo (separate git repo, 26M)
+qwen-bailian-usagetraces-anon/
