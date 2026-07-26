@@ -7,7 +7,16 @@ ignores it. The engine is stock FIFO in both. So the only difference is the
 scheduler's routing policy:
 
   loadbalance : least of DispatchNeutralLoadMetric  (stock Llumnix)
-  polyserve   : tier affinity + the PolyServe 4.5-4.7 admission test + least-load
+  polyserve   : tier affinity + the PolyServe 4.5-4.7 feasibility test + least-load
+
+Note on "admission": PolyServe's admission test decides WHICH SERVER may take a
+request, not whether the system accepts it. It has no reject path, and neither
+does this implementation -- the filter is dropped on Llumnix's fallback pass, so
+a request that no server can serve within SLO still gets placed on the least
+loaded server in its tier. Measured: 45 of 45,300 requests returned 503 under
+PolyServe and 20 of 45,300 under load-balance, both from the gateway giving up
+after its hold-and-retry window at extreme saturation, not from either policy
+declining anything.
 
 That makes this the complement of EXP-17..20, which varied the ENGINE scheduler
 and held routing fixed. Attainment is judged by the same class-differentiated
@@ -25,6 +34,7 @@ import os
 import re
 import sys
 
+import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
@@ -46,7 +56,7 @@ ARM_STYLE = {
     "loadbalance": dict(color="#d62728", ls="--", marker="o",
                         label="Llumnix load-balance (routing baseline)"),
     "polyserve":   dict(color="#1f77b4", ls="-", marker="s",
-                        label="PolyServe (tier + admission + least-load)"),
+                        label="PolyServe (tier partition + SLO feasibility + least-load)"),
 }
 ARMS = {
     "loadbalance": "*exp21_loadbalance_mixA_rpm_*",
@@ -152,6 +162,18 @@ def main():
                 sub = sr[sr["class"] == c]
                 rec[f"attain_{c}"] = attain(sub)
                 rec[f"n_{c}"] = len(sub)
+            # fleet_attain weights each class by how many of its requests got
+            # SERVED, and the arms do not serve the same mix: at 50 req/s
+            # PolyServe's served set is 10% swe against load-balance's 30%,
+            # because its protected classes stream through while swe starves.
+            # That inflates fleet_attain for whichever arm completes more of the
+            # easy classes. The workload is offered 1:1:1, so weight the classes
+            # equally instead -- this is the mix-independent comparison.
+            per_class = [rec[f"attain_{c}"] for c in CLASSES]
+            rec["attain_equalmix"] = (float(np.nanmean(per_class))
+                                      if not all(pd.isna(v) for v in per_class)
+                                      else float("nan"))
+            rec["served_per_s"] = len(sr) / 280.0
             kv = sorted(engine_series(run_dir, "kv_cache_usage_perc"))
             pre = engine_series(run_dir, "num_preemptions_total")
             rec["kv_p90"] = kv[int(len(kv) * .9)] if kv else float("nan")
@@ -171,8 +193,9 @@ def main():
 
     arms = [k for k in ARM_STYLE if k in set(df["arm"])]
     piv = df.pivot(index="rpm", columns="arm")
-    hdr = f"{'rpm':>6}{'req/s':>7} | " + "".join(f"{k[:11]+' fleet':>19}" for k in arms)
+    hdr = f"{'rpm':>6}{'req/s':>7} | " + "".join(f"{k[:11]+' eqmix':>19}" for k in arms)
     hdr += " | " + "".join(f"{k[:4]+' '+c[:4]:>11}" for c in CLASSES for k in arms)
+    print("equal-mix attainment (classes weighted 1:1:1 as offered), then per class")
     print(hdr)
     for rpm in sorted(df["rpm"].unique()):
         def g(col, arm):
@@ -183,7 +206,7 @@ def main():
                 return None
         def fmt(v, w):
             return f"{v:{w}.1f}" if v is not None else f"{'-':>{w}}"
-        line = f"{rpm:>6}{rpm/60:>7.1f} | " + "".join(fmt(g("fleet_attain", k), 19) for k in arms)
+        line = f"{rpm:>6}{rpm/60:>7.1f} | " + "".join(fmt(g("attain_equalmix", k), 19) for k in arms)
         line += " | " + "".join(fmt(g(f"attain_{c}", k), 11) for c in CLASSES for k in arms)
         print(line)
 
@@ -209,8 +232,8 @@ def _plot_arms(ax, df, ycol):
 def make_figures(df, out_dir, arms):
     with plt.rc_context(PAPER_STYLE):
         fig, ax = plt.subplots(figsize=(5.4, 3.6))
-        _plot_arms(ax, df, "fleet_attain")
-        _axis(ax, "Fleet SLO attainment (%)")
+        _plot_arms(ax, df, "attain_equalmix")
+        _axis(ax, "SLO attainment (%), classes weighted 1:1:1")
         ax.set_ylim(-3, 105)
         ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=1)
         p = os.path.join(out_dir, "exp21_fleet_attainment.png")
