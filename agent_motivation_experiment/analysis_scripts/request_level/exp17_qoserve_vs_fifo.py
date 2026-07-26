@@ -26,6 +26,7 @@ import os
 import re
 import sys
 
+import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
@@ -52,6 +53,7 @@ ARM_STYLE = {
     "sjf":     dict(color="#9467bd", ls=":",  marker="D", label="SJF (shortest job)"),
     "srpf":    dict(color="#8c564b", ls=(0,(3,1,1,1)), marker="v", label="SRPF (shortest remaining)"),
     "qoserve": dict(color="#1f77b4", ls="-",  marker="s", label="QoServe (deadline)"),
+    "polyserve": dict(color="#000000", ls="-", marker="*", label="PolyServe (ROUTING, engine=FIFO)"),
 }
 
 
@@ -74,6 +76,13 @@ ARMS = {
     # The pre-fix arm (*exp17_qoserve_mixA_rpm_*) is kept on disk but excluded:
     # it measured the admission-explosion bug, not the policy.
     "qoserve": "*exp17b_qoservefix_mixA_rpm_*",
+    # EXP-21 varies the ROUTING policy with the engine held at stock FIFO, the
+    # perpendicular axis to the five above (which vary the engine scheduler with
+    # routing held at load-balance). Its load-balance arm reproduces the fifo arm
+    # to within 0.2pp at the one rate they share, which is what makes the two
+    # experiments joinable on one chart despite different rpm grids -- rate is a
+    # continuous axis, each arm just carries its own sample points.
+    "polyserve": "*exp21_polyserve_mixA_rpm_*",
 }
 CLASSES = ("chat", "deepresearch", "swe")
 
@@ -124,6 +133,17 @@ def main():
                 sub = sr[sr["class"] == c]
                 rec[f"attain_{c}"] = attain(sub)
                 rec[f"n_{c}"] = len(sub)
+            # fleet_attain weights each class by how many of ITS requests got
+            # served, and the arms do not serve the same mix. PolyServe protects
+            # two classes so completely that they dominate its served set (10%
+            # swe at 50 req/s vs ~30% for the engine-scheduler arms), which
+            # inflates its fleet number. The workload is offered 1:1:1, so weight
+            # the classes equally -- that is the mix-independent comparison and
+            # the one the headline figure uses.
+            per_class = [rec[f"attain_{c}"] for c in CLASSES]
+            rec["attain_equalmix"] = (float(np.nanmean(per_class))
+                                      if not all(pd.isna(v) for v in per_class)
+                                      else float("nan"))
             recs.append(rec)
 
     df = pd.DataFrame(recs).sort_values(["arm", "rpm"])
@@ -134,7 +154,7 @@ def main():
     # side-by-side table per rate, one block of columns per arm
     piv = df.pivot(index="rpm", columns="arm")
     arms = [k for k in ARM_STYLE if k in set(df["arm"])]
-    hdr = f"{'rpm':>6}{'req/s':>7} | " + "".join(f"{k+' fleet':>14}" for k in arms)
+    hdr = f"{'rpm':>6}{'req/s':>7} | " + "".join(f"{k[:7]+' eqmix':>14}" for k in arms)
     hdr += " | " + "".join(f"{k[:4]+' '+c[:4]:>11}" for c in CLASSES for k in arms)
     print(hdr)
     for rpm in sorted(df["rpm"].unique()):
@@ -146,7 +166,7 @@ def main():
                 return None
         def fmt(v, w=14):
             return f"{v:{w}.1f}" if v is not None else f"{'-':>{w}}"
-        line = f"{rpm:>6}{rpm/60:>7.1f} | " + "".join(fmt(g("fleet_attain", k)) for k in arms)
+        line = f"{rpm:>6}{rpm/60:>7.1f} | " + "".join(fmt(g("attain_equalmix", k)) for k in arms)
         line += " | " + "".join(fmt(g(f"attain_{c}", k), 11) for c in CLASSES for k in arms)
         print(line)
 
@@ -203,8 +223,8 @@ def make_figures(df, results_dir, out_dir):
     with plt.rc_context(PAPER_STYLE):
         # 1) headline: fleet attainment
         fig, ax = plt.subplots(figsize=(5.4, 3.6))
-        _plot_arms(ax, df, "fleet_attain")
-        _axis(ax, "Fleet SLO attainment (%)")
+        _plot_arms(ax, df, "attain_equalmix")
+        _axis(ax, "SLO attainment (%), classes weighted 1:1:1")
         ax.set_ylim(-3, 105)
         ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=2)
         p = os.path.join(out_dir, "exp17_fleet_attainment.png")

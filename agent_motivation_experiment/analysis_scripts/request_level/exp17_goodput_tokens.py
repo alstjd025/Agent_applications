@@ -47,6 +47,10 @@ ARMS = {
     "sjf":     "*exp19_sjf_mixA_rpm_*",
     "srpf":    "*exp20_srpf_mixA_rpm_*",
     "qoserve": "*exp17b_qoservefix_mixA_rpm_*",
+    # Routing axis (engine=FIFO). Different rpm grid, but goodput is normalised
+    # by the FIXED 60-340s window below, not by a run's own span, so the arms
+    # stay comparable regardless of which rates each one sampled.
+    "polyserve": "*exp21_polyserve_mixA_rpm_*",
 }
 PAPER_STYLE = {
     "font.family": "serif",
@@ -65,6 +69,7 @@ ARM_STYLE = {
     "sjf":     dict(color="#9467bd", ls=":",  marker="D", label="SJF (shortest job)"),
     "srpf":    dict(color="#8c564b", ls=(0,(3,1,1,1)), marker="v", label="SRPF (shortest remaining)"),
     "qoserve": dict(color="#1f77b4", ls="-",  marker="s", label="QoServe (deadline)"),
+    "polyserve": dict(color="#000000", ls="-", marker="*", label="PolyServe (ROUTING, engine=FIFO)"),
 }
 BIN_S = 20.0
 # served_rows' nominal steady window: [STEADY_LO=60, min(last,360)-DRAIN=340].
