@@ -38,6 +38,7 @@ from typing import Optional
 from workloads.base import JobResult, RunContext, TaskLogInfo
 from workloads.mixed_request_level_poisson.mixplan import (
     build_class_sequence,
+    load_class_plan,
     realised_ratio,
 )
 
@@ -53,18 +54,46 @@ DEFAULT_PLAN_LENGTH = 200000
 
 
 class MixedPool:
-    """Draw tasks from per-class delegate pools following a fixed plan."""
+    """Draw tasks from per-class delegate pools following a fixed plan.
 
-    def __init__(self, pools: dict, class_seq: list):
+    Two plan sources (see mixplan.py):
+
+    * `class_seq` — the static-mix cycle; draw i takes `class_seq[i % len]`.
+    * `class_plan` — one entry per trace arrival, for time-varying mixes.
+      Indexed by the **global** arrival index, not this worker's local one:
+      `_run_multiprocess` hands worker k the arrivals `offsets[k::n]`, and its
+      submit loop calls `next_task()` once per arrival in order, so worker k's
+      j-th draw is global arrival `k + j*n`. Indexing by global arrival (rather
+      than by wall clock) keeps the class↔time pairing exact even when the
+      fleet falls behind and the open-loop driver submits back-to-back.
+    """
+
+    def __init__(self, pools: dict, class_seq: list, class_plan: Optional[list] = None,
+                 shard_idx: int = 0, n_shards: int = 1):
         self.pools = pools
         self.class_seq = class_seq
+        self.class_plan = class_plan
+        self.shard_idx = int(shard_idx)
+        self.n_shards = max(1, int(n_shards))
         self._i = 0
         self._lock = threading.Lock()
 
     def next_task(self) -> Optional[dict]:
         with self._lock:
-            cls = self.class_seq[self._i % len(self.class_seq)]
+            j = self._i
             self._i += 1
+        if self.class_plan is not None:
+            g = self.shard_idx + j * self.n_shards
+            if g >= len(self.class_plan):
+                # Structurally impossible (the plan file IS the trace file, so
+                # arrivals and plan entries are the same rows) -- but if it ever
+                # happens, say so instead of silently recycling a stale class.
+                print(f"[mixed] class plan exhausted at global index {g} "
+                      f"(plan has {len(self.class_plan)}); ending this shard")
+                return None
+            cls = self.class_plan[g]
+        else:
+            cls = self.class_seq[j % len(self.class_seq)]
         task = self.pools[cls].next_task()
         if task is None:
             return None
@@ -88,6 +117,9 @@ class Workload:
         # per-class SLO spec, folded into `priority` by the completions client.
         self._slo = {}
         self._priority_mode = "none"
+        # Dynamic-trace runs: one class per arrival, read from the trace csv.
+        self._class_plan = None
+        self._class_plan_file = None
 
     # -- helpers ---------------------------------------------------------
     def _load_delegates(self, weights):
@@ -104,8 +136,24 @@ class Workload:
 
     # -- adapter contract ------------------------------------------------
     def load_dataset(self, args, workload_config: dict):
-        weights = dict(workload_config.get("mix", DEFAULT_MIX))
-        weights = {k: int(v) for k, v in weights.items() if int(v) > 0}
+        # A `class_plan_file` (dynamic trace) supersedes `mix`: the per-arrival
+        # classes are fixed offline, so the run's weights are whatever the plan
+        # actually contains. Deriving them from the plan (rather than trusting a
+        # `mix` block to agree with it) keeps run_config honest and makes sure
+        # every class the plan uses gets its delegate loaded.
+        self._class_plan_file = workload_config.get("class_plan_file")
+        if self._class_plan_file:
+            self._class_plan = load_class_plan(self._class_plan_file)
+            counts = {}
+            for c in self._class_plan:
+                counts[c] = counts.get(c, 0) + 1
+            weights = counts
+            print(f"[mixed] class plan {self._class_plan_file}: "
+                  f"{len(self._class_plan)} arrivals, "
+                  f"whole-run ratio {realised_ratio(self._class_plan)}")
+        else:
+            weights = dict(workload_config.get("mix", DEFAULT_MIX))
+            weights = {k: int(v) for k, v in weights.items() if int(v) > 0}
         unknown = set(weights) - set(DELEGATES)
         if unknown:
             raise ValueError(f"unknown mix classes: {sorted(unknown)}")
@@ -128,9 +176,10 @@ class Workload:
             except Exception:
                 self._per_class_meta[cls] = {}
 
-        self._class_seq = build_class_sequence(weights, plan_len, seed)
-        print(f"[mixed] mix={weights} -> realised request ratio "
-              f"{realised_ratio(self._class_seq)} over {plan_len} planned arrivals")
+        if self._class_plan is None:
+            self._class_seq = build_class_sequence(weights, plan_len, seed)
+            print(f"[mixed] mix={weights} -> realised request ratio "
+                  f"{realised_ratio(self._class_seq)} over {plan_len} planned arrivals")
         return {"datasets": datasets, "weights": weights, "seed": seed}
 
     def build_baseline_tasks(self, dataset, replay_count, rng, args, workload_config):
@@ -153,7 +202,9 @@ class Workload:
             pools[cls] = self._delegates[cls].create_task_pool(
                 ds, baseline_latencies, rng, args, sub_cfg
             )
-        return MixedPool(pools, self._class_seq)
+        shard = workload_config.get("_shard") or {}
+        return MixedPool(pools, self._class_seq, class_plan=self._class_plan,
+                         shard_idx=shard.get("idx", 0), n_shards=shard.get("n", 1))
 
     def run_job(self, task: dict, context: RunContext) -> JobResult:
         cls = task.get("_mix_class")
@@ -199,8 +250,22 @@ class Workload:
         req_frac = {c: round(w / total_w, 4) for c, w in sorted(self._mix.items())}
         tok_w = {c: self._mix.get(c, 0) * mean_in.get(c, 0) for c in self._mix}
         tok_total = sum(tok_w.values()) or 1
+        # With a class plan the "mix" is a whole-run average of a schedule that
+        # changes during the run -- label it so nobody reads it as the mix that
+        # was in force at any given moment. The plan JSON has the segments.
+        dyn = {}
+        if self._class_plan is not None:
+            dyn = {
+                "class_plan_file": self._class_plan_file,
+                "class_plan_arrivals": len(self._class_plan),
+                "mix_is_time_varying": True,
+                "note": "request_fraction/mix_weights below are WHOLE-RUN "
+                        "averages of a time-varying mix; per-segment targets "
+                        "and realised ratios are in the trace's .plan.json",
+            }
         return {
             "name": self.name,
+            **dyn,
             "mix_weights": self._mix,
             "request_fraction": req_frac,
             "input_token_fraction_expected": {
@@ -220,6 +285,10 @@ class Workload:
             "client_seed": args.seed,
             "mix_weights": self._mix,
             "class_sequence": (
+                f"per-arrival plan read from {self._class_plan_file} and indexed "
+                f"by GLOBAL arrival index (shard_idx + j*n_shards), so the "
+                f"class<->arrival pairing is identical regardless of --load-procs"
+                if self._class_plan is not None else
                 "shuffled blocks of size sum(weights); block b shuffled with "
                 "random.Random(sample_seed*7919+b) -> exact ratio per block, "
                 "deterministic across runs and load processes"

@@ -146,6 +146,21 @@ streams (one LLM request per task, Poisson arrivals — no job/chain).
   tok vs chat 0.7k / SWE 21.8k; ~910-tok system prompt cached + ~3.1k
   unique tail), single-turn and chain-free.
 
+`mixed_request_level_poisson/` draws arrivals from all three of the above in a
+configured ratio, delegating `run_job` to whichever workload owns the drawn task
+(so each class keeps its exact single-workload semantics). Two ways to decide the
+class of an arrival:
+
+- **static mix** — `"mix": {"chat": 1, "deepresearch": 1, "swe": 1}`; classes come
+  from a shuffled fixed-composition block cycle, exact ratio per block.
+- **time-varying mix** — `"class_plan_file": "<trace>.csv"`; one class per arrival,
+  precomputed offline and read from the same trace csv `--mode trace-replay`
+  replays for timing. Paired **by row index**, so the file must be strictly
+  ascending in `arrival_s`; under `--load-procs n` the pool reconstructs the
+  global arrival index as `shard_idx + j*n_shards`. A `class_plan_file`
+  supersedes `mix` (declaring both risks them disagreeing silently). See
+  [../traces/TRACE_FORMAT.md](../traces/TRACE_FORMAT.md) §"Per-arrival class plan".
+
 See [AGENTS.md](AGENTS.md) §"Request-level Poisson Workload",
 §"ShareGPT Request-level Workload" and §"Search Arena Deep-Research
 Request-level Workload", plus each workload folder's own `AGENTS.md`.

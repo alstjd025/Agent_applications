@@ -94,7 +94,12 @@ def _mp_load_worker(cfg: dict) -> Optional[dict]:
     from workloads import load_workload
     workload = load_workload(cfg["workload_name"])
     args = cfg["args"]
-    wcfg = cfg["workload_config"]
+    # Tell the workload which slice of the offered load this process owns. The
+    # parent hands worker k the arrivals offsets[k::n], so a workload driving
+    # anything off the GLOBAL arrival index (e.g. the mixed workload's dynamic
+    # class plan) can reconstruct it as shard_idx + j*n_shards.
+    wcfg = dict(cfg["workload_config"] or {})
+    wcfg["_shard"] = {"idx": cfg["shard_idx"], "n": cfg["n_shards"]}
     dataset = workload.load_dataset(args, wcfg)
     # Disjoint-ish slice per worker so streams differ (reduces exact-duplicate
     # prefix-cache masking); fall back to the full dataset if too small.

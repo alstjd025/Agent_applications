@@ -88,6 +88,12 @@ SCHEDULER_METRICS = {
     "instance_cms_inflight_dispatch_prefill_requests",
     "instance_cms_inflight_dispatch_decode_requests",
     "instance_cms_scheduler_waiting_to_decode_requests",
+    # PolyServe tier repartitioning (labelled by tpot_slo_ms). The scheduler
+    # also klog's each decision, but a long dynamic-trace run outlives the pod
+    # log buffer, so the allocation history has to come from the scrape.
+    "scheduler_polyserve_tier_servers",
+    "scheduler_polyserve_tier_demand",
+    "scheduler_polyserve_live_servers",
 }
 
 GATEWAY_METRICS = {

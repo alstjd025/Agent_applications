@@ -28,6 +28,8 @@ CSV with a header row. One row = one arrival.
 | `request_id` | no | string | Opaque id from the source trace. Currently **ignored** by the runner (timing-only); reserved for future trace-driven content selection. |
 | `input_tokens` | no | int | Source-trace context/prompt token count. **Ignored** (request content comes from the workload, not the trace). |
 | `output_tokens` | no | int | Source-trace generated token count. **Ignored.** |
+| `class` | no | string | **Ignored by the runner.** Read by `mixed_request_level_poisson` when its `class_plan_file` points at this file — see "Per-arrival class plan" below. |
+| `phase` / `segment` | no | string | Free-form tags (`warmup`/`measure`, mix segment id). Ignored by everything; for analysis and eyeballing. |
 
 Any extra columns are allowed and ignored.
 
@@ -68,6 +70,37 @@ arrival_s,request_id,input_tokens,output_tokens
   unchanged, so existing `analysis_scripts/` parsers apply as-is.
 
 ---
+
+## Per-arrival class plan (time-varying workload mix)
+
+The rule above — *the trace decides only **when***  — still holds for the runner:
+`load_arrival_trace` reads `arrival_s` and nothing else. But a run whose **class
+mix changes over time** needs the mix to be a function of time, and the trace is
+the only artifact that already knows what time each arrival happens at. So the
+generator may additionally write a `class` column, and the workload (not the
+runner) reads it back:
+
+- runner: `--mode trace-replay --trace-file T.csv` → arrival timing from `T.csv`
+- workload: `--workload-config` with `"class_plan_file": "T.csv"` → class per
+  arrival from the same `T.csv`
+
+The two are paired **by row index**, which imposes one hard invariant:
+
+> **The file must be strictly ascending in `arrival_s`.**
+
+The runner sorts the offsets and discards every other column, so if file order
+and sorted order ever disagreed, classes would be attached to the wrong
+requests — silently, with no error and a plausible-looking result.
+`build_dynamic_mix_trace.py` enforces it on write and `mixplan.load_class_plan`
+re-checks it on read.
+
+Under `--load-procs n` the parent hands worker *k* the arrivals `offsets[k::n]`,
+so the workload reconstructs the global index as `k + j*n` for its *j*-th draw.
+Indexing by global arrival rather than by wall clock keeps the class↔time
+pairing exact even when the fleet falls behind and the open-loop driver submits
+backlogged arrivals back-to-back.
+
+Generator: [`dynamic/build_dynamic_mix_trace.py`](dynamic/build_dynamic_mix_trace.py).
 
 ## Producing a canonical file (guidance for `traces/` scripts)
 

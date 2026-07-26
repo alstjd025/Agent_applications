@@ -14,6 +14,9 @@ runner only ever reads the canonical format — it never knows the source trace.
 traces/
 ├── TRACE_FORMAT.md       # canonical format spec (the contract)
 ├── scale_trace.py        # up/down scale any canonical trace (source-agnostic)
+├── dynamic/              # composed traces: Azure-shaped rate + time-varying mix
+│   ├── build_dynamic_mix_trace.py
+│   └── canonical/            # generated traces (gitignored: *.csv)
 └── azure/                # one folder per source
     ├── convert_azure.py      # Azure LLM Inference -> canonical
     ├── analyze_azure.py      # count / span / token & rate / burstiness stats
@@ -98,6 +101,35 @@ python run_experiment.py \
   --tau 3.0 \
   --session-name trace_conv_thin0p25
 ```
+
+## Dynamic trace: Azure-shaped rate + time-varying class mix (`dynamic/`)
+
+One continuous run in which **both** knobs move, instead of a grid of static
+conditions. `build_dynamic_mix_trace.py` compresses N Azure days into the run
+(→ N peaks), quantile-maps the rate onto the band our fleet resolves, and steps
+the chat:deepresearch:swe ratio through the EXP-14 A/B/C mixes. It writes three
+files sharing a stem: the canonical `.csv` (with a `class` column, see
+TRACE_FORMAT.md §"Per-arrival class plan"), a `.plan.json` holding λ(t) and the
+per-segment realised ratios as analysis ground truth, and a `.png` to check the
+curve before spending an hour of cluster time.
+
+```bash
+# the standard 1-hour trace: 4 peaks, 10-50 req/s, mix A -> C -> B -> A
+python3 traces/dynamic/build_dynamic_mix_trace.py \
+  --out traces/dynamic/canonical/dyn60_azure4d
+# a 7-minute version of the same shape, for validating the plumbing
+python3 traces/dynamic/build_dynamic_mix_trace.py --duration-min 6 \
+  --out traces/dynamic/canonical/dyn06_azure4d_smoke
+```
+
+Drive it with `--mode trace-replay --trace-file <csv>` plus a workload config
+whose `class_plan_file` points at that same csv (`workload_configs/mix_dyn60.json`);
+k8s job template: `k8s/exp07/runner-dyn.template.yaml`.
+
+Quantile mapping is a **rank** transform: it keeps the temporal order and
+autocorrelation of the real trace but not the shape of its rate distribution
+(Azure conv+code spans p95/p5 ≈ 3.6×, the band we want is 5×). Describe the
+result as "Azure-shaped, rescaled to our cluster", not as an Azure trace.
 
 ## Adding another source (BurstGPT, Mooncake, …)
 
