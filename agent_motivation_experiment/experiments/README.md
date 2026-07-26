@@ -85,4 +85,6 @@ restart** (not just once at the start).
 
 분석 노트: [ANALYSIS_kv-tank-flow.md](ANALYSIS_kv-tank-flow.md) (KV 수조/유량),
 [ANALYSIS_why-not-full-kv.md](ANALYSIS_why-not-full-kv.md) (TBT–KV 선형 법칙),
-[DEV_multiprocess-load-generator.md](DEV_multiprocess-load-generator.md) (부하기 MP 개조).
+[DEV_multiprocess-load-generator.md](DEV_multiprocess-load-generator.md) (부하기 MP 개조),
+[DEV_dynamic-trace-mix.md](DEV_dynamic-trace-mix.md) (1시간 동적 trace: Azure 모양 rate
++ 시간가변 믹스 — 배관 완료, 클러스터 미검증).
