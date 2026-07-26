@@ -5,6 +5,13 @@
 #   ./run_exp22_fluidserve.sh dyn                # the 1-hour dynamic trace, both arms
 #   ./run_exp22_fluidserve.sh arm fluidserve dyn # a single arm
 #
+#   FS_PEND=false ./run_exp22_fluidserve.sh smoke 1800   # ablation: no holding
+#
+# Ablation switches pass through to the scheduler (FS_PEND, FS_EXTERNALITY,
+# FS_FLUX, FS_ALPHA, FS_HORIZON, FS_Z). With holding off FluidServe is pure
+# routing, which is what PolyServe is too, so that arm is the like-for-like
+# comparison of the two routing rules.
+#
 # Only the SCHEDULER POLICY differs between arms. Same workload, same trace, the
 # same cold engine restart per condition, and the client sends the packed
 # per-request SLO in both arms.
@@ -114,7 +121,7 @@ run_trace_arm() {  # $1 arm, $2 trace, $3 wcfg, $4 timeout
 
 run_rate_arm() {  # $1 arm, $2 rates, $3 durmin, $4 timeout
   local arm=$1 rates=$2 durmin=$3 timeout=$4
-  local job="bench-runner-exp22-${arm}" session="exp22fix_${arm}_mixA"
+  local job="bench-runner-exp22-${arm}" session="exp22fix_${arm}${SESSION_SUFFIX:-}_mixA"
   set_arm "$arm" || return 1
   kubectl -n llumnix delete job "$job" --ignore-not-found >/dev/null
   sed -e "s/__JOBNAME__/$job/" -e "s/__SESSION__/$session/" \
