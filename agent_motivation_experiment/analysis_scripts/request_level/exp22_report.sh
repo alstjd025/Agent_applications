@@ -29,6 +29,11 @@ for r in "${RUNS[@]}"; do
   # invisible in the request-level numbers: the requests behind the queue never
   # finish, so they are dropped as "still in flight" rather than counted.
   python3 engine_occupancy.py --run "$r" --summary-only 2>&1 | tail -8
+  # Then the two SLO rules per class, separately. Combining them into one
+  # attainment figure hides the difference between "the tokens came out too
+  # slowly", which is a routing outcome, and "the first token never arrived",
+  # which usually is not.
+  python3 slo_rule_breakdown.py --runs "$r" 2>&1 | tail -25
   python3 exp22_controller.py --run "$r" --out-dir "$OUT" 2>&1 | tail -40
 done
 

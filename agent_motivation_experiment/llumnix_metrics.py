@@ -110,6 +110,14 @@ SCHEDULER_METRICS = {
     "scheduler_fluidserve_live_requests",
     "scheduler_fluidserve_unachievable_requests",
     "scheduler_fluidserve_retired_total",
+    # How long one scheduling call takes. FluidServe's decision is far heavier
+    # than a filter-and-pick, and a request held at the gateway re-enters this
+    # path at every retry, so the per-call cost and the call rate together
+    # decide whether the control plane can keep up with the offered load.
+    "request_full_mode_schedule_duration_milliseconds_sum",
+    "request_full_mode_schedule_duration_milliseconds_count",
+    "scheduler_scheduling_total",
+    "scheduler_scheduling_failed_total",
 }
 
 GATEWAY_METRICS = {
