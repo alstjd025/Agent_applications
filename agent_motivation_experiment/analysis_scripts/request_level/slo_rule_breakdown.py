@@ -65,6 +65,13 @@ def load(run):
     r["tbt"] = pd.to_numeric(r["tbt_mean_ms"], errors="coerce")
     r["e2e"] = pd.to_numeric(r["latency"], errors="coerce")
     r["done"] = r["success"].astype(str).str.lower().eq("true")
+    # A request that produced no answer has a recorded latency anyway -- for a
+    # rejection it is the time to be told no, which is short. Left as it is,
+    # that reads as a request that finished well inside its end-to-end budget,
+    # so a policy that rejects would score better the more it rejected. Every
+    # rule is therefore evaluated only where an answer was actually produced,
+    # and everything else counts as a miss.
+    r.loc[~r["done"], ["ttft", "tbt", "e2e"]] = float("nan")
     return r
 
 
