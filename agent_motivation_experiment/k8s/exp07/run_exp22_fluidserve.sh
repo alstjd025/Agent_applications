@@ -80,8 +80,16 @@ set_arm() {  # $1 = fluidserve | polyserve | loadbalance
   local pod actual
   pod=$(kubectl -n llumnix get pods -l app=scheduler \
         --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}')
-  actual=$(kubectl -n llumnix logs "$pod" --tail=3000 2>/dev/null \
-           | grep -ao "create scheduler with policy: [a-z-]*" | tail -1 | awk '{print $NF}')
+  # Read from the START of the container log, not the tail: the scheduler runs
+  # at -v 4 and emits hundreds of lines a second, so the start-up line is out of
+  # any tail window within seconds of the pod becoming ready.
+  actual=$(kubectl -n llumnix logs "$pod" 2>/dev/null \
+           | grep -am1 -ao "create scheduler with policy: [a-z-]*" | awk '{print $NF}')
+  if [ -z "$actual" ]; then
+    echo "[exp22] scheduler pod $pod did not report a policy; last lines:"
+    kubectl -n llumnix logs "$pod" --tail=15 2>/dev/null | sed 's/^/[exp22]   /'
+    return 1
+  fi
   [ "$actual" = "$policy" ] \
     || { echo "[exp22] ABORT: scheduler reports policy '$actual', wanted '$policy'"; return 1; }
   # The retry cadence is part of the arm, so confirm it too.

@@ -6,8 +6,9 @@ survive a long run, so this reads the time series the collector recorded and
 answers the questions an attainment number cannot:
 
   decision mix     how often a request was placed immediately, held at the
-                   gateway, or placed anyway because its time-to-first-token
-                   budget had run out
+                   gateway, rejected because no placement could meet its own
+                   budget, or placed anyway because it could still meet that
+                   budget but nothing could serve it at its promised pace
   model accuracy   measured iteration time against what the capacity model
                    predicted, per instance. This is the assumption every
                    placement rests on, and it is measurable live rather than
@@ -112,17 +113,24 @@ def main():
             total += counts[kind]
     if not counts:
         print("  none recorded (is this a FluidServe run?)")
-    for kind in ("route", "pend", "force"):
+    # A held request is re-asked at every retry interval, so a pend is one
+    # re-decision rather than one request. Sharing it against the total makes a
+    # policy that holds briefly look like one that holds everything: at a 100 ms
+    # retry interval, a single request held for one second contributes ten
+    # pends against one route. The terminal decisions -- the ones that happen
+    # once per request -- are shared among themselves, and holding is reported
+    # separately in the units it is actually in.
+    terminal = sum(counts.get(k, 0.0) for k in ("route", "shed", "force"))
+    for kind in ("route", "shed", "force"):
         if kind in counts:
-            share = 100.0 * counts[kind] / total if total else 0.0
-            print(f"  {kind:<6} {counts[kind]:>10,.0f}  ({share:4.1f}%)")
+            share = 100.0 * counts[kind] / terminal if terminal else 0.0
+            print(f"  {kind:<6} {counts[kind]:>10,.0f}  ({share:4.1f}% of requests placed or rejected)")
     if counts.get("pend"):
-        # A held request is re-asked every retry interval, so pend decisions
-        # count retries rather than requests. The gateway counters below are the
-        # per-request view.
-        print("  note: pend counts re-decisions, not distinct requests")
+        print(f"  {'pend':<6} {counts['pend']:>10,.0f}  "
+              f"({counts['pend'] / max(terminal, 1):.1f} re-decisions per request)")
 
     for name, label in (("gateway_scheduling_waited_total", "requests that waited"),
+                        ("gateway_scheduling_rejected_total", "requests rejected"),
                         ("gateway_scheduling_gave_up_total", "requests given up on")):
         pts = next((v for k, v in gw.items() if k.startswith(name)), None)
         if pts:

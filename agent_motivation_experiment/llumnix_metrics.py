@@ -98,19 +98,17 @@ SCHEDULER_METRICS = {
     # scheduler's log, which does not survive an hour-long run. What the run has
     # to be able to answer afterwards is why each request went where it did, so
     # the per-instance state at decision time is exported.
-    "scheduler_fluidserve_decisions_total",       # route / pend / force
+    "scheduler_fluidserve_decisions_total",       # route / pend / shed / force
     "scheduler_fluidserve_headroom_tokens",       # per instance
     "scheduler_fluidserve_cap_kv_tokens",         # latency-imposed capacity
     "scheduler_fluidserve_projected_kv_tokens",
     "scheduler_fluidserve_outflow_tokens",
     "scheduler_fluidserve_observed_step_ms",      # measured iteration time
     "scheduler_fluidserve_predicted_step_ms",     # what the model said
-    "scheduler_fluidserve_tightest_allowance_ms",
+    "scheduler_fluidserve_tightest_allowance_ms",  # tightest remaining budget
+    "scheduler_fluidserve_gate_allowance_ms",      # the nominal pace admission is gated on
     "scheduler_fluidserve_live_requests",
     "scheduler_fluidserve_unachievable_requests",
-    "scheduler_fluidserve_capacity_correction",
-    "scheduler_fluidserve_z_safety",
-    "scheduler_fluidserve_overshoot_rate",
     "scheduler_fluidserve_retired_total",
 }
 
@@ -123,6 +121,7 @@ GATEWAY_METRICS = {
     "gateway_scheduling_wait_milliseconds_sum",
     "gateway_scheduling_wait_milliseconds_count",
     "gateway_scheduling_gave_up_total",
+    "gateway_scheduling_rejected_total",
     "gateway_pending_requests",
     "gateway_current_requests",
     "request_total",
