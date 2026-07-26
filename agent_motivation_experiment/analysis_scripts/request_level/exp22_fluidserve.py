@@ -160,6 +160,43 @@ def total_tokens(rows, window_s):
     return float(tok) / window_s if window_s > 0 else np.nan
 
 
+def routing_concentration(rows, run_dir):
+    """How concentrated each class's requests were across the engines.
+
+    0 means the class was spread evenly over the fleet, 1 means every request of
+    that class landed on one engine. Computed as the Herfindahl index of the
+    per-engine shares, rescaled so the uniform case reads 0 regardless of how
+    many engines there are.
+
+    This is the direct measure of whether a separation between classes occurred.
+    EXP-21 used the same quantity to show that PolyServe's tier partition was
+    actually in force; here nothing is partitioned, so any concentration is an
+    outcome of the routing decisions rather than a constraint on them.
+    """
+    p = os.path.join(run_dir, "analysis", "request_engine.csv")
+    if not os.path.isfile(p):
+        return None
+    try:
+        m = pd.read_csv(p)[["task_id", "engine_port"]].drop_duplicates("task_id")
+    except Exception:                                            # noqa: BLE001
+        return None
+    merged = rows.merge(m, on="task_id", how="inner")
+    if merged.empty:
+        return None
+    engines = merged["engine_port"].nunique()
+    if engines < 2:
+        return None
+    out = {}
+    for c in CLASSES:
+        sub = merged[merged["class"] == c]
+        if len(sub) < 20:
+            continue
+        shares = sub["engine_port"].value_counts(normalize=True)
+        h = float((shares ** 2).sum())
+        out[c] = (h - 1.0 / engines) / (1.0 - 1.0 / engines)
+    return out
+
+
 def arm_of(run_dir):
     # Matches EXP-21 run directories too, so a published PolyServe condition can
     # be re-scored under this script's denominator and placed alongside a new
@@ -248,6 +285,10 @@ def main():
             rec[f"{c}_offered"] = attain(sub, "violate_offered")
             rec[f"{c}_served"] = attain(sub, "violate_served")
             rec[f"n_{c}"] = len(sub)
+        conc = routing_concentration(rows, d)
+        if conc:
+            for c, v in conc.items():
+                rec[f"conc_{c}"] = v
         summary.append(rec)
         slides[arm] = sliding(rows, "violate_offered")
         slides[arm].to_csv(os.path.join(a.out_dir, f"exp22_timeseries_{arm}.csv"),
@@ -270,6 +311,17 @@ def main():
               f"{r['deepresearch_offered']:>8.1f}{r['swe_offered']:>8.1f}"
               f"{r['goodput_tps']:>10.0f}{r['tokens_tps']:>10.0f}"
               f"{r['rejected']:>7d}{r['errored']:>6d}")
+
+    if any(c.startswith("conc_") for c in df.columns):
+        print("\nRouting concentration (0 = spread evenly over the engines, "
+              "1 = confined to one)")
+        print(f"{'arm':<12}" + "".join(f"{c[:12]:>14}" for c in CLASSES))
+        for _, r in df.iterrows():
+            line = f"{r['arm']:<12}"
+            for c in CLASSES:
+                v = r.get(f"conc_{c}")
+                line += f"{v:>14.3f}" if isinstance(v, float) and not np.isnan(v) else f"{'-':>14}"
+            print(line)
 
     for arm, sl in slides.items():
         if sl.empty:
