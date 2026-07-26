@@ -80,6 +80,8 @@ restart** (not just once at the start).
 | 12 | [EXP-12_chat-baseline-31.md](EXP-12_chat-baseline-31.md) | done | chat baseline 3.1-70B 재실험 (exp05 대체; 단일 모델화, 표준 창 [60,340]) |
 | 13 | [EXP-13_searcharena-deep-research-sweep.md](EXP-13_searcharena-deep-research-sweep.md) | done | deep-research(중간 길이, 입력 ~4k tok) 무제어 rate sweep — SLO knee 13 req/s·그 위 절벽, throughput은 붕괴 않고 포화-평탄(chat-side); 큐-질량 법칙 3번째 검증 |
 | 14 | [EXP-14_workload-mix.md](EXP-14_workload-mix.md) | done | chat+deep-research+SWE mix 3비율 rate sweep — knee가 토큰 질량 따라 이동(C13<A20<B38), 클래스 함께 붕괴(간섭), throughput 붕괴 강도 SWE지분 비례(C−49/A−40/B−20%); per-request→엔진 귀속 신규 |
+| 16 | [EXP-16_per-step-decode-decomposition.md](EXP-16_per-step-decode-decomposition.md) | done | decode step 분해(InstrumentedScheduler per-step 계측) — T_schedule 무시가능, KV 주항, prefill=full-chunk tail |
+| 21 | [EXP-21_polyserve-routing.md](EXP-21_polyserve-routing.md) | done | **라우팅** 축 실험(엔진 stock FIFO 고정): PolyServe tier 격리 vs load-balance — chat/dr 전 rate 100%, goodput 30req/s에서 FIFO 5.2배·QoServe 4.1배, 엔진 스케줄러 5종은 모두 ~14req/s에서 붕괴하나 PolyServe만 단조증가. 이득 출처는 tier 파티션(admission은 고부하에서 무력화) |
 
 분석 노트: [ANALYSIS_kv-tank-flow.md](ANALYSIS_kv-tank-flow.md) (KV 수조/유량),
 [ANALYSIS_why-not-full-kv.md](ANALYSIS_why-not-full-kv.md) (TBT–KV 선형 법칙),
