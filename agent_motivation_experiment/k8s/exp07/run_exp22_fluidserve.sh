@@ -142,6 +142,16 @@ case "${1:-}" in
     check_stack
     run_trace_arm fluidserve "$SMOKE_TRACE" "$SMOKE_WCFG" 60m
     ;;
+  dynsmokeboth)
+    # Run both arms on the 7-minute trace before spending an hour on each. The
+    # trace-replay mode has never been exercised on this cluster, so this is
+    # also the first check that the class plan lands on the right arrivals and
+    # that the new scheduler series appear in the scrape.
+    check_stack
+    run_trace_arm polyserve  "$SMOKE_TRACE" "$SMOKE_WCFG" 60m || exit 1
+    run_trace_arm fluidserve "$SMOKE_TRACE" "$SMOKE_WCFG" 60m || exit 1
+    echo "[exp22] DYN SMOKE DONE $(date -u +%H:%M)"
+    ;;
   dyn)
     check_stack
     run_trace_arm polyserve  "$TRACE" "$WCFG" 180m || exit 1
