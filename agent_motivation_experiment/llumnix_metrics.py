@@ -111,6 +111,7 @@ SCHEDULER_METRICS = {
     "scheduler_fluidserve_unachievable_requests",
     "scheduler_fluidserve_retired_total",
     "scheduler_fluidserve_capacity_correction",   # measured mean step / predicted
+    "scheduler_fluidserve_prefill_fraction",      # measured share of a prompt actually computed
     # How long one scheduling call takes. FluidServe's decision is far heavier
     # than a filter-and-pick, and a request held at the gateway re-enters this
     # path at every retry, so the per-call cost and the call rate together
