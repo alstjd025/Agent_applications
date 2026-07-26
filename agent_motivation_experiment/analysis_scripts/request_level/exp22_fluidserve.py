@@ -79,7 +79,7 @@ DRAIN_S = 20.0     # requests arriving this close to the end cannot finish
 def truthy(df, col):
     if col not in df.columns:
         return pd.Series(False, index=df.index)
-    return df[col].fillna(False).astype(str).str.lower().isin(["true", "1", "1.0"])
+    return df[col].astype(str).str.lower().isin(["true", "1", "1.0"])
 
 
 def load_run(run_dir):
@@ -161,7 +161,12 @@ def total_tokens(rows, window_s):
 
 
 def arm_of(run_dir):
-    m = re.search(r"exp22\w*_([a-z]+)_", os.path.basename(run_dir))
+    # Matches EXP-21 run directories too, so a published PolyServe condition can
+    # be re-scored under this script's denominator and placed alongside a new
+    # FluidServe one at the same rate without re-running it.
+    # [a-z]* rather than \w*: the latter swallows underscores and would match
+    # the trailing "rpm" instead of the arm name.
+    m = re.search(r"exp\d+[a-z]*_([a-z]+)_", os.path.basename(run_dir))
     return m.group(1) if m else os.path.basename(run_dir)
 
 
