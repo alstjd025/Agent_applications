@@ -313,8 +313,44 @@ FluidServe가 이길 수 있는 경로는 따라서 (필요조건: chat·dr을 P
    구분되지 않는다. rate-binned 곡선은 한 run 안에서 여러 window를 평균하므로 이
    점에서 단일 요약값보다 낫다.
 
+## 다음 작업 순서 (2026-07-27 확정)
+
+근거와 상세는 [fluidserve-implementation.md](../../../ms_dev/notes/fluidserve-implementation.md) §6.
+
+```
+1. prefix cache 반영
+   새 요청의 prefill 작업량을 프롬프트 전체가 아니라 실제 미계산분으로 charge.
+   → 처리량 결손(5,671 대 9,965 tok/s)의 최대 원인. 대기율 53%인 상태에서는
+     라우팅을 바꿔도 효과가 대기에 묻히므로 이걸 먼저.
+
+2. 강제 배치 경로를 claimed 집합으로 제한
+   클래스별 수요 D_c(도착률 × 요청당 서버-초, tierRepartitioner가 이미 계산)에서
+   k_c = ceil(D_c)대를 정하고, claimed_c = 그 클래스를 가장 많이 담은 상위 k_c 대.
+   feasible한 곳이 없을 때 claimed_c 안에서만 강제 배치.
+   → chat·dr 오염 차단. 산수상 가장 큰 이득(43.9/53.0 → 95~100 목표).
+
+3. share 항에 용량 정지점
+   share = (같은 클래스 비율) × max(0, 1 − 그 클래스가 이 인스턴스에서 쓰는 용량 비율)
+   → 폭주 방지를 room 하한(−50)에만 의존하지 않게 되어, 하한을 완화할 수 있고
+     그러면 2번의 오염 압력도 함께 줄어든다.
+
+4. warm start + 1시간 trace 2-arm 비교
+   저부하 10분 preload 후 측정 시작(build_dynamic_mix_trace.py의 warmup 구간을
+   60초 → 10분, 분석의 WARMUP_S도 맞춤).
+   주의 (a) prefix/page cache도 데워져 EXP-14/17/21과 절대 수치 비교 불가
+        (b) 그래서 1번을 먼저 — warm start는 캐시 히트율을 더 올려 미반영 결함을 키운다
+        (c) preload와 측정 사이에 엔진 재시작이 들어가면 안 됨
+   진단 가치: 격차가 크게 줄면 시작 전이가 원인, 안 줄면 정상상태의 성질.
+```
+
+**먼저 볼 만한 것**: 1시간 trace 전에 **mix B만 고정 rate로 15분**. chat 60% 구간에서
+PolyServe가 chat에 1대만 주는 게 실제로 얼마나 손해인지, 그게 파고들 수 있는 크기인지를
+짧게 확인할 수 있다.
+
 ## 산출물
 
 - 드라이버 `k8s/exp07/run_exp22_fluidserve.sh`, 러너 `k8s/exp07/runner-dyn.template.yaml`
-- 분석 `analysis_scripts/request_level/exp22_fluidserve.py`
+- 분석 `analysis_scripts/request_level/exp22_fluidserve.py` (attainment·goodput·집중도),
+  `exp22_controller.py`(컨트롤러 내부 상태), `exp22_polyserve_allocation.py`(배정이
+  움직였는지), `exp22_report.sh`(한 번에 전부)
 - 결과 `results/aggregate_analysis/exp22/`
