@@ -187,6 +187,18 @@ case "${1:-}" in
     run_rate_arm fluidserve "$RATES" "$DUR" 240m || exit 1
     echo "[exp22] SWEEP DONE $(date -u +%H:%M)"
     ;;
+  armsweep)
+    # One arm over a rate list at a chosen duration, for when only that arm has
+    # changed. The other arm's curve is reused, which is sound only while the
+    # code path it exercises is untouched -- state that explicitly in the write-up
+    # rather than leaving the reader to check.
+    #
+    #   ./run_exp22_fluidserve.sh armsweep <arm> [rates] [minutes-per-rate]
+    check_stack
+    export SESSION_PREFIX=${SESSION_PREFIX:-exp23}
+    run_rate_arm "${2:?arm name}" "${3:-600,1200,1800,2400,3000,3600}" "${4:-8}" 240m
+    echo "[exp22] ARM SWEEP DONE $(date -u +%H:%M)"
+    ;;
   dyn)
     check_stack
     run_trace_arm polyserve  "$TRACE" "$WCFG" 180m || exit 1
