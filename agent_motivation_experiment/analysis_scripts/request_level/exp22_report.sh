@@ -8,10 +8,15 @@
 # scraped scheduler series. Across runs: attainment against both denominators,
 # goodput, the time course, and the hour re-expressed as a rate sweep.
 set -uo pipefail
-cd "$(dirname "$0")"
 OUT=${1:?usage: exp22_report.sh <out-dir> <run-dir>...}
 shift
-RUNS=("$@")
+# Resolve everything against the caller's directory before moving to the script's
+# own, or relative run paths silently resolve to nothing that exists and the
+# report comes out empty rather than failing.
+OUT=$(readlink -f "$OUT")
+RUNS=()
+for r in "$@"; do RUNS+=("$(readlink -f "$r")"); done
+cd "$(dirname "$0")"
 [ ${#RUNS[@]} -gt 0 ] || { echo "no run dirs given"; exit 1; }
 
 mkdir -p "$OUT"

@@ -168,9 +168,10 @@ case "${1:-}" in
   arm)
     check_stack
     case "${3:-dyn}" in
-      dyn)   run_trace_arm "${2:?arm name}" "$TRACE" "$WCFG" 180m ;;
-      smoke) run_rate_arm  "${2:?arm name}" "${4:-1800}" 2 60m ;;
-      *) echo "usage: arm <name> {dyn|smoke}"; exit 1 ;;
+      dyn)    run_trace_arm "${2:?arm name}" "$TRACE" "$WCFG" 180m ;;
+      dyn06)  run_trace_arm "${2:?arm name}" "$SMOKE_TRACE" "$SMOKE_WCFG" 90m ;;
+      smoke)  run_rate_arm  "${2:?arm name}" "${4:-1800}" 2 60m ;;
+      *) echo "usage: arm <name> {dyn|dyn06|smoke}"; exit 1 ;;
     esac
     ;;
   *)
