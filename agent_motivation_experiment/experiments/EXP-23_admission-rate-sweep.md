@@ -106,3 +106,41 @@ FluidServe의 거절은 "이미 잃은 요청을 빨리 놓아주어, 아직 지
 - 이 실험의 전제와 v9/v10 재설계: [EXP-22](EXP-22_fluidserve-routing.md),
   [fluidserve-implementation.md](../../../ms_dev/notes/fluidserve-implementation.md) §7
 - 같은 스택의 rate sweep 선례: EXP-21 (PolyServe 대 stock Llumnix)
+
+---
+
+## 실행 (2026-07-27 03:37 시작)
+
+```
+./run_exp22_fluidserve.sh sweep "600,1200,1800,2400,3000,3600" 8
+```
+polyserve arm 먼저 6개 rate, 이어서 fluidserve arm 6개 rate. 세션 접두사 `exp23`.
+조건마다 엔진 콜드 재시작 + 60초 저부하 예열, arm당 약 60분.
+
+**스택은 EXP-22 v12 시점 그대로**: 게이트웨이 워커 4096 / 큐 16384(두 arm 공통),
+FluidServe 재시도 500ms / 보유 상한 35s, 엔진 stock FIFO, migration off,
+KV threshold off.
+
+## 실행 전에 적어두는 예상 (1800 rpm 단일 조건 결과를 알고 있는 상태)
+
+1800 rpm에서 이미 측정된 값: FluidServe 72.1 대 PolyServe 68.5(등가중),
+token goodput 8,047 대 7,361. EXP-21에서 PolyServe의 등가중은 rate에 따라
+99.2 → 78.3 → 69.5 → 67.4 → 67.2로 내려가 고원을 만든다(chat·dr은 전 구간 100,
+swe만 97.5 → 1.7로 떨어진다).
+
+| rate | 예상 | 근거 |
+|---|---|---|
+| 600 | 둘 다 95~100, 차이 없음 | 수요가 용량보다 훨씬 작아 admission이 발동하지 않는다 |
+| 1200 | FluidServe가 근소하게 앞서거나 동률 | swe가 막 감당 범위를 벗어나는 구간 |
+| 1800 | FluidServe +3~4 | 측정됨 (72.1 대 68.5) |
+| 2400~3600 | **격차가 벌어져야 한다** | PolyServe는 swe 서버 2대에 대기열을 무한히 쌓아 swe가 1~3%로 수렴한다. FluidServe는 감당 못 할 swe를 거절하고 chat/dr 인스턴스의 남는 용량만큼만 받으므로 swe가 완만하게만 떨어진다 |
+
+**틀렸을 때의 해석**
+- 높은 rate에서 FluidServe가 무너지면 → 제어평면일 가능성이 크다. 스케줄러 호출
+  비용이 2.05ms(PolyServe 0.109ms)이고 보유 중 요청이 재시도마다 그 경로를 다시
+  탄다. `request_full_mode_schedule_duration_milliseconds`와
+  `gateway_pending_requests`를 먼저 본다.
+- 낮은 rate에서 FluidServe가 지면 → 과보수다. 부하가 없는데 대기하거나 거절했다는
+  뜻이므로 `decisions`의 shed 비율을 본다(0이어야 정상).
+- swe가 PolyServe보다 낮아지면 → 거절이 과하다. 거절된 swe의 예상 완료 시간을
+  실제 완료한 swe와 비교한다.
