@@ -25,6 +25,21 @@ figures that say whether the fleet was used as a fleet:
                      routing failure as opposed to an overload.
   imbalance          the ratio of the busiest to the least busy engine, averaged
                      over the run.
+  preemptions        requests the engine evicted because its KV pool was full.
+                     vLLM V1 preempts by RECOMPUTE, so each one throws away the
+                     prefill already done and pays for it again when the request
+                     is rescheduled. It is invisible in every request-level
+                     number -- the request still completes, just later -- and it
+                     is not small: PolyServe preempted 549 times in one 8-minute
+                     condition at 3000 rpm, which at that workload's 7,460
+                     recomputed tokens per preemption is about 27% of the two
+                     affected engines' time spent redoing work.
+  prefix hit rate    the engine's own report of how much of each prompt it
+                     served from cache. It reads out the ROUTING: a policy that
+                     keeps a class on one engine drives that engine's hit rate up
+                     (PolyServe's chat engine reached 94.5% while its agent
+                     engines sat at 66.7%), and four engines all reporting the
+                     same figure means the classes are mixed.
 
 Usage
 -----
@@ -40,6 +55,9 @@ import sys
 RUNNING = "vllm:num_requests_running"
 WAITING = "vllm:num_requests_waiting"
 KVUSED = "vllm:kv_cache_usage_perc"
+PREEMPT = "vllm:num_preemptions_total"
+PFX_HIT = "vllm:prefix_cache_hits_total"
+PFX_Q = "vllm:prefix_cache_queries_total"
 
 
 def pick(rec, prefix):
@@ -63,7 +81,9 @@ def load_engines(run):
                 if not rec.get("ok"):
                     continue
                 rows.append((rec["t"], pick(rec, RUNNING) or 0.0,
-                             pick(rec, WAITING) or 0.0, pick(rec, KVUSED) or 0.0))
+                             pick(rec, WAITING) or 0.0, pick(rec, KVUSED) or 0.0,
+                             pick(rec, PREEMPT), pick(rec, PFX_HIT),
+                             pick(rec, PFX_Q)))
         if rows:
             out[os.path.basename(path).replace("engine_", "").replace(".jsonl", "")] = rows
     return out
@@ -132,9 +152,28 @@ def main():
             for i in range(0, n, a.step):
                 cells = []
                 for e in names:
-                    _, r, w, kv = engines[e][i]
+                    _, r, w, kv = engines[e][i][:4]
                     cells.append(f"{r:4.0f} {w:5.0f} {100 * kv:4.0f}%")
                 print(f"  {engines[names[0]][i][0] - t0:5.0f} | " + " | ".join(cells))
+        # Counters, so the run's total is the difference between its ends. Taken
+        # over the whole file rather than the printed window: a preemption during
+        # warmup is still work the engine had to redo.
+        print()
+        print(f"  {'engine':<8}{'preemptions':>13}{'prefix hit':>12}"
+              f"{'KV mean':>9}{'KV max':>8}")
+        for e in names:
+            rows = engines[e]
+            pre = [r[4] for r in rows if r[4] is not None]
+            hit = [r[5] for r in rows if r[5] is not None]
+            qry = [r[6] for r in rows if r[6] is not None]
+            kv = [r[3] for r in rows]
+            npre = (pre[-1] - pre[0]) if len(pre) > 1 else float("nan")
+            rate = ((hit[-1] - hit[0]) / (qry[-1] - qry[0])
+                    if len(hit) > 1 and len(qry) > 1 and qry[-1] > qry[0]
+                    else float("nan"))
+            print(f"  {e:<8}{npre:>13,.0f}{100 * rate:>11.1f}%"
+                  f"{100 * (sum(kv) / len(kv)):>8.1f}%{100 * max(kv):>7.1f}%")
+
         s = summarise(engines)
         print(f"\n  engines {s['engines']}, {s['samples']} samples over {s['span_s']:.0f}s")
         print(f"  peak queue depth on one engine   {s['peak_queue_depth']:>8,.0f}")
@@ -142,6 +181,15 @@ def main():
               f"{s['idle_while_queued_pct']:>5.1f}% of samples "
               f"({s['idle_while_queued_samples']:,})")
         print(f"  mean busiest / least busy        {s['mean_busiest_over_least_busy']:>8.1f}x")
+        total_pre = 0.0
+        for e in names:
+            pre = [r[4] for r in engines[e] if r[4] is not None]
+            if len(pre) > 1:
+                total_pre += pre[-1] - pre[0]
+        if total_pre > 0:
+            print(f"  -> {total_pre:,.0f} preemptions. Each one discards the prefill "
+                  "already done for that request and pays for it again on reschedule, "
+                  "which is engine time no request-level metric attributes to anything.")
         if s["peak_queue_depth"] > 500:
             print("  -> a queue this deep is work the router committed to an engine that "
                   "could not take it. A dispatched request cannot be recalled, so this is "
