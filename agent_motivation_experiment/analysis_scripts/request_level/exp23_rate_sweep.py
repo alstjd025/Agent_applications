@@ -46,7 +46,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from exp22_fluidserve import (  # noqa: E402
     ARM_STYLE, CLASSES, CLASS_COLORS, PAPER_STYLE, WARMUP_S, DRAIN_S,
-    load_run, equal_mix, attain, goodput_tokens, arm_of,
+    load_run, equal_mix, per_request, attain, goodput_tokens, arm_of,
 )
 
 
@@ -70,6 +70,8 @@ def summarise(run_dir):
         "arrivals_per_s": len(rows) / window,
         "eqmix": equal_mix(rows, "violate_offered"),
         "eqmix_served": equal_mix(rows, "violate_served"),
+        "perreq_served": per_request(rows, "violate_served"),
+        "perreq": per_request(rows, "violate_offered"),
         "goodput": goodput_tokens(rows, window),
         "rejected_pct": 100.0 * rows["rejected"].mean(),
         "errored_pct": 100.0 * rows["errored"].mean(),
@@ -156,14 +158,18 @@ def main():
     print("\nSLO attainment, equal weight across classes.")
     print("  admitted = denominator is the requests the system accepted")
     print("  offered  = denominator is every arriving request; a reject is a miss\n")
-    hdr = (f"{'arm':<12}{'rpm':>6}{'arrived/s':>11}{'admitted':>10}{'offered':>9}"
-           f"{'rej%':>7}{'goodput':>10}   per class (admitted) chat/dr/swe")
+    print("  equal-weight averages the three CLASSES; per-request counts every")
+    print("  REQUEST once. On mixes whose class volumes differ they diverge.\n")
+    hdr = (f"{'arm':<12}{'rpm':>6}{'arr/s':>7}"
+           f"{'eq-adm':>8}{'eq-off':>8}{'req-adm':>9}{'req-off':>9}"
+           f"{'rej%':>7}{'goodput':>9}   per class (admitted) chat/dr/swe")
     print(hdr)
     print("-" * len(hdr))
     for _, r in df.iterrows():
-        print(f"{r['arm']:<12}{r['rpm']:>6}{r['arrivals_per_s']:>11.1f}"
-              f"{r['eqmix_served']:>10.1f}{r['eqmix']:>9.1f}"
-              f"{r['rejected_pct']:>7.1f}{r['goodput']:>10.0f}   "
+        print(f"{r['arm']:<12}{r['rpm']:>6}{r['arrivals_per_s']:>7.1f}"
+              f"{r['eqmix_served']:>8.1f}{r['eqmix']:>8.1f}"
+              f"{r['perreq_served']:>9.1f}{r['perreq']:>9.1f}"
+              f"{r['rejected_pct']:>7.1f}{r['goodput']:>9.0f}   "
               f"{r['served_chat']:>5.1f}/{r['served_deepresearch']:>5.1f}/"
               f"{r['served_swe']:>5.1f}")
 
@@ -180,15 +186,18 @@ def main():
     if len(arms) == 2:
         a0, a1 = arms
         print(f"\n{a1} minus {a0}, per rate")
-        print(f"{'rpm':>6}{'admitted':>10}{'offered':>9}{'goodput':>10}")
+        print(f"{'rpm':>6}{'eq-adm':>9}{'eq-off':>8}{'req-adm':>9}{'req-off':>9}"
+              f"{'goodput':>10}")
         for rpm in sorted(set(df["rpm"])):
             x = df[(df.arm == a0) & (df.rpm == rpm)]
             y = df[(df.arm == a1) & (df.rpm == rpm)]
             if x.empty or y.empty:
                 continue
             print(f"{rpm:>6}"
-                  f"{y.eqmix_served.iloc[0] - x.eqmix_served.iloc[0]:>+10.1f}"
-                  f"{y.eqmix.iloc[0] - x.eqmix.iloc[0]:>+9.1f}"
+                  f"{y.eqmix_served.iloc[0] - x.eqmix_served.iloc[0]:>+9.1f}"
+                  f"{y.eqmix.iloc[0] - x.eqmix.iloc[0]:>+8.1f}"
+                  f"{y.perreq_served.iloc[0] - x.perreq_served.iloc[0]:>+9.1f}"
+                  f"{y.perreq.iloc[0] - x.perreq.iloc[0]:>+9.1f}"
                   f"{y.goodput.iloc[0] - x.goodput.iloc[0]:>+10.0f}")
 
     figures(df, a.out_dir)

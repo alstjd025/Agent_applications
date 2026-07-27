@@ -161,9 +161,32 @@ def attain(rows, col):
 
 
 def equal_mix(rows, col):
+    """Attainment averaged with every CLASS weighted equally.
+
+    Answers "is any service tier being starved". It was also the per-request
+    figure for as long as the mix was 1:1:1 by request count, which is why only
+    one aggregate was ever reported. It stops being that as soon as the classes
+    have different volumes: on the chat-heavy mix chat is 93% of the requests and
+    the other two are 4.7% and 2.3%, so this average gives a class carrying 40
+    times fewer requests the same say. Report it next to per_request(), not
+    instead of it.
+    """
     vals = [attain(rows[rows["class"] == c], col) for c in CLASSES]
     vals = [v for v in vals if not np.isnan(v)]
     return float(np.mean(vals)) if vals else np.nan
+
+
+def per_request(rows, col):
+    """Attainment over all requests, each counting once.
+
+    Answers "what share of the traffic got what it was promised". Neither this
+    nor equal_mix is the right one on its own: this one lets a dominant class
+    hide a starved small one, and equal_mix lets a starved dominant class hide
+    behind two healthy small ones. On mixes whose class volumes differ by 40x the
+    two can point in opposite directions, so both are reported and any claim has
+    to say which it rests on.
+    """
+    return attain(rows, col)
 
 
 def goodput_tokens(rows, window_s, col="violate_offered"):
