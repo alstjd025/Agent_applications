@@ -198,12 +198,19 @@ def routing_concentration(rows, run_dir):
 
 
 def arm_of(run_dir):
-    # Matches EXP-21 run directories too, so a published PolyServe condition can
-    # be re-scored under this script's denominator and placed alongside a new
-    # FluidServe one at the same rate without re-running it.
-    # [a-z]* rather than \w*: the latter swallows underscores and would match
-    # the trailing "rpm" instead of the arm name.
-    m = re.search(r"exp\d+[a-z]*_([a-z]+)_", os.path.basename(run_dir))
+    r"""The arm name out of a run directory, or the whole basename if unsure.
+
+    The session tag is anything from `exp21` to `exp24r3` to `exp25r1`, so the
+    digits and letters can alternate. An earlier pattern required the tag to end
+    in letters and therefore did not match `exp25r1_`; it fell through to the
+    basename, which reads as a distinct arm per run and silently turns a
+    two-arm comparison into a table of one-run arms. Nothing errors, the numbers
+    are all correct, and the grouping is wrong.
+
+    [a-z]* rather than \w* in the arm itself: the latter swallows underscores
+    and would match the trailing "rpm".
+    """
+    m = re.search(r"exp[0-9a-z]*_([a-z][a-z0-9]*)_", os.path.basename(run_dir))
     return m.group(1) if m else os.path.basename(run_dir)
 
 
