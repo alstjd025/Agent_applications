@@ -65,6 +65,16 @@ MIXES = {
     "A": {"chat": 1, "deepresearch": 1, "swe": 1},   # 33/33/33%  - balanced
     "B": {"chat": 6, "deepresearch": 3, "swe": 1},   # 60/30/10%  - light-heavy
     "C": {"chat": 1, "deepresearch": 1, "swe": 3},   # 20/20/60%  - heavy-heavy
+    # EXP-27 ratios, by INPUT TOKEN share against the SHORTENED agent transcript
+    # (mean input chat 674 / deepresearch 4,055 / swe 6,812). Stating the mix by
+    # request count, as A/B/C do, puts 83% of the fleet's input tokens in the
+    # agent class at equal counts and PolyServe's partition then comes out
+    # (2 swe / 1 chat / 1 dr) for every ratio it can be given -- a static
+    # partition that never has to move cannot be shown to be worse than one that
+    # moves. By token share it does move: m2 computes (1 / 2 / 1).
+    "m1": {"chat": 10, "deepresearch": 2, "swe": 1},  # 31/37/31% of input tokens
+    "m2": {"chat": 40, "deepresearch": 2, "swe": 1},  # 64/19/16%
+    "m3": {"chat": 6,  "deepresearch": 1, "swe": 2},  # 19/19/63%
 }
 
 DEF_CONV = "traces/azure/plots/_minute_conv2024.csv"
@@ -307,7 +317,11 @@ def _plot(path, lam, shape, args, bounds, t, n_warm, classes):
     style = {"font.family": "serif", "font.size": 8, "axes.labelsize": 9,
              "axes.titlesize": 9, "legend.fontsize": 7.5, "legend.frameon": False,
              "xtick.direction": "in", "ytick.direction": "in", "lines.linewidth": 1.1}
-    seg_color = {"A": "#1f77b4", "B": "#2ca02c", "C": "#d62728"}
+    # One colour per mix NAME rather than a fixed three-entry table, so adding a
+    # mix to MIXES does not make the figure raise on a name it has never seen.
+    palette = ["#1f77b4", "#2ca02c", "#d62728", "#9467bd", "#ff7f0e", "#8c564b"]
+    seg_color = {name: palette[i % len(palette)]
+                 for i, name in enumerate(sorted(MIXES))}
     with plt.rc_context(style):
         fig, axes = plt.subplots(3, 1, figsize=(7.2, 6.4), sharex=False)
 
