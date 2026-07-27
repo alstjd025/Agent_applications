@@ -245,7 +245,14 @@ class Workload:
         # Report the request mix AND the token mix it implies — with ~30x
         # input-size spread between classes these are very different, and
         # conflating them is the easiest way to misread a mixed run.
+        #
+        # The swe figure depends on which transcript is replayed (the shortened
+        # one averages 6,812 tokens against the original's 22,474), so a config
+        # that changes the transcript has to state it or this bookkeeping — and
+        # the input_token_fraction derived from it — would describe a different
+        # workload than the one that ran.
         mean_in = {"chat": 674, "deepresearch": 4055, "swe": 22474}
+        mean_in.update(workload_config.get("mean_input_tokens", {}) or {})
         total_w = sum(self._mix.values()) or 1
         req_frac = {c: round(w / total_w, 4) for c, w in sorted(self._mix.items())}
         tok_w = {c: self._mix.get(c, 0) * mean_in.get(c, 0) for c in self._mix}

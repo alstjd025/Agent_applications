@@ -1,0 +1,152 @@
+#!/bin/bash
+# EXP-27: rate x mix sweep on the shortened swe workload.
+#
+#   ./run_exp27_mixsweep.sh calib [rates] [min]      polyserve only, all mixes,
+#                                                    to locate where the fleet
+#                                                    saturates before spending
+#                                                    hours at the wrong rates
+#   ./run_exp27_mixsweep.sh sweep [rates] [min] [reps]
+#   ./run_exp27_mixsweep.sh arm <arm> <mix> [rates] [min]
+#
+# Two things changed from EXP-25 and both are in the workload, not the policy:
+#
+#   swe input   22,474 -> 6,812 mean tokens (shortened transcript). At the old
+#               length swe carried 82.6% of the fleet's input tokens at equal
+#               request counts and cost 15x a chat request, so PolyServe's
+#               partition came out (2 swe / 1 chat / 1 dr) for every mix it
+#               could be given. A partition that never moves cannot be shown to
+#               be worse than one that moves.
+#   the mix     stated as a share of INPUT TOKENS rather than of request counts.
+#               m1 balanced 31/37/31, m2 chat-heavy 64/19/16, m3 swe-heavy
+#               19/19/63 (chat / deep research / swe).
+#
+# Reproduced off-line against allocateServers, the three mixes no longer agree:
+# m2 computes (1 swe / 2 chat / 1 dr) where m1 and m3 compute (2 / 1 / 1).
+#
+# The scheduler policy is the only thing that differs between arms. Same
+# workload, same rates, same cold engine restart per condition.
+set -uo pipefail
+cd "$(dirname "$0")"
+REPO=/home/nxclab/llumnix_reproduce
+META=../../results/exp07_meta
+mkdir -p "$META"
+
+declare -A MIXCFG=(
+  [m1]=/work/workload_configs/mix_short_m1_balanced.json
+  [m2]=/work/workload_configs/mix_short_m2_chatheavy.json
+  [m3]=/work/workload_configs/mix_short_m3_sweheavy.json
+)
+HOSTWORK=/home/nxclab/llumnix_reproduce/Agent_applications/agent_motivation_experiment
+SHORT_TRANSCRIPT="$HOSTWORK/results/exp10_transcript/transcript_swe_short7k_mix1500.jsonl"
+
+check_stack() {
+  local th bin mig extra
+  th=$(kubectl -n llumnix get deploy scheduler -o yaml \
+       | grep -A1 -- "--admission-kv-usage-threshold" | tail -1 | tr -dc '0-9.')
+  if [ -n "$th" ] && awk -v t="$th" 'BEGIN{exit !(t>0)}'; then
+    echo "[exp27] ABORT: KV admission theta=$th is on"; exit 1
+  fi
+  bin=$(kubectl -n llumnix get deploy gateway -o jsonpath='{.spec.template.spec.containers[0].command[0]}')
+  [ "$bin" = "/exp07bin/gateway-exp10" ] \
+    || { echo "[exp27] ABORT: gateway is not the host-built binary ($bin)"; exit 1; }
+  mig=$(kubectl -n llumnix get lws neutral -o json \
+        | python3 -c "import json,sys;c=[c for c in json.load(sys.stdin)['spec']['leaderWorkerTemplate']['workerTemplate']['spec']['containers'] if c['name']=='vllm'][0];print(next((e.get('value','') for e in c.get('env',[]) if e['name']=='LLUMNIX_ENABLE_MIGRATION'),'unset'))")
+  [ "$mig" = "0" ] || { echo "[exp27] ABORT: engine migration is '$mig', want 0"; exit 1; }
+  extra=$(kubectl -n llumnix get lws neutral -o json \
+        | python3 -c "import json,sys;c=[c for c in json.load(sys.stdin)['spec']['leaderWorkerTemplate']['workerTemplate']['spec']['containers'] if c['name']=='vllm'][0];print(next((e.get('value','') for e in c.get('env',[]) if e['name']=='SCHED_EXTRA_ARGS'),'unset'))")
+  [ -z "$extra" ] || { echo "[exp27] ABORT: engine has SCHED_EXTRA_ARGS='$extra'"; exit 1; }
+  # The shortened transcript is the whole point of this experiment; running it
+  # against the long one would silently reproduce EXP-25 under a new name.
+  [ -s "$SHORT_TRANSCRIPT" ] \
+    || { echo "[exp27] ABORT: short transcript missing: $SHORT_TRANSCRIPT"; exit 1; }
+  echo "[exp27] stack ok: theta off, gateway=$bin, migration off, engine stock FIFO"
+}
+
+set_arm() {  # $1 = fluidserve | polyserve | loadbalance
+  local policy
+  case "$1" in
+    fluidserve)  policy=fluidserve ;;
+    polyserve)   policy=polyserve ;;
+    loadbalance) policy=load-balance ;;
+    *) echo "[exp27] unknown arm: $1" >&2; return 1 ;;
+  esac
+  echo "[exp27] switching scheduler -> $policy"
+  python3 "$REPO/ms_dev/scripts/set_scheduler_profiling.py" --policy "$policy" \
+    | sed 's/^/[exp27]   /'
+  local pod actual
+  pod=$(kubectl -n llumnix get pods -l app=scheduler \
+        --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}')
+  # From the START of the log: at -v 4 the start-up line leaves any tail window
+  # within seconds.
+  actual=$(kubectl -n llumnix logs "$pod" 2>/dev/null \
+           | grep -am1 -ao "create scheduler with policy: [a-z-]*" | awk '{print $NF}')
+  [ -n "$actual" ] || { echo "[exp27] scheduler pod $pod reported no policy"; return 1; }
+  [ "$actual" = "$policy" ] \
+    || { echo "[exp27] ABORT: scheduler reports '$actual', wanted '$policy'"; return 1; }
+  echo "[exp27] scheduler confirmed policy=$actual (pod $pod)"
+}
+
+run_cell() {  # $1 arm, $2 mix key, $3 rates, $4 durmin
+  local arm=$1 mix=$2 rates=$3 durmin=$4
+  local wcfg=${MIXCFG[$mix]:-}
+  [ -n "$wcfg" ] || { echo "[exp27] unknown mix '$mix'"; return 1; }
+  [ -s "${HOSTWORK}${wcfg#/work}" ] || { echo "[exp27] missing $wcfg"; return 1; }
+  local job="bench-runner-exp27-${arm}"
+  local session="${SESSION_PREFIX:-exp27}_${arm}${SESSION_SUFFIX:-}_${mix}"
+  set_arm "$arm" || return 1
+  kubectl -n llumnix delete job "$job" --ignore-not-found >/dev/null
+  sed -e "s/__JOBNAME__/$job/" -e "s/__SESSION__/$session/" \
+      -e "s/__RATES__/$rates/" -e "s/__DURMIN__/$durmin/" -e "s/__ARM__/$arm/" \
+      -e "s#__WCFG__#$wcfg#" \
+      runner-exp27.template.yaml | kubectl apply -f - >/dev/null
+  echo "[exp27] $arm/$mix launched $(date -u +%H:%M:%S), rates=$rates rpm dur=${durmin}m"
+  kubectl -n llumnix wait --for=condition=complete "job/$job" --timeout=300m \
+    || { echo "[exp27] $arm/$mix did not complete"
+         kubectl -n llumnix logs "job/$job" --tail=60; return 1; }
+  kubectl -n llumnix logs "job/$job" --tail=400 2>/dev/null | grep -aE "Success:|rc=" | tail -3
+  kubectl -n llumnix get deploy scheduler -o yaml > "$META/scheduler_deploy_${session}.yaml"
+  kubectl -n llumnix delete job "$job" --ignore-not-found >/dev/null
+  echo "[exp27] $arm/$mix DONE $(date -u +%H:%M:%S)"
+}
+
+case "${1:-}" in
+  calib)
+    # Where does this workload saturate? The shortened swe changes the fleet's
+    # capacity, so the EXP-25 rate list is no longer the right one and guessing
+    # it from the demand model is not good enough -- that model puts chat's
+    # capacity well below what the fleet actually delivers. One arm, short
+    # conditions, all three mixes.
+    check_stack
+    export SESSION_PREFIX=exp27cal
+    for mix in m1 m2 m3; do
+      run_cell polyserve "$mix" "${2:-600,1200,2400,3600}" "${3:-4}" || exit 1
+    done
+    echo "[exp27] CALIB DONE $(date -u +%H:%M)"
+    ;;
+  sweep)
+    check_stack
+    RATES=${2:-600,1200,2400}
+    DUR=${3:-8}
+    REPS=${4:-1}
+    for rep in $(seq 1 "$REPS"); do
+      # Repeat is the OUTER loop. Machine state drifts over hours, and with the
+      # arm outside, one arm would be measured entirely in a different stretch
+      # of that drift and the drift would read as an arm effect. EXP-24 measured
+      # 5 points of between-session movement against 0.2 within a session.
+      for mix in m1 m2 m3; do
+        for arm in polyserve fluidserve; do
+          SESSION_PREFIX="exp27r${rep}" run_cell "$arm" "$mix" "$RATES" "$DUR" \
+            || echo "[exp27] rep$rep $arm/$mix FAILED"
+        done
+      done
+      echo "[exp27] REPEAT $rep DONE $(date -u +%H:%M)"
+    done
+    echo "[exp27] SWEEP DONE $(date -u +%H:%M)"
+    ;;
+  arm)
+    check_stack
+    run_cell "${2:?arm}" "${3:?mix key m1|m2|m3}" "${4:-1200}" "${5:-4}"
+    ;;
+  *)
+    sed -n '2,30p' "$0"; exit 1 ;;
+esac

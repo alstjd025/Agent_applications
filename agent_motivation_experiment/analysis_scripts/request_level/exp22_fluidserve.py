@@ -132,7 +132,31 @@ def load_run(run_dir):
 
 
 def attain(rows, col):
+    """Attainment under one of the two denominators.
+
+    The denominator is part of the definition, not a detail of the filter, and
+    the two columns need different ones:
+
+      violate_offered   every request that arrived is in the denominator, and a
+                        rejection is a violation. This is what a policy that can
+                        reject has to answer for -- refusing work is not the same
+                        as doing it.
+      violate_served    the denominator is the requests the system ACCEPTED, so
+                        a rejection is neither a success nor a failure; it leaves
+                        the population. Read on its own it rewards refusing
+                        everything, which is why it is only ever reported next to
+                        the rejection rate and to token goodput.
+
+    Rejections were previously left in the denominator for BOTH columns, which
+    made the served column differ from the offered one only by client errors: a
+    rejected request has no first token, so `miss` was true for it either way.
+    Every "served" figure recorded before 2026-07-28 is really an offered figure.
+
+    Run-boundary cutoffs leave both denominators: their outcome is unknown.
+    """
     rows = rows[~rows["cutoff"]]
+    if col == "violate_served":
+        rows = rows[~rows["rejected"]]
     return 100.0 * (~rows[col]).mean() if len(rows) else np.nan
 
 

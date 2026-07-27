@@ -69,6 +69,7 @@ def summarise(run_dir):
         "n": len(rows),
         "arrivals_per_s": len(rows) / window,
         "eqmix": equal_mix(rows, "violate_offered"),
+        "eqmix_served": equal_mix(rows, "violate_served"),
         "goodput": goodput_tokens(rows, window),
         "rejected_pct": 100.0 * rows["rejected"].mean(),
         "errored_pct": 100.0 * rows["errored"].mean(),
@@ -76,6 +77,7 @@ def summarise(run_dir):
     for c in CLASSES:
         sub = rows[rows["class"] == c]
         out[f"attain_{c}"] = attain(sub, "violate_offered")
+        out[f"served_{c}"] = attain(sub, "violate_served")
         out[f"rejected_{c}"] = 100.0 * sub["rejected"].mean() if len(sub) else np.nan
     return out
 
@@ -90,7 +92,14 @@ def figures(df, out_dir):
             d = df[df.arm == a].sort_values("rpm")
             st = dict(ARM_STYLE[a])
             lbl = st.pop("label")
-            ax[0].plot(d.rpm, d.eqmix, label=lbl, **st)
+            # Solid: the admitted denominator, which is the headline. Faint: the
+            # same arm on the offered denominator, drawn in the same panel so the
+            # gap between the two lines IS the rejection rate's cost and cannot
+            # be presented without it.
+            ax[0].plot(d.rpm, d.eqmix_served, label=lbl, **st)
+            ax[0].plot(d.rpm, d.eqmix, alpha=0.35, lw=1.0,
+                       color=st.get("color"), ls=st.get("ls", "-"), marker="",
+                       label=f"{lbl} (offered)")
             ax[2].plot(d.rpm, d.goodput, label=lbl, **st)
             ax[3].plot(d.rpm, d.rejected_pct, label=lbl, **st)
         # Per class, one line style per arm and one colour per class, so the
@@ -98,11 +107,11 @@ def figures(df, out_dir):
         for a in arms:
             d = df[df.arm == a].sort_values("rpm")
             for c in CLASSES:
-                ax[1].plot(d.rpm, d[f"attain_{c}"], color=CLASS_COLORS[c],
+                ax[1].plot(d.rpm, d[f"served_{c}"], color=CLASS_COLORS[c],
                            ls=ARM_STYLE[a]["ls"], marker=ARM_STYLE[a]["marker"],
                            label=f"{c} / {ARM_STYLE[a]['label']}")
-        titles = ["equal-weight attainment", "per class", "token goodput",
-                  "rejected"]
+        titles = ["equal-weight attainment\n(solid admitted, faint offered)",
+                  "per class (admitted)", "token goodput", "rejected"]
         ylabels = ["SLO attainment (%)", "SLO attainment (%)",
                    "output tokens/s from requests that met their SLO",
                    "requests rejected (%)"]
@@ -137,30 +146,49 @@ def main():
     csv = os.path.join(a.out_dir, "exp23_rate_sweep.csv")
     df.to_csv(csv, index=False)
 
-    print("\nSLO attainment, equal weight across classes, offered denominator")
-    print("(a rejected, errored or unanswered request counts as a violation)\n")
-    hdr = (f"{'arm':<12}{'rpm':>6}{'arrived/s':>11}{'eqmix':>8}"
-           f"{'chat':>8}{'dr':>8}{'swe':>8}{'goodput':>10}{'rej%':>7}")
+    # Both denominators, side by side, because neither answers the question on
+    # its own. Attainment among ADMITTED requests is what a request that got in
+    # can expect, and it is the number an admission controller is entitled to be
+    # judged on -- but read alone it rewards refusing everything, so the
+    # rejection rate is printed in the same row and token goodput beside it.
+    # Attainment over EVERYTHING OFFERED has the opposite bias: it charges every
+    # rejection as a violation even when the request was going to miss anyway.
+    print("\nSLO attainment, equal weight across classes.")
+    print("  admitted = denominator is the requests the system accepted")
+    print("  offered  = denominator is every arriving request; a reject is a miss\n")
+    hdr = (f"{'arm':<12}{'rpm':>6}{'arrived/s':>11}{'admitted':>10}{'offered':>9}"
+           f"{'rej%':>7}{'goodput':>10}   per class (admitted) chat/dr/swe")
     print(hdr)
     print("-" * len(hdr))
     for _, r in df.iterrows():
         print(f"{r['arm']:<12}{r['rpm']:>6}{r['arrivals_per_s']:>11.1f}"
-              f"{r['eqmix']:>8.1f}{r['attain_chat']:>8.1f}"
-              f"{r['attain_deepresearch']:>8.1f}{r['attain_swe']:>8.1f}"
-              f"{r['goodput']:>10.0f}{r['rejected_pct']:>7.1f}")
+              f"{r['eqmix_served']:>10.1f}{r['eqmix']:>9.1f}"
+              f"{r['rejected_pct']:>7.1f}{r['goodput']:>10.0f}   "
+              f"{r['served_chat']:>5.1f}/{r['served_deepresearch']:>5.1f}/"
+              f"{r['served_swe']:>5.1f}")
+
+    print("\nRejection rate by class (%)\n")
+    hdr = f"{'arm':<12}{'rpm':>6}{'chat':>8}{'dr':>8}{'swe':>8}"
+    print(hdr)
+    print("-" * len(hdr))
+    for _, r in df.iterrows():
+        print(f"{r['arm']:<12}{r['rpm']:>6}{r['rejected_chat']:>8.1f}"
+              f"{r['rejected_deepresearch']:>8.1f}{r['rejected_swe']:>8.1f}")
 
     # The comparison itself, stated per rate rather than left to the reader.
     arms = sorted(set(df["arm"]))
     if len(arms) == 2:
         a0, a1 = arms
         print(f"\n{a1} minus {a0}, per rate")
-        print(f"{'rpm':>6}{'eqmix':>9}{'goodput':>10}")
+        print(f"{'rpm':>6}{'admitted':>10}{'offered':>9}{'goodput':>10}")
         for rpm in sorted(set(df["rpm"])):
             x = df[(df.arm == a0) & (df.rpm == rpm)]
             y = df[(df.arm == a1) & (df.rpm == rpm)]
             if x.empty or y.empty:
                 continue
-            print(f"{rpm:>6}{y.eqmix.iloc[0] - x.eqmix.iloc[0]:>+9.1f}"
+            print(f"{rpm:>6}"
+                  f"{y.eqmix_served.iloc[0] - x.eqmix_served.iloc[0]:>+10.1f}"
+                  f"{y.eqmix.iloc[0] - x.eqmix.iloc[0]:>+9.1f}"
                   f"{y.goodput.iloc[0] - x.goodput.iloc[0]:>+10.0f}")
 
     figures(df, a.out_dir)
