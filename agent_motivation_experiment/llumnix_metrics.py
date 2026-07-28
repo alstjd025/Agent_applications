@@ -129,6 +129,15 @@ SCHEDULER_METRICS = {
     "scheduler_fluidserve_obs_decode_batch",  # and the request count
     "scheduler_fluidserve_pace_ms",           # iteration time the horizon is converted with;
                                               # enters the prefill term as duty x pace
+    "scheduler_fluidserve_obs_steps",         # iterations the measured interval covered. The
+                                              # per-interval mean is elapsed/steps, so without
+                                              # this the series cannot be aggregated into a
+                                              # time per TOKEN -- and the equal-weight average
+                                              # of it reads 16 ms above the engines' own
+                                              # inter-token latency.
+    "scheduler_fluidserve_raw_step_ms",       # that interval's elapsed/steps, before the
+                                              # step-weighted smoothing observed_step_ms now
+                                              # carries
     "scheduler_fluidserve_offered_rate_tokens_per_ms",  # telemetry only since v19: how far
                                                   # past the fleet's capacity the run was
                                                   # driven. No decision reads it.
