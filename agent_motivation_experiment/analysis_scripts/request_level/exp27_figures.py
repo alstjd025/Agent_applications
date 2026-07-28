@@ -284,6 +284,12 @@ def main():
               "EXP-27 pass 1 (v19+v20, one run per condition): "
               "three mixes, four engines, 8 min per condition")
 
+    d3 = collect(["results/*exp27p3r1_*"])
+    if not d3.empty:
+        fig_split(d3, os.path.join(a.out_dir, "exp27_pass3"),
+                  "EXP-27 pass 3 (v22: re-decision reserve + queued-prefill price)",
+                  "m1 balanced, four engines, 8 min per condition, one run each")
+
     d2 = collect(a.pass2)
     if not d2.empty:
         fig_sweep(d2[d2.arm != "fluidserveflat"],
@@ -307,5 +313,75 @@ def main():
     return 0
 
 
+
+def fig_split(df, out_prefix, title, note=""):
+    """Attainment and goodput as two separate figures.
+
+    The dual-axis version keeps the two in view together, which is the right
+    default because a policy can raise attainment by refusing work. Split, each
+    gets its own scale and can be read precisely, so the attainment panel carries
+    BOTH denominators and the rejection rate is annotated on the points that have
+    one: the gap between the solid and faint lines is exactly what the rejections
+    cost, and separating the figures must not separate that.
+    """
+    arms = [a for a in ARM_C if a in set(df["arm"])]
+
+    def agg(a):
+        return df[df.arm == a].groupby("rpm").agg(
+            sloA=("attain", "mean"), sloALo=("attain", "min"),
+            sloAHi=("attain", "max"),
+            sloO=("attain_off", "mean"), sloOLo=("attain_off", "min"),
+            sloOHi=("attain_off", "max"),
+            gp=("goodput", "mean"), gpLo=("goodput", "min"),
+            gpHi=("goodput", "max"), rej=("rejected", "mean"),
+        ).reset_index().sort_values("rpm")
+
+    with plt.rc_context(PAPER_STYLE):
+        fig, ax = plt.subplots(figsize=(4.6, 3.4))
+        for a in arms:
+            d, c = agg(a), ARM_C[a]
+            ax.errorbar(d.rpm, d.sloA, yerr=[d.sloA - d.sloALo, d.sloAHi - d.sloA],
+                        color=c, ls="-", marker="o", capsize=2,
+                        label=f"{ARM_L[a]} — admitted")
+            ax.errorbar(d.rpm, d.sloO, yerr=[d.sloO - d.sloOLo, d.sloOHi - d.sloO],
+                        color=c, ls=":", marker="^", ms=3.5, alpha=0.6, capsize=2,
+                        label=f"{ARM_L[a]} — offered")
+            for _, r in d.iterrows():
+                if r.rej >= 1.0:
+                    ax.annotate(f"{r.rej:.0f}% rejected",
+                                (r.rpm, (r.sloA + r.sloO) / 2),
+                                fontsize=6, color=c, ha="center", va="center",
+                                xytext=(0, 0), textcoords="offset points")
+        ax.set_xlabel("offered rate (rpm)")
+        ax.set_ylabel("SLO attainment (%), per request")
+        ax.set_xticks(sorted(df.rpm.unique()))
+        ax.set_ylim(0, 105)
+        ax.grid(axis="y", ls=":", lw=0.7, alpha=0.6)
+        ax.legend(loc="lower left", fontsize=7)
+        ax.set_title(title + ("\n" + note if note else ""))
+        fig.tight_layout()
+        fig.savefig(f"{out_prefix}_attainment.png", dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
+        fig, ax = plt.subplots(figsize=(4.6, 3.4))
+        for a in arms:
+            d, c = agg(a), ARM_C[a]
+            ax.errorbar(d.rpm, d.gp, yerr=[d.gp - d.gpLo, d.gpHi - d.gp],
+                        color=c, ls="-", marker="s", capsize=2, label=ARM_L[a])
+        ax.set_xlabel("offered rate (rpm)")
+        # Short label, definition in the title: the long form overflows the axes
+        # box at this figure width and the leading characters are clipped.
+        ax.set_ylabel("goodput (output tokens/s)")
+        ax.set_xticks(sorted(df.rpm.unique()))
+        ax.set_ylim(0, None)
+        ax.grid(axis="y", ls=":", lw=0.7, alpha=0.6)
+        ax.legend(loc="upper left", fontsize=7)
+        ax.set_title("Token goodput — output tokens/s from requests that met "
+                     "their SLO\n" + title + ("\n" + note if note else ""),
+                     fontsize=8)
+        fig.tight_layout()
+        fig.savefig(f"{out_prefix}_goodput.png", dpi=300, bbox_inches="tight")
+        plt.close(fig)
+    print(f"wrote {out_prefix}_attainment.png and {out_prefix}_goodput.png")
 if __name__ == "__main__":
     sys.exit(main())
