@@ -137,70 +137,122 @@ def main():
     print(f"\n{os.path.basename(a.run_dir)}   (first {a.from_min:g} min dropped)")
     print(f"correction = {corr:.4f}    prefill_fraction = {pfrac:.4f}\n")
 
+    # Aligned by (instance, timestamp) rather than averaged series by series.
+    # The duty cycle the measurement implies is a RATIO, (obs - decOnly)/obs, and
+    # a ratio of the two means is not the mean of the ratios whenever the
+    # iteration time is volatile -- which at this rate it is. Computing it from
+    # run means made the smoothed duty look like it lagged by 0.13 when most of
+    # that was the two averages not being the same quantity.
+    per = collections.defaultdict(dict)   # (inst, t) -> {short name: value}
+    SHORT = {
+        "scheduler_fluidserve_observed_step_ms": "obs",
+        "scheduler_fluidserve_predicted_step_ms": "pred",
+        "scheduler_fluidserve_decode_law_ms": "dec",
+        "scheduler_fluidserve_decode_only_ms": "deco",
+        "scheduler_fluidserve_prefill_duty": "duty",
+        "scheduler_fluidserve_pace_ms": "pace",
+        "scheduler_fluidserve_arriving_prefill_tokens": "arr",
+        "scheduler_fluidserve_queued_prefill_tokens": "que",
+        "scheduler_fluidserve_gate_allowance_ms": "gate",
+    }
+    for name, short in SHORT.items():
+        for inst, pts in d.get(name, {}).items():
+            for t, v in pts:
+                per[(inst, t)][short] = v
+                per[(inst, t)]["_t"] = t
+
+    rows = [r for r in per.values()
+            if all(k in r for k in ("obs", "pred", "dec", "deco", "duty", "pace"))
+            and r["obs"] > 0]
+    if not rows:
+        sys.exit("no aligned samples: the series do not share timestamps")
+    for r in rows:
+        r["duty_i"] = (r["obs"] - r["deco"]) / r["obs"]
+
     insts = sorted(d["scheduler_fluidserve_observed_step_ms"].keys())
     hdr = (f"{'instance':>10}{'obs':>8}{'pred':>8}{'gap':>7}"
-           f"{'dec':>8}{'decOnly':>9}{'duty':>7}{'pace':>8}"
-           f"{'arriv':>9}{'queued':>9}{'gate':>8}")
+           f"{'dec':>8}{'decOnly':>9}{'duty_s':>8}{'duty_i':>8}"
+           f"{'arriv':>9}{'queued':>9}{'gate':>7}{'n':>6}")
     print(hdr)
     print("-" * len(hdr))
     agg = collections.defaultdict(list)
     for i in insts:
-        row = {n: series_mean(d, n, i) for n in PER_INSTANCE}
-        obs = row["scheduler_fluidserve_observed_step_ms"]
-        pred = row["scheduler_fluidserve_predicted_step_ms"]
-        dec = row["scheduler_fluidserve_decode_law_ms"]
-        deco = row["scheduler_fluidserve_decode_only_ms"]
-        duty = row["scheduler_fluidserve_prefill_duty"]
-        pace = row["scheduler_fluidserve_pace_ms"]
-        arr = row["scheduler_fluidserve_arriving_prefill_tokens"]
-        que = row["scheduler_fluidserve_queued_prefill_tokens"]
-        gate = row["scheduler_fluidserve_gate_allowance_ms"]
-        print(f"{i[-8:]:>10}{obs:8.2f}{pred:8.2f}{pred-obs:7.2f}"
-              f"{dec:8.2f}{deco:9.2f}{duty:7.3f}{pace:8.2f}"
-              f"{arr:9.0f}{que:9.0f}{gate:8.1f}")
-        for k, v in (("obs", obs), ("pred", pred), ("dec", dec), ("deco", deco),
-                     ("duty", duty), ("pace", pace), ("arr", arr), ("que", que)):
-            agg[k].append(v)
+        sub = [r for (inst, _), r in per.items() if inst == i and "duty_i" in r]
+        if not sub:
+            continue
+        g = lambda k: mean([r[k] for r in sub if k in r])
+        print(f"{i[-8:]:>10}{g('obs'):8.2f}{g('pred'):8.2f}{g('pred')-g('obs'):7.2f}"
+              f"{g('dec'):8.2f}{g('deco'):9.2f}{g('duty'):8.3f}{g('duty_i'):8.3f}"
+              f"{g('arr'):9.0f}{g('que'):9.0f}{g('gate'):7.1f}{len(sub):6d}")
+    for k in ("obs", "pred", "dec", "deco", "duty", "duty_i", "pace", "arr", "que"):
+        agg[k] = [r[k] for r in rows if k in r]
 
-    m = {k: mean(v) for k, v in agg.items()}
-    gap = m["pred"] - m["obs"]
-    # (1) what the multiplicative correction contributes: the prediction is
-    #     corr x (the uncorrected assembly), so removing it costs (corr-1)/corr
-    #     of the prediction.
-    c1 = m["pred"] * (corr - 1) / corr if corr else float("nan")
-    # (2) what evaluating the decode law at the current status rather than at the
-    #     batch that ran costs. Carried through the same correction.
-    c2 = corr * (m["dec"] - m["deco"])
-    # (3) what is left of the prefill term after the collapse duty x pace. Zero
-    #     when effectivePrefill takes the arriving branch and the duty cycle has
-    #     settled; positive when the queued branch wins.
-    c3 = gap - c1 - c2
+    # Per-sample decomposition, reported as a median as well as a mean. The
+    # iteration time is heavy-tailed at this rate -- a few very long intervals
+    # pull the mean far above the typical sample -- and the two statistics
+    # disagree about the SIGN of the gap, so reporting one alone would answer
+    # the question either way depending on which was picked.
+    corrs = dict(d.get("scheduler_fluidserve_capacity_correction", {}).get("-", []))
+    def corr_at(t):
+        return corrs.get(t, corr)
 
-    print(f"\n{'':>10}{'mean':>8}")
-    print(f"{'observed':>10}{m['obs']:8.2f}")
-    print(f"{'predicted':>10}{m['pred']:8.2f}")
-    print(f"{'GAP':>10}{gap:8.2f}\n")
-    print("decomposition of the gap")
-    print(f"  (1) correction  (corr={corr:.3f})        {c1:7.2f} ms"
-          f"   {100*c1/gap if gap else 0:5.1f}%")
-    print(f"  (2) batch       (dec-decOnly={m['dec']-m['deco']:.2f})  {c2:7.2f} ms"
-          f"   {100*c2/gap if gap else 0:5.1f}%")
-    print(f"  (3) prefill term residual              {c3:7.2f} ms"
-          f"   {100*c3/gap if gap else 0:5.1f}%")
-    print(f"\n  duty={m['duty']:.3f}  pace={m['pace']:.2f}  duty*pace="
-          f"{m['duty']*m['pace']:.2f} ms")
-    print(f"  arriving={m['arr']:.0f} tok   queued={m['que']:.0f} tok   "
-          f"-> effective takes the "
-          f"{'QUEUED' if m['que'] > m['arr'] else 'arriving'} branch")
+    for r in rows:
+        c = corr_at(r.get("_t", None)) if "_t" in r else corr
+        r["_corr"] = c
+        # Does the assembly reproduce the published prediction? If this residual
+        # is not near zero the model of how meanStep is built is wrong, and every
+        # component below is a decomposition of the wrong quantity.
+        r["asm"] = c * (r["dec"] + r["duty"] * r["pace"])
+        r["asm_err"] = r["pred"] - r["asm"]
+        r["gap"] = r["pred"] - r["obs"]
+        r["c1"] = (c - 1) * r["dec"]
+        r["c2"] = r["dec"] - r["deco"]
+        r["c3"] = r["obs"] * (c * r["duty"] - r["duty_i"])
+        r["resid"] = r["gap"] - r["c1"] - r["c2"] - r["c3"]
+
+    def med(k):
+        v = sorted(r[k] for r in rows if k in r)
+        n = len(v)
+        return (v[n // 2] if n % 2 else 0.5 * (v[n // 2 - 1] + v[n // 2])) if n else float("nan")
+
+    print(f"\n{'':>28}{'mean':>9}{'median':>9}")
+    for label, k in (("observed", "obs"), ("predicted", "pred"),
+                     ("GAP (pred - obs)", "gap"),
+                     ("assembly check (pred-asm)", "asm_err")):
+        print(f"{label:>28}{mean([r[k] for r in rows]):9.2f}{med(k):9.2f}")
+
+    print(f"\ndecomposition of the gap{'':>4}{'mean':>9}{'median':>9}")
+    for label, k in (("(1) correction", "c1"), ("(2) evaluation batch", "c2"),
+                     ("(3) duty cycle", "c3"), ("    residual", "resid")):
+        print(f"{label:>28}{mean([r[k] for r in rows]):9.2f}{med(k):9.2f}")
+
+    print(f"\n{'duty smoothed':>28}{mean([r['duty'] for r in rows]):9.3f}"
+          f"{med('duty'):9.3f}")
+    print(f"{'duty instantaneous':>28}{mean([r['duty_i'] for r in rows]):9.3f}"
+          f"{med('duty_i'):9.3f}")
+    print(f"{'correction':>28}{corr:9.4f}")
+    print(f"{'arriving prefill (tok)':>28}{mean([r['arr'] for r in rows]):9.0f}")
+    print(f"{'queued prefill (tok)':>28}{mean([r['que'] for r in rows]):9.0f}")
+    nq = sum(1 for r in rows if r.get("que", 0) > r.get("arr", 0))
+    print(f"{'samples on QUEUED branch':>28}{nq:9d}  of {len(rows)}")
 
     print("\nverdict (EXP-29 section 4 rule: a component >= 6 ms names the cause)")
-    for name, val in (("correction loop", c1), ("evaluation batch", c2),
-                      ("prefill term", c3)):
-        if val >= 6.0:
-            print(f"  -> {name}: {val:.2f} ms")
-    if max(c1, c2, c3) < 6.0:
-        print("  -> no single component reaches 6 ms; the decomposition is "
-              "incomplete and must be rebuilt rather than guessed past")
+    if abs(med("asm_err")) > 1.5:
+        print(f"  !! assembly check off by {med('asm_err'):+.2f} ms at the median: "
+              f"the model of how the prediction is built is wrong, and the "
+              f"components below decompose the wrong quantity")
+    named = False
+    for label, k in (("correction loop", "c1"), ("evaluation batch", "c2"),
+                     ("duty-cycle definition", "c3")):
+        if abs(med(k)) >= 6.0 or abs(mean([r[k] for r in rows])) >= 6.0:
+            print(f"  -> {label}: mean {mean([r[k] for r in rows]):+.2f} ms, "
+                  f"median {med(k):+.2f} ms")
+            named = True
+    if abs(med("resid")) > 1.5:
+        print(f"  !! residual {med('resid'):+.2f} ms at the median: the "
+              f"decomposition does not close")
+    if not named:
+        print("  -> no component reaches 6 ms on either statistic")
 
 
 if __name__ == "__main__":
