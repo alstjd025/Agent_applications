@@ -60,7 +60,7 @@ PER_INSTANCE = [
     "scheduler_fluidserve_gate_allowance_ms",
 ]
 GLOBAL = [
-    "scheduler_fluidserve_correction",
+    "scheduler_fluidserve_capacity_correction",
     "scheduler_fluidserve_prefill_fraction",
 ]
 
@@ -132,7 +132,7 @@ def main():
         if "scheduler_fluidserve_decode_only_ms" in missing:
             sys.exit("cannot decompose without decode_only_ms")
 
-    corr = series_mean(d, "scheduler_fluidserve_correction")
+    corr = series_mean(d, "scheduler_fluidserve_capacity_correction")
     pfrac = series_mean(d, "scheduler_fluidserve_prefill_fraction")
     print(f"\n{os.path.basename(a.run_dir)}   (first {a.from_min:g} min dropped)")
     print(f"correction = {corr:.4f}    prefill_fraction = {pfrac:.4f}\n")

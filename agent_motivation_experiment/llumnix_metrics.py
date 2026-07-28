@@ -117,6 +117,18 @@ SCHEDULER_METRICS = {
     "scheduler_fluidserve_prefill_duty",          # per-instance share of engine time on
                                                   # prefill; what the projection is built
                                                   # from since v19
+    # The terms the predicted iteration is assembled from, added for EXP-29.
+    # observed_step_ms and predicted_step_ms above give the two endpoints of the
+    # gap that holds 84% of decisions at 80 req/s, and a gap between them can be
+    # produced at four different places with no way to tell which from outside.
+    # These are the places.
+    "scheduler_fluidserve_decode_only_ms",    # decode law at the batch that RAN, which is
+                                              # what the prefill attribution subtracts
+    "scheduler_fluidserve_decode_law_ms",     # decode law at the batch the PREDICTION uses
+    "scheduler_fluidserve_obs_kv_tokens",     # the KV the first of those was evaluated at
+    "scheduler_fluidserve_obs_decode_batch",  # and the request count
+    "scheduler_fluidserve_pace_ms",           # iteration time the horizon is converted with;
+                                              # enters the prefill term as duty x pace
     "scheduler_fluidserve_offered_rate_tokens_per_ms",  # telemetry only since v19: how far
                                                   # past the fleet's capacity the run was
                                                   # driven. No decision reads it.
