@@ -292,11 +292,12 @@ def main():
               "EXP-27 pass 1 (v19+v20, one run per condition): "
               "three mixes, four engines, 8 min per condition")
 
-    d3 = collect(["results/*exp27p3r1_*"])
+    d3 = collect(["results/*exp27p3*"])
     if not d3.empty:
         fig_split(d3, os.path.join(a.out_dir, "exp27_pass3"),
                   "EXP-27 pass 3 (v22: re-decision reserve + queued-prefill price)",
-                  "m1 balanced, four engines, 8 min per condition, one run each")
+                  "m1 balanced, four engines, 8 min per condition, "
+                  "two repeats (bars = min..max)")
 
     d2 = collect(a.pass2)
     if not d2.empty:
