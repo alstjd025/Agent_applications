@@ -1,0 +1,61 @@
+{
+  "_comment": [
+    "m1 balanced, with the agent class's SLO restated for a policy that cannot",
+    "express an end-to-end budget.",
+    "",
+    "The agent class's real SLO is E2E <= 30 s, and the analysis scores it that way",
+    "whatever this file says. FluidServe is told so directly (25:e2e:30000) and",
+    "derives a nominal pace of 30,000 / 520.2 measured output tokens = 57.7 ms per",
+    "token. Llumnix's own SLO policy has no end-to-end mode: it takes tbt_ms",
+    "literally as a per-token target. With the default decomposition (11,800, 25) it",
+    "therefore judged the agent class at 25 ms per token -- 2.3x tighter than",
+    "FluidServe judged the same requests -- and refused every instance, rejecting",
+    "98% of that class.",
+    "",
+    "This file gives it the decomposition closest to FluidServe's nominal pace that",
+    "still fits the 30 s budget at the measured output length:",
+    "    2,500 + 520.2 x 52 = 29,550 ms <= 30,000",
+    "",
+    "It is not an equivalent statement of the same SLO, and cannot be: an end-to-end",
+    "budget allows trading time to first token against per-token pace, and a fixed",
+    "(ttft, tbt) pair fixes one point on that trade. That is the limitation under",
+    "test. This file makes the baseline as strong as a static pair can be, so that",
+    "what remains is the limitation and not the configuration.",
+    "",
+    "chat and deep research are unchanged: their SLOs are natively (ttft, tbt)."
+  ],
+  "mix": {
+    "chat": 10,
+    "deepresearch": 2,
+    "swe": 1
+  },
+  "mean_input_tokens": {
+    "chat": 674,
+    "deepresearch": 4055,
+    "swe": 6812
+  },
+  "chat_config": {
+    "num_conversations": 1000
+  },
+  "deepresearch_config": {},
+  "swe_config": {
+    "transcript_file": "/work/results/exp10_transcript/transcript_swe_short7k_mix1500.jsonl"
+  },
+  "slo": {
+    "chat": {
+      "ttft_ms": 5000,
+      "tbt_ms": 50,
+      "out_len": 386
+    },
+    "deepresearch": {
+      "ttft_ms": 10000,
+      "tbt_ms": 100,
+      "out_len": 275
+    },
+    "swe": {
+      "ttft_ms": 2500,
+      "tbt_ms": 52,
+      "out_len": 728
+    }
+  }
+}

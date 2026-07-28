@@ -35,6 +35,13 @@ declare -A MIXCFG=(
   [m1]=/work/workload_configs/mix_short_m1_balanced.json
   [m2]=/work/workload_configs/mix_short_m2_chatheavy.json
   [m3]=/work/workload_configs/mix_short_m3_sweheavy.json
+  # m1 with the agent class's 30 s end-to-end budget restated as the (ttft, tbt)
+  # pair closest to FluidServe's nominal pace. For the Llumnix SLO arm only: that
+  # policy has no end-to-end mode and took the default decomposition's 25 ms as a
+  # literal per-token target, judging the same requests 2.3x tighter than
+  # FluidServe judged them. Scoring is unaffected -- the analysis scores the agent
+  # class on end-to-end 30 s whatever this file says.
+  [m1f]=/work/workload_configs/mix_short_m1_slofair.json
 )
 HOSTWORK=/home/nxclab/llumnix_reproduce/Agent_applications/agent_motivation_experiment
 SHORT_TRANSCRIPT="$HOSTWORK/results/exp10_transcript/transcript_swe_short7k_mix1500.jsonl"
@@ -62,11 +69,17 @@ check_stack() {
   echo "[exp27] stack ok: theta off, gateway=$bin, migration off, engine stock FIFO"
 }
 
-set_arm() {  # $1 = fluidserve | polyserve | loadbalance
+set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
   local policy
   case "$1" in
     fluidserve)  policy=fluidserve ;;
     polyserve)   policy=polyserve ;;
+    # Llumnix's own SLO-aware policy, as shipped apart from the neutral branch
+    # that lets it run on a co-located fleet. It is NOT class-aware: --ttft-slo
+    # and --tpot-slo are single global values, so every request is judged against
+    # the same pair. That is the point of having it -- it separates what SLO
+    # awareness buys from what per-class differentiation buys.
+    slo)         policy=slo ;;
     loadbalance) policy=load-balance ;;
     *) echo "[exp27] unknown arm: $1" >&2; return 1 ;;
   esac

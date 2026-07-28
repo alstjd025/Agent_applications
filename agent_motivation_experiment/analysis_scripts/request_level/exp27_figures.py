@@ -40,10 +40,10 @@ from exp22_fluidserve import (  # noqa: E402
     arm_of,
 )
 
-ARM_C = {"polyserve": "#d62728", "fluidserve": "#1f77b4",
-         "fluidserveflat": "#2ca02c"}
-ARM_L = {"polyserve": "PolyServe", "fluidserve": "FluidServe",
-         "fluidserveflat": "FluidServe (v20 off)"}
+ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
+         "fluidserveflat": "#9467bd"}
+ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
+         "fluidserve": "FluidServe", "fluidserveflat": "FluidServe (v20 off)"}
 MIX_TITLE = {
     "m1": "m1 balanced\n31/37/31% of input tokens",
     "m2": "m2 chat-heavy\n64/19/16%",
@@ -292,12 +292,21 @@ def main():
               "EXP-27 pass 1 (v19+v20, one run per condition): "
               "three mixes, four engines, 8 min per condition")
 
-    d3 = collect(["results/*exp27p3*"])
+    # pass 3 (polyserve, fluidserve) and pass 4 (the Llumnix SLO baseline) ran in
+    # different sessions. Placing them on one figure is a cross-session
+    # comparison, which is only defensible because the between-session movement on
+    # this workload has been measured and is small against the differences shown:
+    # PolyServe read 33.0 / 32.4 / 33.1 / 33.1 at 80 req/s across four sessions
+    # and FluidServe 100.0 at 40 across three. The note on the figure says so.
+    d3 = collect(["results/*exp27p3*", "results/*exp27p4*"])
     if not d3.empty:
+        note = ("m1 balanced, four engines, 8 min per condition, "
+                "two repeats (bars = min..max)")
+        if "slo" in set(d3["arm"]):
+            note += ("\nLlumnix SLO measured in a separate session; "
+                     "between-session movement on this workload is 0.7-1.6 points")
         fig_split(d3, os.path.join(a.out_dir, "exp27_pass3"),
-                  "EXP-27 pass 3 (v22: re-decision reserve + queued-prefill price)",
-                  "m1 balanced, four engines, 8 min per condition, "
-                  "two repeats (bars = min..max)")
+                  "EXP-27 (v22: re-decision reserve + queued-prefill price)", note)
 
     d2 = collect(a.pass2)
     if not d2.empty:
@@ -357,12 +366,12 @@ def fig_split(df, out_prefix, title, note=""):
                         yerr=[d.sloO - d.sloOLo, d.sloOHi - d.sloO],
                         color=c, ls=":", marker="^", ms=3.5, alpha=0.6, capsize=2,
                         label=f"{ARM_L[a]} — offered")
-            for _, r in d.iterrows():
-                if r.rej >= 1.0:
-                    ax.annotate(f"{r.rej:.0f}% rejected",
-                                (r.rpm / 60.0, (r.sloA + r.sloO) / 2),
-                                fontsize=6, color=c, ha="center", va="center",
-                                xytext=(0, 0), textcoords="offset points")
+        # The rejection rate is not annotated on the points. With three arms the
+        # labels collide at exactly the rates where the arms are closest, which is
+        # where the figure has to be readable. The gap between an arm's solid line
+        # (admitted) and its dotted line (offered) already IS the rejection cost,
+        # measured on the same axis, so the information is in the figure without
+        # the text; the numbers are in the table.
         ax.set_xlabel("offered rate (requests/s)")
         ax.set_ylabel("SLO attainment (%), per request")
         ax.set_xticks(rps(sorted(df.rpm.unique())))

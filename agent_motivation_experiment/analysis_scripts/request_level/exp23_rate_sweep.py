@@ -87,6 +87,17 @@ def decision_mix(run_dir):
     return {d: 100.0 * (last[d] - first[d]) / total for d in last}
 
 
+# Display names. The arm key is the scheduler's own policy name, which is what
+# the session directory and the --scheduling-policy flag carry; "slo" on its own
+# reads as a category rather than as the specific policy Llumnix ships, so the
+# tables spell it out.
+ARM_DISPLAY = {"slo": "llumnix-slo"}
+
+
+def shown(arm):
+    return ARM_DISPLAY.get(arm, arm)
+
+
 def rpm_of(run_dir):
     m = re.search(r"_rpm_(\d+)", os.path.basename(run_dir))
     return int(m.group(1)) if m else None
@@ -208,7 +219,7 @@ def main():
     print(hdr)
     print("-" * len(hdr))
     for _, r in df.iterrows():
-        print(f"{r['arm']:<12}{r['rpm']:>6}{r['arrivals_per_s']:>7.1f}"
+        print(f"{shown(r['arm']):<12}{r['rpm']:>6}{r['arrivals_per_s']:>7.1f}"
               f"{r['eqmix_served']:>8.1f}{r['eqmix']:>8.1f}"
               f"{r['perreq_served']:>9.1f}{r['perreq']:>9.1f}"
               f"{r['rejected_pct']:>7.1f}{r['goodput']:>9.0f}   "
@@ -224,7 +235,7 @@ def main():
         for _, r in df.iterrows():
             if pd.isna(r.get("dec_route")):
                 continue
-            print(f"{r['arm']:<12}{r['rpm']:>6}{r['dec_route']:>8.1f}"
+            print(f"{shown(r['arm']):<12}{r['rpm']:>6}{r['dec_route']:>8.1f}"
                   f"{r['dec_pend']:>8.1f}{r['dec_shed']:>8.1f}{r['dec_force']:>8.1f}")
 
     print("\nRejection rate by class (%)\n")
@@ -232,7 +243,7 @@ def main():
     print(hdr)
     print("-" * len(hdr))
     for _, r in df.iterrows():
-        print(f"{r['arm']:<12}{r['rpm']:>6}{r['rejected_chat']:>8.1f}"
+        print(f"{shown(r['arm']):<12}{r['rpm']:>6}{r['rejected_chat']:>8.1f}"
               f"{r['rejected_deepresearch']:>8.1f}{r['rejected_swe']:>8.1f}")
 
     # The comparison itself, stated per rate rather than left to the reader.
