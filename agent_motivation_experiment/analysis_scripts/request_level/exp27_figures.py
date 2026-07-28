@@ -54,6 +54,14 @@ TTFT_BUDGET = {"chat": 5.0, "deepresearch": 10.0, "swe": None}
 ITL_BUDGET = {"chat": 50.0, "deepresearch": 100.0, "swe": None}
 
 
+# The runner's condition is set in requests per MINUTE, which is what the run
+# directory is named after, but every rate in the analysis and in the capacity
+# arithmetic is per SECOND. Converting once here keeps the figures in the unit the
+# reasoning is done in and leaves the directory names alone.
+def rps(rpm):
+    return np.asarray(rpm, dtype=float) / 60.0
+
+
 def rpm_of(d):
     m = re.search(r"_rpm_(\d+)", os.path.basename(d))
     return int(m.group(1)) if m else None
@@ -106,16 +114,16 @@ def fig_sweep(df, out, title):
                 if d.empty:
                     continue
                 c = ARM_C[a]
-                ax.errorbar(d.rpm, d.sloA,
+                ax.errorbar(rps(d.rpm), d.sloA,
                             yerr=[d.sloA - d.sloLo, d.sloHi - d.sloA],
                             color=c, ls="-", marker="o", capsize=2)
-                ax2.errorbar(d.rpm, d.gp,
+                ax2.errorbar(rps(d.rpm), d.gp,
                              yerr=[d.gp - d.gpLo, d.gpHi - d.gp],
                              color=c, ls="--", marker="s", ms=3.5, alpha=0.75,
                              capsize=2)
             ax.set_title(MIX_TITLE.get(mix, mix))
-            ax.set_xlabel("offered rate (rpm)")
-            ax.set_xticks(sorted(df.rpm.unique()))
+            ax.set_xlabel("offered rate (requests/s)")
+            ax.set_xticks(rps(sorted(df.rpm.unique())))
             ax.set_ylim(0, 105)
             ax2.set_ylim(0, 19000)
             ax.grid(axis="y", ls=":", lw=0.7, alpha=0.6)
@@ -340,21 +348,23 @@ def fig_split(df, out_prefix, title, note=""):
         fig, ax = plt.subplots(figsize=(4.6, 3.4))
         for a in arms:
             d, c = agg(a), ARM_C[a]
-            ax.errorbar(d.rpm, d.sloA, yerr=[d.sloA - d.sloALo, d.sloAHi - d.sloA],
+            ax.errorbar(rps(d.rpm), d.sloA,
+                        yerr=[d.sloA - d.sloALo, d.sloAHi - d.sloA],
                         color=c, ls="-", marker="o", capsize=2,
                         label=f"{ARM_L[a]} — admitted")
-            ax.errorbar(d.rpm, d.sloO, yerr=[d.sloO - d.sloOLo, d.sloOHi - d.sloO],
+            ax.errorbar(rps(d.rpm), d.sloO,
+                        yerr=[d.sloO - d.sloOLo, d.sloOHi - d.sloO],
                         color=c, ls=":", marker="^", ms=3.5, alpha=0.6, capsize=2,
                         label=f"{ARM_L[a]} — offered")
             for _, r in d.iterrows():
                 if r.rej >= 1.0:
                     ax.annotate(f"{r.rej:.0f}% rejected",
-                                (r.rpm, (r.sloA + r.sloO) / 2),
+                                (r.rpm / 60.0, (r.sloA + r.sloO) / 2),
                                 fontsize=6, color=c, ha="center", va="center",
                                 xytext=(0, 0), textcoords="offset points")
-        ax.set_xlabel("offered rate (rpm)")
+        ax.set_xlabel("offered rate (requests/s)")
         ax.set_ylabel("SLO attainment (%), per request")
-        ax.set_xticks(sorted(df.rpm.unique()))
+        ax.set_xticks(rps(sorted(df.rpm.unique())))
         ax.set_ylim(0, 105)
         ax.grid(axis="y", ls=":", lw=0.7, alpha=0.6)
         ax.legend(loc="lower left", fontsize=7)
@@ -366,13 +376,13 @@ def fig_split(df, out_prefix, title, note=""):
         fig, ax = plt.subplots(figsize=(4.6, 3.4))
         for a in arms:
             d, c = agg(a), ARM_C[a]
-            ax.errorbar(d.rpm, d.gp, yerr=[d.gp - d.gpLo, d.gpHi - d.gp],
+            ax.errorbar(rps(d.rpm), d.gp, yerr=[d.gp - d.gpLo, d.gpHi - d.gp],
                         color=c, ls="-", marker="s", capsize=2, label=ARM_L[a])
-        ax.set_xlabel("offered rate (rpm)")
+        ax.set_xlabel("offered rate (requests/s)")
         # Short label, definition in the title: the long form overflows the axes
         # box at this figure width and the leading characters are clipped.
         ax.set_ylabel("goodput (output tokens/s)")
-        ax.set_xticks(sorted(df.rpm.unique()))
+        ax.set_xticks(rps(sorted(df.rpm.unique())))
         ax.set_ylim(0, None)
         ax.grid(axis="y", ls=":", lw=0.7, alpha=0.6)
         ax.legend(loc="upper left", fontsize=7)
