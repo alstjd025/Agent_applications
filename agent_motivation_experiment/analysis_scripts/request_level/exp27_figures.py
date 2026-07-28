@@ -68,7 +68,21 @@ def rpm_of(d):
 
 
 def mix_of(d):
-    m = re.search(r"_(m[123])_rpm_", os.path.basename(d))
+    """The mix key, with the "f" variant folded onto the mix it is made of.
+
+    m1f is m1: the same three workloads at the same ratio, the same arrival
+    process and the same seed. The only difference is the (ttft_ms, tbt_ms) pair
+    the config declares for the agent class, which exists so that a policy with
+    no end-to-end mode is told a pace comparable to the one FluidServe derives
+    instead of the default decomposition's 25 ms. Scoring is on the real 30 s
+    end-to-end budget in both cases, so the runs are measurements of the same
+    condition and belong on the same panel.
+
+    Before this, the pattern required "_m1_rpm_" and the m1f runs matched
+    nothing, so collect() dropped them and the Llumnix SLO arm was silently
+    absent from a figure that named it in the note.
+    """
+    m = re.search(r"_(m[123])f?_rpm_", os.path.basename(d))
     return m.group(1) if m else None
 
 
@@ -292,19 +306,33 @@ def main():
               "EXP-27 pass 1 (v19+v20, one run per condition): "
               "three mixes, four engines, 8 min per condition")
 
-    # pass 3 (polyserve, fluidserve) and pass 4 (the Llumnix SLO baseline) ran in
-    # different sessions. Placing them on one figure is a cross-session
-    # comparison, which is only defensible because the between-session movement on
-    # this workload has been measured and is small against the differences shown:
-    # PolyServe read 33.0 / 32.4 / 33.1 / 33.1 at 80 req/s across four sessions
-    # and FluidServe 100.0 at 40 across three. The note on the figure says so.
-    d3 = collect(["results/*exp27p3*", "results/*exp27p4*"])
+    # pass 3 (polyserve, fluidserve) and pass 5 (the Llumnix SLO baseline at the
+    # FAIR setting) ran in different sessions, so this is a cross-session
+    # comparison and the figure has to say by how much that matters.
+    #
+    # The size is measurable without any modelling, because PolyServe's code did
+    # not change across any of these passes: five runs of PolyServe on m1 spanning
+    # three sessions read, per request on the admitted denominator,
+    #    20 req/s  99.9 100.0 100.0 100.0 100.0   range 0.1
+    #    40 req/s  53.7  54.3  55.0  55.1  55.7   range 2.0
+    #    80 req/s  32.1  32.6  33.0  33.1  36.7   range 4.6
+    # The movement grows with rate because at 20 req/s every placement is feasible
+    # for every policy and the order requests arrive in cannot change the outcome,
+    # whereas at 80 req/s every policy is deciding at its own feasibility boundary
+    # and a shift in which requests coincide flips individual decisions, each of
+    # which changes the state the next decision reads.
+    #
+    # pass 4 (the Llumnix SLO baseline at the 25 ms/token setting) is deliberately
+    # NOT drawn: that setting judged the agent class 2.3x tighter than FluidServe
+    # judged it and rejected 98% of it, so its curve is of a policy that was
+    # answering a different question.
+    d3 = collect(["results/*exp27p3*", "results/*exp27p5*"])
     if not d3.empty:
         note = ("m1 balanced, four engines, 8 min per condition, "
                 "two repeats (bars = min..max)")
         if "slo" in set(d3["arm"]):
-            note += ("\nLlumnix SLO measured in a separate session; "
-                     "between-session movement on this workload is 0.7-1.6 points")
+            note += ("\nLlumnix SLO: fair setting, one run, separate session; "
+                     "cross-session movement here is 0.1 pt at 20 to 4.6 pt at 80")
         fig_split(d3, os.path.join(a.out_dir, "exp27_pass3"),
                   "EXP-27 (v22: re-decision reserve + queued-prefill price)", note)
 
