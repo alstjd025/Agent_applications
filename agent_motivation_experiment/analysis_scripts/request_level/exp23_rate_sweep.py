@@ -33,6 +33,7 @@ Usage
 """
 import argparse
 import glob
+import json
 import os
 import re
 import sys
@@ -48,6 +49,42 @@ from exp22_fluidserve import (  # noqa: E402
     ARM_STYLE, CLASSES, CLASS_COLORS, PAPER_STYLE, WARMUP_S, DRAIN_S,
     load_run, equal_mix, per_request, attain, goodput_tokens, arm_of,
 )
+
+
+def decision_mix(run_dir):
+    """route / pend / shed / force as a share of all decisions.
+
+    A held request re-enters the scheduling path at every gateway retry, so these
+    are decisions and not requests, and that is the point: a fleet that holds
+    everything makes tens of decisions per request and the ratio says so
+    immediately. It is the one series that distinguishes "the policy is placing
+    work badly" from "the policy is not placing work at all", and reading it
+    required an ad-hoc script until now.
+    """
+    path = os.path.join(run_dir, "server_metrics", "scheduler.jsonl")
+    if not os.path.isfile(path):
+        return {}
+    first, last = {}, {}
+    for line in open(path):
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if not rec.get("ok"):
+            continue
+        for k, v in rec.items():
+            if v is None or "fluidserve_decisions_total" not in k:
+                continue
+            m = re.search(r'decision="?(\w+)', k)
+            if not m:
+                continue
+            d = m.group(1)
+            first.setdefault(d, float(v))
+            last[d] = float(v)
+    total = sum(last[d] - first[d] for d in last)
+    if total <= 0:
+        return {}
+    return {d: 100.0 * (last[d] - first[d]) / total for d in last}
 
 
 def rpm_of(run_dir):
@@ -76,6 +113,11 @@ def summarise(run_dir):
         "rejected_pct": 100.0 * rows["rejected"].mean(),
         "errored_pct": 100.0 * rows["errored"].mean(),
     }
+    mix = decision_mix(run_dir)
+    for d in ("route", "pend", "shed", "force"):
+        # A kind that never fired reads as 0, not as missing: the counter is
+        # created on first use, so its absence means it was never chosen.
+        out[f"dec_{d}"] = mix.get(d, 0.0) if mix else np.nan
     for c in CLASSES:
         sub = rows[rows["class"] == c]
         out[f"attain_{c}"] = attain(sub, "violate_offered")
@@ -172,6 +214,18 @@ def main():
               f"{r['rejected_pct']:>7.1f}{r['goodput']:>9.0f}   "
               f"{r['served_chat']:>5.1f}/{r['served_deepresearch']:>5.1f}/"
               f"{r['served_swe']:>5.1f}")
+
+    if df[["dec_route", "dec_pend"]].notna().any().any():
+        print("\nScheduler decisions (% of all decisions; a held request is "
+              "re-decided at every gateway retry)\n")
+        hdr = f"{'arm':<12}{'rpm':>6}{'route':>8}{'pend':>8}{'shed':>8}{'force':>8}"
+        print(hdr)
+        print("-" * len(hdr))
+        for _, r in df.iterrows():
+            if pd.isna(r.get("dec_route")):
+                continue
+            print(f"{r['arm']:<12}{r['rpm']:>6}{r['dec_route']:>8.1f}"
+                  f"{r['dec_pend']:>8.1f}{r['dec_shed']:>8.1f}{r['dec_force']:>8.1f}")
 
     print("\nRejection rate by class (%)\n")
     hdr = f"{'arm':<12}{'rpm':>6}{'chat':>8}{'dr':>8}{'swe':>8}"
