@@ -251,6 +251,33 @@ after the post-duration grace, so this is queue backlog and not a measurement
 artifact. Those requests leave both denominators, so the reported 62.3% is
 computed over the half that finished.
 
+## 5.4 The result is better stated as a capacity, not as a point difference
+
+The margin over Llumnix SLO is +0.1 points at 30 req/s, +37.7 at 45 and +7.1 at
+60, which reads as an inconsistent result until the curves are read as curves.
+All three policies hold near 100% until they reach a rate at which they cannot,
+and what differs is where that rate is. Taking 90% offered attainment as the
+line, and interpolating between the rates measured:
+
+| policy | highest rate holding 90% offered |
+|---|---|
+| PolyServe | below 30 req/s |
+| Llumnix SLO | about 33 req/s |
+| FluidServe | about 44 req/s |
+
+**FluidServe carries about a third more load at the same SLO.** That is one
+number, it does not depend on which rate is chosen to quote, and it is the
+statement the rate sweep is actually built to support. The point differences are
+what that gap looks like when sampled at four rates, which is why they vary so
+much between them: at 30 both policies are above the line and at 60 both are far
+below it, so only the middle sample sees the separation.
+
+The interpolation is over a 15 req/s gap, which is too coarse for the number to
+be quoted as it stands. **Two more rates, 36 and 40 req/s, would locate both
+knees to within 4 req/s** at a cost of three arms times two rates times two
+repeats, about 2.8 hours. That is the cheapest remaining measurement with a
+direct effect on the headline claim.
+
 ## 6. Status and what remains
 
 rep2 was running when this was written. It decides whether the gaps that carry
