@@ -22,7 +22,9 @@
     "test. This file makes the baseline as strong as a static pair can be, so that",
     "what remains is the limitation and not the configuration.",
     "",
-    "chat and deep research are unchanged: their SLOs are natively (ttft, tbt)."
+    "chat and deep research are unchanged: their SLOs are natively (ttft, tbt).",
+    "",
+    "mean_input_tokens is MEASURED at the gateway, not estimated by the transcript builder. The agent class was declared 6,812 from a tiktoken pass over the transcript file while the runtime actually sends 5,557, and deep research moved 4,055 -> 4,639 when its system prompt grew and its notes became the question's own. The request-count ratios below are NOT retuned to restore the old token shares: the trace files and every earlier run encode those counts, and changing the workload and the mix in the same step would make the two indistinguishable. Realised input token shares with these means: m1 30/43/26, m2 64/23/14, m3 20/24/57."
   ],
   "mix": {
     "chat": 10,
@@ -30,9 +32,9 @@
     "swe": 1
   },
   "mean_input_tokens": {
-    "chat": 674,
-    "deepresearch": 4055,
-    "swe": 6812
+    "chat": 649,
+    "deepresearch": 4639,
+    "swe": 5557
   },
   "chat_config": {
     "num_conversations": 1000
