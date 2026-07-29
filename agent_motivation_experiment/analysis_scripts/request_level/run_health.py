@@ -52,7 +52,11 @@ def engines_ok(d):
 
 def main():
     pats = sys.argv[1:] or ["results/*exp37*"]
-    dirs = sorted({d for p in pats for d in glob.glob(p) if os.path.isdir(d)})
+    # Skip directories still being written: the condition has not finished, and
+    # reporting them as EMPTY for hours drowns the real flags.
+    dirs = sorted({d for p in pats for d in glob.glob(p)
+                   if os.path.isdir(d)
+                   and os.path.exists(os.path.join(d, "metrics.csv"))})
     if not dirs:
         print("no run directories yet")
         return
@@ -89,8 +93,13 @@ def main():
             flags.append("N tiny")
         if rej >= 99.9:
             flags.append("REJECT all")
-        if len(r) > 1000 and adm in (0.0, 100.0) and rej < 1:
-            flags.append(f"ATTAIN exactly {adm:.0f}")
+        # Exactly 0 is always suspect. Exactly 100 is the expected answer well
+        # below capacity, so it is only suspect where the fleet should be
+        # struggling -- the decode bound on this workload is about 50 req/s.
+        if len(r) > 1000 and adm == 0.0:
+            flags.append("ATTAIN exactly 0")
+        elif len(r) > 1000 and adm == 100.0 and rej < 1 and (tgt or 0) >= 40:
+            flags.append("ATTAIN exactly 100 at high rate")
 
         print(f"{os.path.basename(d)[:45]:<46}{arm_of(d)[:11]:<12}"
               f"{tgt or 0:7.0f}{got:7.1f}{len(r):8d}{adm:7.1f}{rej:7.1f}"
