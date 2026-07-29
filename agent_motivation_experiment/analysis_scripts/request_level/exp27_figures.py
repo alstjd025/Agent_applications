@@ -298,8 +298,47 @@ def main():
     ap.add_argument("--pass1", nargs="+", default=["results/*exp27r1_*"])
     ap.add_argument("--pass2", nargs="+", default=["results/*exp27p2*"])
     ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--runs", nargs="+", default=None,
+                    help="produce the standard set for an arbitrary sweep and "
+                         "stop, instead of the EXP-27 pass layout below")
+    ap.add_argument("--title", default="")
+    ap.add_argument("--note", default="")
     a = ap.parse_args()
     os.makedirs(a.out_dir, exist_ok=True)
+
+    if a.runs:
+        # The EXP-27 layout below hard-codes that experiment's pass globs, which
+        # made every later sweep either edit this file or go without figures.
+        # This branch takes a glob and produces the four things the figure-set
+        # convention asks for: attainment on both denominators, goodput, what
+        # each engine was doing, and latency against the budgets it is scored on.
+        d = collect(a.runs)
+        if d.empty:
+            sys.exit(f"no runs matched {a.runs}")
+        rates = sorted(set(d["rpm"]))
+        arms = sorted(set(d["arm"]))
+        print(f"drawing arms {arms} at {rates} rpm from {len(d)} runs")
+        fig_split(d, os.path.join(a.out_dir, "sweep"),
+                  a.title or "attainment and goodput", a.note)
+        # Engines and latency are per condition, so use the highest rate at
+        # which every arm has a run: that is where the policies differ most and
+        # where a missing arm would be most misleading.
+        for rpm in reversed(rates):
+            cell = {}
+            for arm in arms:
+                m = d[(d.arm == arm) & (d.rpm == rpm)]
+                if not m.empty:
+                    cell[arm] = m.iloc[0]["dir"]
+            if len(cell) == len(arms):
+                fig_engines([(f"{arm}, {rpm} rpm", run) for arm, run in cell.items()],
+                            os.path.join(a.out_dir, f"engines_{rpm}.png"),
+                            f"What each of the four engines was doing ({rpm} rpm)")
+                fig_latency([(f"{rpm} rpm", cell)],
+                            os.path.join(a.out_dir, f"latency_{rpm}.png"),
+                            "Latency of ADMITTED requests against the budgets "
+                            "they are scored on")
+                break
+        return 0
 
     d1 = collect(a.pass1)
     fig_sweep(d1, os.path.join(a.out_dir, "exp27_sweep_pass1.png"),
