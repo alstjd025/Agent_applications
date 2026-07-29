@@ -151,8 +151,16 @@ def figures(df, out_dir):
             # same arm on the offered denominator, drawn in the same panel so the
             # gap between the two lines IS the rejection rate's cost and cannot
             # be presented without it.
-            ax[0].plot(d.rpm, d.eqmix_served, label=lbl, **st)
-            ax[0].plot(d.rpm, d.eqmix, alpha=0.35, lw=1.0,
+            # Per REQUEST, not per class. This panel was drawn on the
+            # class-equal average until 2026-07-30, which made it disagree with
+            # exp27_figures.py's headline panel while carrying the same title.
+            # The class-equal average is the unweighted mean of the three lines
+            # in ax[1], so it adds no information those lines do not already
+            # carry, and it hides which class moved: at 60 req/s FluidServe
+            # reads 53.6 either way, but only ax[1] says that is chat 51.0,
+            # deep research 80.7 and agent 29.2.
+            ax[0].plot(d.rpm, d.perreq_served, label=lbl, **st)
+            ax[0].plot(d.rpm, d.perreq, alpha=0.35, lw=1.0,
                        color=st.get("color"), ls=st.get("ls", "-"), marker="",
                        label=f"{lbl} (offered)")
             ax[2].plot(d.rpm, d.goodput, label=lbl, **st)
@@ -162,11 +170,15 @@ def figures(df, out_dir):
         for a in arms:
             d = df[df.arm == a].sort_values("rpm")
             for c in CLASSES:
-                ax[1].plot(d.rpm, d[f"served_{c}"], color=CLASS_COLORS[c],
+                # Offered, so a class the policy refuses shows the refusal.
+                # On the admitted denominator the agent class reads 67.8 under
+                # FluidServe at 60 req/s while 56.5% of it was turned away, and
+                # the panel would show a class in reasonable shape.
+                ax[1].plot(d.rpm, d[f"attain_{c}"], color=CLASS_COLORS[c],
                            ls=ARM_STYLE[a]["ls"], marker=ARM_STYLE[a]["marker"],
                            label=f"{c} / {ARM_STYLE[a]['label']}")
-        titles = ["equal-weight attainment\n(solid admitted, faint offered)",
-                  "per class (admitted)", "token goodput", "rejected"]
+        titles = ["per-request attainment\n(solid admitted, faint offered)",
+                  "per class (offered)", "token goodput", "rejected"]
         ylabels = ["SLO attainment (%)", "SLO attainment (%)",
                    "output tokens/s from requests that met their SLO",
                    "requests rejected (%)"]
@@ -208,23 +220,30 @@ def main():
     # rejection rate is printed in the same row and token goodput beside it.
     # Attainment over EVERYTHING OFFERED has the opposite bias: it charges every
     # rejection as a violation even when the request was going to miss anyway.
-    print("\nSLO attainment, equal weight across classes.")
+    # Aggregation is per REQUEST: every request counts once, with no weight
+    # applied. The class-equal average is still computed and still written to
+    # the CSV, because results recorded before 2026-07-30 are stated in it and
+    # cannot otherwise be reproduced, but it is no longer printed here. It is
+    # the unweighted mean of the three per-class columns on the right, so it
+    # adds nothing they do not carry while hiding which class produced it, and
+    # it gives a class that is 7.7% of the requests one third of the score.
+    print("\nSLO attainment, every request counted once.")
     print("  admitted = denominator is the requests the system accepted")
-    print("  offered  = denominator is every arriving request; a reject is a miss\n")
-    print("  equal-weight averages the three CLASSES; per-request counts every")
-    print("  REQUEST once. On mixes whose class volumes differ they diverge.\n")
+    print("  offered  = denominator is every arriving request; a reject is a miss")
+    print("  the gap between the two IS what the rejections cost\n")
+    print("  per class is on the OFFERED denominator, so a class the policy")
+    print("  refuses shows the refusal; rejection by class is the table below.\n")
     hdr = (f"{'arm':<12}{'rpm':>6}{'arr/s':>7}"
-           f"{'eq-adm':>8}{'eq-off':>8}{'req-adm':>9}{'req-off':>9}"
-           f"{'rej%':>7}{'goodput':>9}   per class (admitted) chat/dr/swe")
+           f"{'admitted':>10}{'offered':>9}"
+           f"{'rej%':>7}{'goodput':>9}   per class (offered) chat/dr/swe")
     print(hdr)
     print("-" * len(hdr))
     for _, r in df.iterrows():
         print(f"{shown(r['arm']):<12}{r['rpm']:>6}{r['arrivals_per_s']:>7.1f}"
-              f"{r['eqmix_served']:>8.1f}{r['eqmix']:>8.1f}"
-              f"{r['perreq_served']:>9.1f}{r['perreq']:>9.1f}"
+              f"{r['perreq_served']:>10.1f}{r['perreq']:>9.1f}"
               f"{r['rejected_pct']:>7.1f}{r['goodput']:>9.0f}   "
-              f"{r['served_chat']:>5.1f}/{r['served_deepresearch']:>5.1f}/"
-              f"{r['served_swe']:>5.1f}")
+              f"{r['attain_chat']:>5.1f}/{r['attain_deepresearch']:>5.1f}/"
+              f"{r['attain_swe']:>5.1f}")
 
     if df[["dec_route", "dec_pend"]].notna().any().any():
         print("\nScheduler decisions (% of all decisions; a held request is "
@@ -251,19 +270,20 @@ def main():
     if len(arms) == 2:
         a0, a1 = arms
         print(f"\n{a1} minus {a0}, per rate")
-        print(f"{'rpm':>6}{'eq-adm':>9}{'eq-off':>8}{'req-adm':>9}{'req-off':>9}"
-              f"{'goodput':>10}")
+        print(f"{'rpm':>6}{'admitted':>10}{'offered':>9}{'goodput':>10}"
+              f"{'chat':>8}{'dr':>8}{'swe':>8}   (per class: offered)")
         for rpm in sorted(set(df["rpm"])):
             x = df[(df.arm == a0) & (df.rpm == rpm)]
             y = df[(df.arm == a1) & (df.rpm == rpm)]
             if x.empty or y.empty:
                 continue
             print(f"{rpm:>6}"
-                  f"{y.eqmix_served.iloc[0] - x.eqmix_served.iloc[0]:>+9.1f}"
-                  f"{y.eqmix.iloc[0] - x.eqmix.iloc[0]:>+8.1f}"
-                  f"{y.perreq_served.iloc[0] - x.perreq_served.iloc[0]:>+9.1f}"
+                  f"{y.perreq_served.iloc[0] - x.perreq_served.iloc[0]:>+10.1f}"
                   f"{y.perreq.iloc[0] - x.perreq.iloc[0]:>+9.1f}"
-                  f"{y.goodput.iloc[0] - x.goodput.iloc[0]:>+10.0f}")
+                  f"{y.goodput.iloc[0] - x.goodput.iloc[0]:>+10.0f}"
+                  f"{y.attain_chat.iloc[0] - x.attain_chat.iloc[0]:>+8.1f}"
+                  f"{y.attain_deepresearch.iloc[0] - x.attain_deepresearch.iloc[0]:>+8.1f}"
+                  f"{y.attain_swe.iloc[0] - x.attain_swe.iloc[0]:>+8.1f}")
 
     figures(df, a.out_dir)
     print(f"wrote {csv}")

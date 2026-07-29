@@ -82,6 +82,54 @@ def truthy(df, col):
     return df[col].astype(str).str.lower().isin(["true", "1", "1.0"])
 
 
+LEGACY_TBT = os.environ.get("FS_LEGACY_TBT") == "1"
+
+
+def mean_inter_token_ms(r, ttft, e2e):
+    """Mean time between output tokens, in milliseconds, per request.
+
+    Computed as (end-to-end time - time to first token) / (output tokens - 1)
+    rather than read from the recorded `tbt_mean_ms` column, because that column
+    is about half the true value on every run collected before 2026-07-30.
+
+    How the recorded column goes wrong. The client accumulates, per streamed
+    chunk, `chunk_tokens_est = max(count_tokens(chunk_text), 1)` and then charges
+    the gap between two chunks as `inter_arrival_ms / chunk_tokens_est` repeated
+    that many times. Tokenising a chunk in isolation is not the same as
+    tokenising it in context -- a fragment that is one token inside the full
+    string usually splits into two on its own, and the `max(..., 1)` floor keeps
+    any sub-token chunk at one. Measured over 2,430 requests of one condition,
+    the summed estimate is 1.920x the token count of the concatenated response,
+    so the divisor is about twice what it should be and the reported per-token
+    time about half.
+
+    That the engine emits exactly one token per chunk is what makes the
+    correction exact rather than approximate: over the same sample, chunks per
+    token is 0.996, so the gap between consecutive chunks IS the gap between
+    consecutive tokens, and no per-chunk estimate is needed at all. Checked
+    three ways on that sample: the true per-token time from the chunk arrival
+    offsets is 50.4 ms, this expression gives 50.5 ms, and the recorded column
+    gives 26.1 ms. The stream span is 1.000x (end-to-end minus first token), so
+    the end-to-end figure carries no trailing overhead that would inflate this.
+
+    What it changes. The rule is time to first token AND mean time between
+    tokens, so every attainment figure recorded before 2026-07-30 judged the
+    per-token half of that rule against roughly twice its intended budget: 96 ms
+    where chat's rule says 50, and 192 ms where deep research's says 100. The
+    agent class is judged end to end and is unaffected. Set FS_LEGACY_TBT=1 to
+    reproduce the earlier numbers.
+    """
+    if LEGACY_TBT:
+        return pd.to_numeric(r["tbt_mean_ms"], errors="coerce")
+    out = pd.to_numeric(r.get("output_tokens"), errors="coerce")
+    span = (e2e - ttft) * 1000.0
+    derived = span / (out - 1.0).where(out > 1.0)
+    # A request that produced one token or none has no inter-token interval to
+    # measure. It is not thereby compliant: it is caught by the missing-first-
+    # token test, or it met its budget trivially.
+    return derived
+
+
 def load_run(run_dir):
     """All requests that arrived in the analysis window, with a violation flag.
 
@@ -113,8 +161,8 @@ def load_run(run_dir):
     r["cutoff"] = truthy(r, "is_server_terminated") & ~r["rejected"] & ~r["errored"]
 
     ttft = pd.to_numeric(r["first_token_latency"], errors="coerce")
-    tbt = pd.to_numeric(r["tbt_mean_ms"], errors="coerce")
     e2e = pd.to_numeric(r["latency"], errors="coerce")
+    tbt = mean_inter_token_ms(r, ttft, e2e)
     miss = pd.Series(False, index=r.index)
     for cname, rule in SLO_RULES.items():
         m = r["class"] == cname
