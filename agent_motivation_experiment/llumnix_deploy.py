@@ -82,12 +82,54 @@ def _wait_gateway(base_url: str, timeout: int, poll: float = 2.0) -> bool:
     return False
 
 
+
+def _wait_engines(host: str, ports, timeout: int) -> bool:
+    """Block until EVERY engine port serves /metrics, or the timeout expires.
+
+    The pod's startup probe checks port 8000 only, so the pod is marked Ready as
+    soon as the first engine has loaded its weights. The other three are still
+    loading, and a condition that starts here runs on a smaller fleet than its
+    name says while looking entirely healthy: the request rate is met, latency is
+    plausible, and only the per-engine metric files show three of four ports
+    producing nothing.
+
+    Measured on EXP-37: three of the first fourteen conditions ran short-handed,
+    one of them on a single engine for eight minutes, and the two others were the
+    60 req/s cells of two different arms -- the comparison the sweep existed to
+    make. Waiting on all four ports is what the pod's readiness gate would do if
+    it knew there were four.
+    """
+    import urllib.request
+
+    deadline = time.monotonic() + timeout
+    pending = list(ports)
+    while pending and time.monotonic() < deadline:
+        still = []
+        for port in pending:
+            try:
+                with urllib.request.urlopen(
+                        f"http://{host}:{port}/metrics", timeout=5) as r:
+                    if r.status != 200 or not r.read(1):
+                        still.append(port)
+            except Exception:
+                still.append(port)
+        pending = still
+        if pending:
+            time.sleep(5)
+    if pending:
+        print(f"[llumnix-restart] engines NOT serving after {timeout}s: {pending}")
+        return False
+    return True
+
+
 def restart_llumnix(
     namespace: str = "llumnix",
     engine_pod: str = "neutral-0",
     restart_control: bool = True,
     gateway_probe_url: Optional[str] = None,
     wait_timeout: int = 600,
+    engine_host: str = "neutral-0.neutral",
+    engine_ports=(8000, 8001, 8002, 8003),
 ) -> dict:
     """Cold-restart the engine (+ optionally scheduler/gateway) and wait ready.
 
@@ -130,7 +172,18 @@ def restart_llumnix(
             result["ok"] = result["ok"] and ok
             print(f"[llumnix-restart] {dep} rollout ok={ok}")
 
-    # 5) Verify the gateway actually serves again before load resumes.
+    # 5) Verify EVERY engine serves before load resumes. Step 3 waited on the
+    #    pod, and the pod's probe knows about one port out of four.
+    if engine_ports:
+        t1 = time.monotonic()
+        all_ok = _wait_engines(engine_host, engine_ports, wait_timeout)
+        result["phases"]["engines_serving_s"] = round(time.monotonic() - t1, 1)
+        result["phases"]["engines_serving"] = all_ok
+        result["ok"] = result["ok"] and all_ok
+        print(f"[llumnix-restart] all {len(engine_ports)} engines serving="
+              f"{all_ok} ({result['phases']['engines_serving_s']}s)")
+
+    # 6) Verify the gateway actually serves again before load resumes.
     if gateway_probe_url:
         gw_ok = _wait_gateway(gateway_probe_url, wait_timeout)
         result["phases"]["gateway_serving"] = gw_ok

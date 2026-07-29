@@ -43,9 +43,17 @@ def engines_ok(d):
             a, b = json.loads(rows[0]), json.loads(rows[-1])
         except Exception:
             continue
+        # A port that never came up still gets a metrics file: the collector
+        # writes a record per tick and every field is None. Comparing None to
+        # None silently reported the engine as merely "not advancing" rather
+        # than absent, which is how a condition that ran on one engine for eight
+        # minutes passed this check.
         key = next((k for k in b if isinstance(k, str)
                     and k.startswith("vllm:generation_tokens_total")), None)
-        if key and b.get(key, 0) > a.get(key, 0):
+        if key is None:
+            continue
+        av, bv = a.get(key), b.get(key)
+        if isinstance(av, (int, float)) and isinstance(bv, (int, float)) and bv > av:
             live += 1
     return len(files), live
 
