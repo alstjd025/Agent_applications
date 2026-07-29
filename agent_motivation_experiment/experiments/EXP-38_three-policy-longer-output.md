@@ -80,7 +80,43 @@ Standing rules: both denominators reported beside the rejection rate and token
 goodput; the per-class breakdown reported with them, so a win bought by
 abandoning a class is visible; no judgement from one measurement per condition.
 
-## 4. rep1 result
+## 4. Result — both repeats
+
+All twenty-four conditions passed the health check: four engine metric files all
+advancing, offered rate within 1% of target. Mean over two repeats, with the
+observed range, per request, corrected inter-token metric:
+
+| rate | arm | admitted | **offered** | rej% | goodput | chat / dr / agent (offered) |
+|---|---|---|---|---|---|---|
+| 15 | all three | 100.0 | 100.0 | 0 | 7,885–8,043 | 100 / 100 / 100 |
+| 30 | PolyServe | 58.3 [57.6, 59.1] | 58.3 | 0 | 9,957 | 45.8 / 100 / 100 |
+| 30 | Llumnix SLO | 99.9 | 99.9 | 0 | 15,561 | 99.9 / 100 / 100 |
+| 30 | **FluidServe** | **100.0** | **100.0** | 0 | **15,687** | 100 / 100 / 100 |
+| 45 | PolyServe | 27.7 [27.7, 27.8] | 27.7 | 0 | 5,607 | 12.3 / 54.2 / **99.8** |
+| 45 | Llumnix SLO | 58.2 [56.6, 59.9] | 52.9 [50.8, 55.0] | 9.0 | 12,661 | 41.3 / **100** / 80.0 |
+| 45 | **FluidServe** | **94.1 [93.9, 94.2]** | **88.5 [88.5, 88.6]** | 5.8 | **20,252** | **89.5** / 97.1 / 63.2 |
+| 60 | PolyServe | 16.6 [16.3, 17.0] | 16.6 | 0 | 4,109 | 4.9 / 26.6 / **99.3** |
+| 60 | Llumnix SLO | 55.0 [54.1, 55.8] | 26.9 [26.3, 27.5] | 50.3 | 11,267 | 8.8 / **100** / 72.8 |
+| 60 | **FluidServe** | **56.3 [55.3, 57.4]** | **35.2 [34.6, 35.8]** | 36.9 | **12,359** | **27.1** / 81.1 / 29.1 |
+
+FluidServe over Llumnix SLO on the offered denominator, against the repeat-to-repeat
+range that decides whether a difference is one:
+
+| rate | difference | goodput | spread, FluidServe / SLO |
+|---|---|---|---|
+| 15 | +0.0 | +2% | 0.0 / 0.0 |
+| 30 | +0.1 | +1% | 0.0 / 0.0 |
+| **45** | **+35.6** | **+60%** | 0.1 / 4.2 |
+| **60** | **+8.3** | +10% | 1.2 / 1.2 |
+
+Both loaded rates clear their spread by a wide margin — the 45 req/s difference
+is eight times the larger of the two ranges and the 60 req/s one is seven times.
+The two repeats of FluidServe at 45 req/s read 88.5 and 88.6.
+
+Figures and both tables (corrected and, under `legacy/`, the pre-correction
+metric) are in `results/aggregate_analysis/exp38/`.
+
+## 4b. rep1 detail
 
 All twelve conditions passed the health check: four engine metric files all
 advancing, offered rate within 1% of target, no condition with attainment
@@ -280,12 +316,21 @@ direct effect on the headline claim.
 
 ## 6. Status and what remains
 
-rep2 was running when this was written. It decides whether the gaps that carry
-the claim are larger than the spread: FluidServe over the SLO arm is 6.6 points
-offered at 45 req/s and 9.9 at 60, and on chat alone 10.8 and 20.7. Within-
-session spread on this workload is 1.4–3.3 points and reaches 6 at the highest
-rate, so the aggregate gap at 45 is close to the spread and the chat gaps are
-not.
+Both repeats are in and the gaps carrying the claim are far outside the spread
+(§4). Two things remain.
+
+**The knee is interpolated over too coarse a grid.** The result is best stated
+as an SLO capacity (§5.4) and the grid puts Llumnix SLO's 90% crossing at about
+33 req/s and FluidServe's at about 44, from samples 15 req/s apart. Adding 36
+and 40 req/s, three arms and two repeats, about 2.8 hours, would locate both to
+within 4 req/s. This is the cheapest remaining measurement that moves the
+headline number.
+
+**The collection-side fix for §32 can now be applied**, since no sweep is
+running. The instructions and the verification are in the scratchpad note
+`apply_after_rep2_tbt_fix.md`. The analysis-side correction stays regardless —
+it is what makes every run already on disk re-scorable — but leaving the
+recorded column wrong invites the next reader to trust it.
 
 The agent-class finding does not depend on rep2 in its direction: 29.2 against
 99.3 is far outside any spread measured here.
