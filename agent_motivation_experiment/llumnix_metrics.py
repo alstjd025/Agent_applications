@@ -139,6 +139,11 @@ SCHEDULER_METRICS = {
     # mean it is bounded from. The gap between them is the whole of the v27 change.
     "scheduler_fluidserve_placement_delay_bound_ms",
     "scheduler_fluidserve_placement_delay_mean_ms",
+    # How often the KV projection changed a decision, counted inside the run
+    # rather than inferred from an ablation arm whose effect has to survive the
+    # feedback the change itself causes.
+    "scheduler_fluidserve_flux_flips_total",
+    "scheduler_fluidserve_flux_evaluations_total",
     "scheduler_fluidserve_raw_step_ms",       # that interval's elapsed/steps, before the
                                               # step-weighted smoothing observed_step_ms now
                                               # carries
