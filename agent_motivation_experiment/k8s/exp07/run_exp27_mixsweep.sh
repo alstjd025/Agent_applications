@@ -86,14 +86,23 @@ set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
   echo "[exp27] switching scheduler -> $policy"
   python3 "$REPO/ms_dev/scripts/set_scheduler_profiling.py" --policy "$policy" \
     | sed 's/^/[exp27]   /'
-  local pod actual
-  pod=$(kubectl -n llumnix get pods -l app=scheduler \
-        --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}')
-  # From the START of the log: at -v 4 the start-up line leaves any tail window
-  # within seconds.
-  actual=$(kubectl -n llumnix logs "$pod" 2>/dev/null \
-           | grep -am1 -ao "create scheduler with policy: [a-z-]*" | awk '{print $NF}')
-  [ -n "$actual" ] || { echo "[exp27] scheduler pod $pod reported no policy"; return 1; }
+  local pod actual i
+  # Retry: the rollout returns as soon as the pod is Ready, which is before the
+  # start-up line has necessarily been written and collected. A single grep here
+  # aborted a condition of EXP-31 that was otherwise fine -- the policy had been
+  # applied correctly and the run simply never started. Read it as many times as
+  # it takes rather than treating "not yet" as "wrong".
+  for i in $(seq 1 30); do
+    pod=$(kubectl -n llumnix get pods -l app=scheduler \
+          --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1].metadata.name}')
+    # From the START of the log: at -v 4 the start-up line leaves any tail window
+    # within seconds.
+    actual=$(kubectl -n llumnix logs "$pod" 2>/dev/null \
+             | grep -am1 -ao "create scheduler with policy: [a-z-]*" | awk '{print $NF}')
+    [ -n "$actual" ] && break
+    sleep 2
+  done
+  [ -n "$actual" ] || { echo "[exp27] scheduler pod $pod reported no policy after 60s"; return 1; }
   [ "$actual" = "$policy" ] \
     || { echo "[exp27] ABORT: scheduler reports '$actual', wanted '$policy'"; return 1; }
   echo "[exp27] scheduler confirmed policy=$actual (pod $pod)"
