@@ -49,6 +49,13 @@ spec:
             - { name: LOAD_PROCS, value: "12" }
             - { name: ARM, value: "__ARM__" }
             - { name: TRANSCRIPT, value: "/work/results/exp10_transcript/transcript_swe_calls_mix1500.jsonl" }
+            # Output-token cap. Unset, agent.py falls back to DEFAULT_MAX_TOKENS
+            # = 2048, and the deep-research class was being cut there: with the
+            # seven-section report structure the model reached section two and
+            # stopped mid-word, so its length was set by the cap rather than by
+            # the material. chat (p99 1,440) and the agent class (p99 859) end on
+            # their own well below it and are unaffected by raising it.
+            - { name: MAX_TOKENS, value: "4096" }
             - { name: RESULT_UID, value: "3092" }
             - { name: RESULT_GID, value: "1999" }
           command: ["/bin/bash", "-lc"]
@@ -82,6 +89,7 @@ spec:
                 --disable-timeouts \
                 --workload-config "${WCFG}" \
                 --priority-mode deadline \
+                --max-tokens "${MAX_TOKENS}" \
                 --restart-timeout 1200 \
                 --model meta-llama/Meta-Llama-3.1-70B-Instruct \
                 --output-dir /work/results \

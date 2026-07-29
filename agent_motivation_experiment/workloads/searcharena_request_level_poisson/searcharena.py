@@ -129,25 +129,48 @@ SYSTEM_PROMPT = (
     "figure they never state.\n"
     "\n"
     "REPORT STRUCTURE\n"
-    "Write a comprehensive, well-organized report in Markdown with these "
-    "sections:\n"
-    "- '## Summary': 3-6 sentences giving the direct, decision-relevant "
-    "answer to the question up front.\n"
-    "- '## Key Findings': the main substantiated points, as a structured "
-    "list or short thematic subsections, each claim cited. Group related "
-    "evidence; do not merely restate notes one by one.\n"
-    "- '## Analysis': synthesize across notes — reconcile or contrast them, "
-    "draw out implications, and explain the reasoning that connects the "
-    "evidence to the answer.\n"
+    "Write a comprehensive, well-organized report in Markdown. The audience "
+    "reads this instead of the sources, so completeness matters more than "
+    "brevity: cover every section below, in order, at the depth indicated.\n"
+    "- '## Executive Summary': 150-250 words giving the direct, "
+    "decision-relevant answer up front, the confidence you hold in it, and "
+    "the one or two considerations that would most change it.\n"
+    "- '## Source Assessment': work through the research notes in order. For "
+    "EACH note give one short paragraph: what it contributes that the others "
+    "do not, how directly it bears on the question, and any reason to weight "
+    "it more or less heavily (recency, specificity, apparent source type, "
+    "internal inconsistency). Cite the note you are describing. Do not skip "
+    "notes and do not merge two notes into one paragraph.\n"
+    "- '## Key Findings': the substantiated points, as a numbered list of 6-10 "
+    "findings. State each finding as a claim, then two or three sentences of "
+    "supporting detail with citations. Group related evidence rather than "
+    "restating notes one by one.\n"
+    "- '## Detailed Analysis': identify three to five themes that cut across "
+    "the notes and give each its own '### ' subsection of at least 200 words. "
+    "Within a theme, synthesize rather than summarize: reconcile or contrast "
+    "the notes, draw out second-order implications, and make the reasoning "
+    "that connects evidence to conclusion explicit enough that a reader can "
+    "check it.\n"
+    "- '## Contradictions and Reconciliation': every point where notes "
+    "disagree, each position attributed, and your reading of which is better "
+    "supported and why. If a disagreement cannot be resolved from the notes, "
+    "say so and state what would resolve it.\n"
     "- '## Limitations and Open Questions': what the notes do NOT establish, "
-    "where coverage is thin or dated, unresolved conflicts, and what "
-    "additional evidence would strengthen the conclusion.\n"
+    "where coverage is thin or dated, and what additional evidence would "
+    "strengthen the conclusion.\n"
+    "- '## Recommendations': what a reader should do or decide given this "
+    "evidence, as three to six concrete recommendations, each tied to the "
+    "findings that support it and qualified by the confidence those findings "
+    "carry.\n"
     "\n"
     "STYLE\n"
-    "Be thorough but precise; prefer specific, evidence-anchored statements "
-    "over vague generalities. Use a neutral, professional register. Do not "
-    "pad with filler, and do not repeat the question back to the user. Begin "
-    "your response directly with the '## Summary' heading."
+    "Prefer specific, evidence-anchored statements over vague generalities, "
+    "and use a neutral, professional register. Length should follow the "
+    "material: a question supported by many notes warrants a longer report "
+    "than one supported by few, and the Source Assessment section in "
+    "particular should scale with the number of notes provided. Do not repeat "
+    "the question back to the user. Begin your response directly with the "
+    "'## Executive Summary' heading."
 )
 
 
@@ -236,10 +259,36 @@ def sample_request_specs(
 
     Spec `i` is drawn from its own `random.Random(sample_seed*1_000_003+i)`
     so the mapping index -> request is deterministic and independent of
-    how the spec list is later sharded across load processes. Notes are
-    sampled without replacement, excluding notes that come from the same
-    conversation as the question (a question must never be accompanied by
-    its own recorded answer).
+    how the spec list is later sharded across load processes.
+
+    Notes are sampled without replacement, and the question's OWN conversation
+    is included first rather than excluded.
+
+    It was excluded originally, on the reasoning that a question must never be
+    accompanied by its own recorded answer. The consequence was that every
+    request handed the model K notes drawn from unrelated conversations, so
+    there was nothing to synthesize: measured, the model answered "there are no
+    research notes provided that directly address the question" and then listed
+    what each note was actually about -- cookie ice cream sandwiches, demand for
+    .NET developers in Lithuania -- before stopping. That is the correct
+    response to those inputs, and it caps the output at a few hundred tokens no
+    matter what the report structure asks for.
+
+    Two things were being conflated. Excluding the source conversation protects
+    ANSWER QUALITY as a measurement, which this workload does not measure: it
+    exists to reproduce a deep-research serving profile -- long input, a fixed
+    cached system prefix, a per-request notes tail -- and is scored on latency
+    against an SLO, not on whether the report is right. What it does need is for
+    the generation to have real material, because the length of the output is
+    part of the serving profile and an empty synthesis is short.
+
+    Including the source conversation is also the more faithful retrieval model.
+    Real retrieval returns documents that bear on the question, mixed with
+    marginal ones; returning only marginal ones is the unrealistic case. So the
+    question's own conversation supplies the on-topic notes (Search Arena is a
+    battle dataset, so each conversation carries two or more independent
+    search-grounded answers to that question) and the remainder is filled from
+    other conversations as distractors.
 
     Specs deliberately do NOT carry text — the full pools stay resident
     once per process and `assemble_messages` concatenates on demand,
@@ -252,8 +301,13 @@ def sample_request_specs(
         k = _sample_k(rng, k_min, k_max)
         q_idx = rng.randrange(len(questions))
         q_conv = questions[q_idx]["conv_index"]
-        note_idxs: list[int] = []
-        seen: set[int] = set()
+        # On-topic first: every note recorded against this question, in pool
+        # order, shuffled so their position in the list is not always the same.
+        own = [j for j, n in enumerate(notes) if n["conv_index"] == q_conv]
+        rng.shuffle(own)
+        note_idxs: list[int] = own[:k]
+        seen: set[int] = set(note_idxs)
+        # Then distractors from other conversations, up to k.
         while len(note_idxs) < k and len(seen) < n_notes:
             j = rng.randrange(n_notes)
             if j in seen:
@@ -262,6 +316,9 @@ def sample_request_specs(
             if notes[j]["conv_index"] == q_conv:
                 continue
             note_idxs.append(j)
+        # The on-topic notes must not sit first every time or the model can
+        # learn to read only the head of the list.
+        rng.shuffle(note_idxs)
         specs.append(
             {
                 "request_id": f"sa-{i:06d}",
