@@ -135,6 +135,10 @@ SCHEDULER_METRICS = {
                                               # time per TOKEN -- and the equal-weight average
                                               # of it reads 16 ms above the engines' own
                                               # inter-token latency.
+    # What canWait reserves for everything that happens after a placement, and the
+    # mean it is bounded from. The gap between them is the whole of the v27 change.
+    "scheduler_fluidserve_placement_delay_bound_ms",
+    "scheduler_fluidserve_placement_delay_mean_ms",
     "scheduler_fluidserve_raw_step_ms",       # that interval's elapsed/steps, before the
                                               # step-weighted smoothing observed_step_ms now
                                               # carries
