@@ -61,12 +61,20 @@ check_stack() {
   [ "$mig" = "0" ] || { echo "[exp27] ABORT: engine migration is '$mig', want 0"; exit 1; }
   extra=$(kubectl -n llumnix get lws neutral -o json \
         | python3 -c "import json,sys;c=[c for c in json.load(sys.stdin)['spec']['leaderWorkerTemplate']['workerTemplate']['spec']['containers'] if c['name']=='vllm'][0];print(next((e.get('value','') for e in c.get('env',[]) if e['name']=='SCHED_EXTRA_ARGS'),'unset'))")
-  [ -z "$extra" ] || { echo "[exp27] ABORT: engine has SCHED_EXTRA_ARGS='$extra'"; exit 1; }
+  # An engine-side scheduler confounds a control-plane comparison, so the
+  # default is to refuse any. EXP-40 makes the engine scheduler the variable
+  # under test, and states which one it expects: the check then still catches an
+  # engine left in the wrong state, which is the failure it exists to prevent.
+  # An unset EXPECT_SCHED_EXTRA_ARGS keeps the old behaviour exactly.
+  want_extra="${EXPECT_SCHED_EXTRA_ARGS-}"
+  [ "$extra" = "$want_extra" ] || {
+    echo "[exp27] ABORT: engine has SCHED_EXTRA_ARGS='$extra', expected '${want_extra:-<empty>}'"
+    exit 1; }
   # The shortened transcript is the whole point of this experiment; running it
   # against the long one would silently reproduce EXP-25 under a new name.
   [ -s "$SHORT_TRANSCRIPT" ] \
     || { echo "[exp27] ABORT: short transcript missing: $SHORT_TRANSCRIPT"; exit 1; }
-  echo "[exp27] stack ok: theta off, gateway=$bin, migration off, engine stock FIFO"
+  echo "[exp27] stack ok: theta off, gateway=$bin, migration off, engine sched='${want_extra:-stock FIFO}'"
 }
 
 set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
