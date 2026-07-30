@@ -863,8 +863,35 @@ def invoke_with_tracking(
                         inter_arrival_ms = None
                     else:
                         inter_arrival_ms = (chunk_arrival_time - last_stream_chunk_time) * 1000.0
-                        per_token_tbt_ms = inter_arrival_ms / chunk_tokens_est
-                        tbt_values_ms.extend([per_token_tbt_ms] * chunk_tokens_est)
+                        # One sample per chunk, undivided.
+                        #
+                        # The engine emits one token per streamed chunk, so the
+                        # gap between two chunks is the gap between two tokens
+                        # and no per-chunk token count is needed. Measured on
+                        # one 8-minute condition against the engine's own
+                        # vllm:generation_tokens_total: chunks received are
+                        # 0.991 of the tokens the server reports generating, and
+                        # the chunk bodies are 1/4/9 characters at p10/p50/p90.
+                        #
+                        # Dividing by count_tokens(chunk_text) was wrong in two
+                        # compounding ways. Tokenising a chunk in isolation is
+                        # not the same as tokenising it inside the string it
+                        # belongs to: a fragment that is one token in context
+                        # usually splits into two on its own. And max(..., 1)
+                        # floors any sub-token chunk at one. Summed over the
+                        # same condition the estimate came to 1.918x the
+                        # server's token count, so this line recorded roughly
+                        # half the true inter-token latency -- 26.1 ms where the
+                        # chunk arrival offsets say 50.4 and the scheduler's
+                        # engine-side measurement says 50.5.
+                        #
+                        # Every SLO judgement made before 2026-07-30 therefore
+                        # applied the per-token half of its rule at about twice
+                        # the intended budget. The analysis derives the quantity
+                        # independently as (e2e - ttft) / (output_tokens - 1),
+                        # which is what makes runs recorded before this fix
+                        # re-scorable; see fluidserve-implementation.md 32.
+                        tbt_values_ms.append(inter_arrival_ms)
 
                     chunk_events.append({
                         "chunk_idx": content_chunk_idx,

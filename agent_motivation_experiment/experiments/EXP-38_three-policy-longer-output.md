@@ -83,8 +83,17 @@ abandoning a class is visible; no judgement from one measurement per condition.
 ## 4. Result — both repeats
 
 All twenty-four conditions passed the health check: four engine metric files all
-advancing, offered rate within 1% of target. Mean over two repeats, with the
-observed range, per request, corrected inter-token metric:
+advancing, offered rate within 1% of target.
+
+**These figures are on the corrected time-between-tokens metric** (implementation.md
+§32). Every attainment number recorded before 2026-07-30 judged the per-token
+half of the rule against roughly twice its intended budget, because the client
+divided each inter-chunk gap by a per-chunk token estimate that is 1.92x the
+true token count. The correction is applied in analysis and therefore applies to
+these runs retroactively; `FS_LEGACY_TBT=1` reproduces the earlier numbers, and
+the pair is tabulated in §32.4. The ranking is unchanged and the margins widen.
+
+Mean over two repeats, with the observed range, per request:
 
 | rate | arm | admitted | **offered** | rej% | goodput | chat / dr / agent (offered) |
 |---|---|---|---|---|---|---|
@@ -116,71 +125,22 @@ The two repeats of FluidServe at 45 req/s read 88.5 and 88.6.
 Figures and both tables (corrected and, under `legacy/`, the pre-correction
 metric) are in `results/aggregate_analysis/exp38/`.
 
-## 4b. rep1 detail
+## 4b. rep1 against rep2
 
-All twelve conditions passed the health check: four engine metric files all
-advancing, offered rate within 1% of target, no condition with attainment
-exactly 0 or exactly 100 at a rate where the fleet should be struggling.
+rep1 was read and written up before rep2 finished, and its numbers are the left
+end of every range in §4 — the per-run rows are in
+`results/aggregate_analysis/exp38/exp23_rate_sweep.csv`. The two repeats agree
+closely enough that nothing in §5 rests on which one is read: the largest
+disagreement in any condition is the Llumnix SLO arm at 45 req/s, 50.8 against
+55.0 offered, and the smallest is FluidServe at the same rate, 88.5 against 88.6.
 
-**These figures are on the corrected time-between-tokens metric** (implementation.md
-§32). Every attainment number recorded before 2026-07-30 judged the per-token
-half of the rule against roughly twice its intended budget, because the client
-divided each inter-chunk gap by a per-chunk token estimate that is 1.92x the
-true token count. The correction is applied in analysis and therefore applies to
-these runs retroactively; `FS_LEGACY_TBT=1` reproduces the earlier numbers, and
-the pair is tabulated in §32.4. The ranking is unchanged and the margins widen.
-
-Every request counted once, both denominators, with the per-class breakdown on
-the offered denominator beside it:
-
-| rate | arm | admitted | offered | rej% | goodput tok/s | chat / dr / agent (offered) |
-|---|---|---|---|---|---|---|
-| 15 | all three | 100 | 100 | 0 | 7,893–8,037 | 100 / 100 / 100 |
-| 30 | PolyServe | 59.1 | 59.1 | 0 | 10,068 | 46.8 / 100.0 / 100.0 |
-| 30 | Llumnix SLO | 99.9 | 99.9 | 0 | 15,460 | 99.9 / 100.0 / 100.0 |
-| 30 | FluidServe | **100.0** | **100.0** | 0 | **15,742** | 99.9 / 100.0 / 100.0 |
-| 45 | PolyServe | 27.7 | 27.7 | 0 | 5,508 | 12.4 / 52.5 / **99.9** |
-| 45 | Llumnix SLO | 56.6 | 50.8 | 10.1 | 12,244 | 38.6 / **100.0** / 79.9 |
-| 45 | FluidServe | **94.2** | **88.5** | 5.9 | **20,206** | **89.4** / 97.0 / 63.2 |
-| 60 | PolyServe | 16.3 | 16.3 | 0 | 4,127 | 4.8 / 26.9 / **99.3** |
-| 60 | Llumnix SLO | 55.8 | 27.5 | 50.0 | 11,439 | 9.5 / **100.0** / 72.3 |
-| 60 | FluidServe | **55.3** | **34.6** | 36.7 | **12,171** | **26.4** / 80.7 / 29.2 |
-
-FluidServe leads Llumnix SLO by **37.7 points** offered at 45 req/s with 65%
-more token goodput, and by 7.1 points at 60. At 30 req/s the corrected metric
-separates PolyServe (59.1) from the other two, which the earlier metric hid by
-scoring all three at approximately 100.
-
-FluidServe wins both denominators and token goodput at both loaded rates. Its
-margin comes entirely from chat, which is 76.9% of the requests: it holds chat
-to a computed deadline and places it inside the 5 s budget where the SLO arm
-holds it for the gateway's fixed 5 s and then answers 503. Its agent class is
-the weakest of the three arms.
-
-**On aggregation.** These figures were originally read on the class-equal
-average as well, under which FluidServe loses to the SLO arm by 3.0 points at
-45 req/s and 13.9 at 60. Those numbers are not wrong and are kept in the CSV,
-but they are no longer reported as a scoring combination, because the
-class-equal average is by construction the unweighted mean of the three
-per-class columns above: it states that the agent class collapsed without
-saying so, and it gives a class carrying 7.7% of the requests one third of the
-score. The per-class columns carry the same objection in a form that names the
-class, which is what §5.2 is about. `exp23_rate_sweep.py` printed and plotted
-the class-equal average until 2026-07-30 while `exp27_figures.py` used the
-per-request one, so the two scripts produced disagreeing headline figures from
-the same run; both now use per request.
-
-Per class, offered denominator, 60 req/s:
-
-| class | share of requests | PolyServe | Llumnix SLO | FluidServe |
-|---|---|---|---|---|
-| chat | 76.9% | 11.2 | 30.3 | **51.0** |
-| deepresearch | 15.4% | 62.3 | **100.0** | 80.7 |
-| swe (agent) | 7.7% | **99.3** | 72.3 | **29.2** |
-
-Decision mix (a held request is re-decided at every gateway retry, so these
-include repeats): at 45 req/s route 11.8 / pend 80.6 / shed 1.1 / force 6.4; at
-60 route 1.6 / pend 87.5 / shed 4.5 / force 6.4.
+The judgement rule in §3 was pre-registered against the uncorrected metric, so it
+is worth checking that the correction does not change either verdict. It does
+not. Rule 1 asked whether FluidServe's per-request offered attainment at 60 req/s
+exceeds the SLO arm's: 53.6 against 43.7 uncorrected, 35.2 against 26.9
+corrected, passed either way. Rule 2 asked whether its agent-class offered
+attainment exceeds the SLO arm's: 29.2 against 72.3 uncorrected, 29.1 against
+72.8 corrected, refuted either way.
 
 ## 5. What the numbers mean
 
@@ -287,7 +247,7 @@ after the post-duration grace, so this is queue backlog and not a measurement
 artifact. Those requests leave both denominators, so the reported 62.3% is
 computed over the half that finished.
 
-## 5.4 The result is better stated as a capacity, not as a point difference
+### 5.4 The result is better stated as a capacity, not as a point difference
 
 The margin over Llumnix SLO is +0.1 points at 30 req/s, +37.7 at 45 and +7.1 at
 60, which reads as an inconsistent result until the curves are read as curves.
