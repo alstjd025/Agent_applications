@@ -37,6 +37,21 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from plot_per_engine_attainment import served_rows, class_of  # noqa: E402
 
+def _itl_ms(rows):
+    """Mean inter-token latency, derived rather than read from tbt_mean_ms.
+
+    The recorded column is half the true value on every run collected before
+    2026-07-30: the client divided each inter-chunk gap by a per-chunk token
+    estimate that tokenises the chunk out of context and comes to 1.92x the
+    true count. Deriving it from columns that are timestamp differences avoids
+    the defect and needs no re-measurement. See fluidserve-implementation.md 32.
+    """
+    out = pd.to_numeric(rows.get("output_tokens"), errors="coerce")
+    ttft = pd.to_numeric(rows["first_token_latency"], errors="coerce")
+    e2e = pd.to_numeric(rows["latency"], errors="coerce")
+    return (e2e - ttft) * 1000.0 / (out - 1.0).where(out > 1.0)
+
+
 # Per-class SLO rules. TTFT/TBT in (s, ms); e2e in s. A class uses e2e XOR
 # (ttft & tbt).
 SLO_RULES = {
@@ -64,7 +79,7 @@ ENGINE_COLORS = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd"]
 def per_class_violate(rows):
     """Recompute `violate` per class rule. rows must have class + raw metrics."""
     ttft = pd.to_numeric(rows["first_token_latency"], errors="coerce")
-    tbt = pd.to_numeric(rows["tbt_mean_ms"], errors="coerce")
+    tbt = _itl_ms(rows)
     e2e = pd.to_numeric(rows["latency"], errors="coerce")
     v = pd.Series(False, index=rows.index)
     for cname, rule in SLO_RULES.items():

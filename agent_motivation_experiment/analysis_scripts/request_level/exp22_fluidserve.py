@@ -173,6 +173,11 @@ def load_run(run_dir):
     # A request with no first token recorded produced nothing, which is a miss
     # under any rule rather than a missing value.
     miss = miss | (ttft.isna() & ~r["cutoff"])
+    # Published so every downstream figure uses the same corrected quantity
+    # instead of re-reading the tbt_mean_ms column, which is half the true
+    # inter-token latency on runs collected before 2026-07-30 (see
+    # fluidserve-implementation.md 32).
+    r["itl_ms"] = tbt
     r["violate_served"] = miss
     r["violate_offered"] = miss | r["rejected"] | r["errored"]
     r["t0"] = t0

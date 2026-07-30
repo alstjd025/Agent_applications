@@ -44,6 +44,8 @@ ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
          "fluidserveflat": "#9467bd"}
 ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "fluidserve": "FluidServe", "fluidserveflat": "FluidServe (v20 off)"}
+# Line style per arm for the latency CDFs, where colour already encodes class.
+ARM_LS = {"fluidserve": "-", "slo": "--", "polyserve": ":"}
 MIX_TITLE = {
     "m1": "m1 balanced\n31/37/31% of input tokens",
     "m2": "m2 chat-heavy\n64/19/16%",
@@ -250,12 +252,16 @@ def fig_latency(cells, out, title):
                 # and counting it as infinite would hide the shape of what was
                 # actually served. The rejection rate is in the sweep figure.
                 r = r[(~r["cutoff"]) & (~r["rejected"])]
-                ls = "-" if arm == "fluidserve" else "--"
+                # One line style per arm. This was solid for FluidServe and
+                # dashed for everything else, which drew the Llumnix SLO arm and
+                # PolyServe on top of each other in the same style while the
+                # legend named only one of them.
+                ls = ARM_LS.get(arm, "--")
                 for c in CLASSES:
                     s = r[r["class"] == c]
                     for j, (col, budget) in enumerate(
                             [("first_token_latency", TTFT_BUDGET[c]),
-                             ("tbt_mean_ms", ITL_BUDGET[c])]):
+                             ("itl_ms", ITL_BUDGET[c])]):
                         v = pd.to_numeric(s[col], errors="coerce").dropna()
                         if v.empty:
                             continue
@@ -275,13 +281,17 @@ def fig_latency(cells, out, title):
                 ax.grid(ls=":", lw=0.7, alpha=0.6)
         handles = [plt.Line2D([], [], color=CLASS_COLORS[c], lw=1.2) for c in CLASSES]
         labels = list(CLASSES)
-        handles += [plt.Line2D([], [], color="#666666", ls="-", lw=1.2),
-                    plt.Line2D([], [], color="#666666", ls="--", lw=1.2),
-                    plt.Line2D([], [], color="#666666", lw=0.6, alpha=0.45)]
-        labels += ["FluidServe", "PolyServe", "SLO budget"]
-        fig.legend(handles, labels, loc="lower center", ncol=6,
-                   bbox_to_anchor=(0.5, 1.0), frameon=False)
-        fig.suptitle(title, y=1.06, fontsize=9)
+        drawn = [x for x in ARM_LS if any(x in arms for _, arms in cells)]
+        handles += [plt.Line2D([], [], color="#666666", ls=ARM_LS[x], lw=1.2)
+                    for x in drawn]
+        handles += [plt.Line2D([], [], color="#666666", lw=0.6, alpha=0.45)]
+        labels += [ARM_L[x] for x in drawn] + ["SLO budget"]
+        # Legend below the axes, title above. Both were above and collided:
+        # seven entries wrap or run the full width, and no vertical offset
+        # separates them reliably at every figure height.
+        fig.legend(handles, labels, loc="upper center", ncol=len(labels),
+                   bbox_to_anchor=(0.5, 0.0), frameon=False, fontsize=7)
+        fig.suptitle(title, y=1.02, fontsize=9)
         fig.tight_layout()
         fig.savefig(out, dpi=300, bbox_inches="tight")
         plt.close(fig)

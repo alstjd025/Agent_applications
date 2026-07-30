@@ -37,6 +37,21 @@ from plot_slo_vs_throughput import (  # noqa: E402
     TTFT_SLO_S, TBT_SLO_MS, STEADY_LO, DRAIN_S, _slo_gw_timeout,
 )
 
+def _itl_ms(rows):
+    """Mean inter-token latency, derived rather than read from tbt_mean_ms.
+
+    The recorded column is half the true value on every run collected before
+    2026-07-30: the client divided each inter-chunk gap by a per-chunk token
+    estimate that tokenises the chunk out of context and comes to 1.92x the
+    true count. Deriving it from columns that are timestamp differences avoids
+    the defect and needs no re-measurement. See fluidserve-implementation.md 32.
+    """
+    out = pd.to_numeric(rows.get("output_tokens"), errors="coerce")
+    ttft = pd.to_numeric(rows["first_token_latency"], errors="coerce")
+    e2e = pd.to_numeric(rows["latency"], errors="coerce")
+    return (e2e - ttft) * 1000.0 / (out - 1.0).where(out > 1.0)
+
+
 PAPER_STYLE = {
     "font.family": "serif",
     "font.serif": ["DejaVu Serif", "Times New Roman", "Liberation Serif"],
@@ -81,7 +96,7 @@ def served_rows(run_dir, steady_max_s=360.0):
     gw = _slo_gw_timeout(r, bl)
     cls = r[(~(bl("is_error") | bl("is_timeout") | bl("is_server_terminated")) | gw)
             & ~rejected].copy()
-    tbt = pd.to_numeric(cls["tbt_mean_ms"], errors="coerce")
+    tbt = _itl_ms(cls)
     cls["violate"] = (
         (pd.to_numeric(cls["first_token_latency"], errors="coerce") > TTFT_SLO_S)
         | (tbt > TBT_SLO_MS) | gw.reindex(cls.index, fill_value=False))
