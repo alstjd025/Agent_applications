@@ -347,8 +347,12 @@ Engine 8003's gate reaches **100 ms** — deep research's own budget — precise
 because nothing else is on it. That is the state section 6.1 says is missing at
 the end of the hour, and it is worth twice the occupancy a 50 ms gate allows.
 
-**What fails is the brake, and it fails because its horizon is shorter than the
-class's residency.** Measured over minutes 5–16:
+**What fails is the memory limit, and it fails because it is computed from a
+prefix-sharing ratio measured at the instant of admission with no forward model
+at all.**
+
+First, what the projection does and does not know. Residency measured over
+minutes 5–16:
 
 | class | e2e p50 | e2e p90 | mean |
 |---|---|---|---|
@@ -356,56 +360,78 @@ class's residency.** Measured over minutes 5–16:
 | **deepresearch** | **78.7 s** | **119.1 s** | **80.0 s** |
 | swe | 17.2 s | 28.6 s | 18.4 s |
 
-The projection horizon is `horizonSteps = 100` iterations, which at the 40–100
-ms paces observed here is **4 to 10 seconds**. Deep research lives **80**. Two
-consequences, both in the direction of admitting too much:
+The projection is `proj = kvLogical + nDecode·horizonSteps − outflow` (line 911)
+with `horizonSteps = 100`, which at the 40–100 ms paces here is **4 to 10
+seconds** against a residency of **80**. The full output-length distribution is
+used, but only in `expectedOutflow` (line 959), as `completionProb(j, horizon) x
+kvTokens` — the probability a request finishes inside the horizon, times its
+whole footprint. It decides **who leaves**, never **how much those who stay will
+grow**: every resident request is credited with exactly 100 more tokens. For a
+class whose completion probability over ten seconds is near zero the outflow
+term vanishes and the projection reduces to `kvLogical + (live count) x 100`,
+with the length distribution contributing nothing.
 
-- `costOf` (line 1206) charges an arriving request `promptTokens + min(100,
-  expectedToks)` of KV. For deep research that is 4,639 + **100**, against an
-  actual output of roughly 840 tokens over its 80-second life — the decode
-  footprint is undercharged by about eight times.
-- `proj = kvLogical + nDecode·100 − outflow` (line 911) credits every resident
-  request with 100 more tokens of growth. With 400 deep research requests
-  resident, the projection anticipates 40k more tokens; those requests will
-  actually add about 336k before they finish.
+Two things that are **not** the defect, checked before concluding:
 
-So during minutes 3–6, while 8003's headroom was still comfortably positive
-(+858k, +945k, +1,273k, +429k), the policy admitted a cohort whose eventual
-footprint was several times what it had charged. Concurrently-live requests on
-8003, reconstructed from client start and end times:
+- **Stale metrics are not the problem.** `decodeBatchOf` (line 448) adds
+  `NumTokensInflightDispatchDecodeRequests` to `kvLogical`, so a request's prompt
+  is charged the moment it is dispatched rather than when the next status pull
+  reports it. Successive admissions inside one poll interval see each other.
+- **The per-request charge is not far wrong.** `costOf` (line 1206) charges
+  `promptTokens + min(100, expectedToks)`. For deep research that is 4,639 + 100
+  against an eventual 4,639 + ~840, so the charge is about **14% low** — the
+  decode term alone is eight times low, but it is only 15% of the footprint. It
+  also affects only the one-request-ahead test; the growth of the resident set is
+  observed directly through `kvLogical`.
 
-| min | live | of which deep research | logical KV estimate |
-|---|---|---|---|
-| 4 | 175 | 174 | 791k |
-| 5 | 219 | 219 | 985k |
-| 6 | **565** | 565 | **2,804k** |
-| 7 | 509 | 509 | 2,643k |
-| 13 | 565 | 565 | 2,708k |
-| 16 | 245 | 245 | 1,263k |
+What actually moved is the limit. Engine 8003, the scheduler's logical KV beside
+the engine's own physical occupancy:
 
-By minute 6 **both brakes are engaged** — the predicted step is 92.9 ms against
-a gate of 90 (100 x 0.90), and headroom has gone negative (−505k at minute 7,
-−1,030k at minute 9). The policy correctly stops admitting. **But a dispatched
-request cannot be recalled, and 400 to 565 deep research requests are already
-resident and will keep generating tokens for another eighty seconds.** That
-growth, not any subsequent admission, is what carries KV to 100% and forces the
-1,471 recomputes. The Llumnix SLO arm never reaches this state because it has no
-affinity term: deep research is spread roughly evenly, so each engine carries
-about a quarter as many concurrent long requests.
+| min | live | logical KV | physical % | phys max | logical held at 100% physical | limit | capKv | proj |
+|---|---|---|---|---|---|---|---|---|
+| 5 | 162 | 1,074k | 39.3 | 42 | **2,730k** | 2,099k | 4,685k | 826k |
+| 6 | 404 | 2,587k | 50.6 | 68 | **5,111k** | 2,220k | 2,362k | 1,791k |
+| 7 | 209 | 2,549k | **89.3** | **100** | 2,854k | 1,565k | 1,565k | 2,069k |
+| 8 | 285 | 2,222k | **99.5** | **100** | **2,234k** | 1,716k | 1,746k | 1,746k |
+| 12 | 253 | 1,993k | 97.2 | 100 | 2,050k | 2,074k | 2,681k | 1,563k |
 
-The defect is therefore not the packing but the **mismatch between the horizon
-the feasibility test looks over and the residency of the class being packed**. A
-brake that looks 5 seconds ahead cannot stop a filling whose consequences
-accumulate over 80. Three candidate fixes, none tried yet:
+**Minutes 6 and 8 hold a comparable logical count — 2,587k and 2,222k — at 50.6%
+and 99.5% of the physical pool.** The logical tokens the pool was holding per
+100% of physical fell from 5,111k to 2,234k and stayed near 2,000–2,400k for the
+rest of the burst. The chat engine 8002 sits at 1,378k throughout for contrast.
 
-1. Scale the horizon to the arriving request's own expected residency rather
-   than fixing it at 100 steps, so a class that lives 80 seconds is charged
-   against an 80-second projection.
-2. Charge `costOf` the request's full expected output rather than `min(100,
-   expectedToks)`; the estimate already exists in `req.expectedToks`.
-3. Bound the per-instance concentration of any one class directly, which is the
-   crude version and the only one that does not depend on the output-length
-   estimate being right.
+`capMem = kvCapacity * fsMemorySafety / ratio` (line 941) with `ratio =
+kvPhysical / kvLogical`, an **instantaneous** measurement of the current resident
+set. Deep research requests share a system prompt of roughly 910 tokens, but
+generated tokens are never shared, so **a cohort's sharing ratio is highest the
+moment it arrives and decays as it decodes**. Packing one class onto one engine
+makes that engine report the most favourable ratio it will ever report, at
+exactly the moment the admission decisions are being made against it. The
+admissions of minutes 5–6 were booked against a capacity that then halved.
+
+The limit moves more than the projection does: between minutes 6 and 7 `proj`
+rises 1,791k → 2,069k (+278k) while the limit falls 2,220k → 1,565k (**−655k**).
+
+By minute 7 both brakes are engaged — predicted step 101.7 ms against a gate of
+90 (100 x 0.90), headroom −505k — and the policy correctly stops admitting. But a
+dispatched request cannot be recalled, so the resident cohort keeps decoding into
+a pool that is already full, and the engine preempts.
+
+Three candidate fixes, none tried:
+
+1. **Give `capMem`'s ratio a forward model.** It is the only quantity in the
+   policy with no projection whatsoever. Discounting it by the resident set's
+   expected remaining output — which will not be shared — would have put minute
+   6's figure near 2,300k rather than 5,111k.
+2. **Compute `inflow` from the length distribution** rather than `nDecode x 100`.
+   This makes the projection right but does not touch the limit, which is where
+   the larger error was.
+3. **Bound the per-instance concentration of any one class.** The crude version,
+   and the only one that does not depend on an estimate being right.
+
+The Llumnix SLO arm never reaches this state because it has no affinity term:
+deep research is spread roughly evenly, so no engine's resident set is dominated
+by one long-lived, high-sharing class.
 
 ### 6.3 The two denominators, drawn apart
 
@@ -459,12 +485,19 @@ served correctly.
   allowances and the headroom are direct counter readings, not estimates. The
   link from the preemption burst to the narrowed advantage at minute 9 is
   temporal co-occurrence only.
-- In 6.2.1 the concurrency and the logical-KV estimate are reconstructed from
-  client start and end times, so they are the number of requests the client
-  believed were in flight rather than the engine's own count; the engine's
-  `num_requests_running` for the same minutes is 400–540, which agrees. The
-  eight-times undercharge in `costOf` is arithmetic from the code and the
-  measured output lengths, not a measurement of the scheduler's internal state.
+- In 6.2.1 the logical KV, the limit, `capKv` and `proj` are the scheduler's own
+  published gauges and the physical occupancy is the engine's own counter, so
+  the sharing-ratio collapse is two direct readings placed side by side rather
+  than an inference. What is inferred is the *cause* of that collapse — that a
+  cohort's sharing decays as it generates unshared tokens — which follows from
+  how prefix caching works but was not measured directly; the measurement would
+  be per-cohort sharing against cohort age.
+- An earlier version of 6.2.1 attributed the failure to the projection horizon
+  and to an "eight times" undercharge in `costOf`. Both statements were wrong in
+  emphasis: the decode term alone is eight times low but is 15% of a deep
+  research footprint, making the per-request charge 14% low; and the projection
+  already counts in-flight dispatches, so successive admissions inside one poll
+  interval do see each other. The measured error is on the limit side.
 - The engine attainment column uses the **admitted** denominator and is not
   comparable with the offered numbers in sections 3 and 6.1. A rejected request
   is never dispatched, so it has no engine to be attributed to.
