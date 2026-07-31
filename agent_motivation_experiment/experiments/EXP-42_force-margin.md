@@ -139,6 +139,96 @@ was supposed to have turned off. `set_scheduler_profiling.py` writes the joined
 form and reads the scheduler's start-up line back to confirm; the run is void
 without that confirmation.
 
-## 4. Result
+## 4. Result — accepted on all five conditions
 
-(to be filled in)
+Finished 2026-08-01 06:08 KST. Sixteen conditions, two repeats of each arm at
+each rate, one session, one binary. `run_health.py`: all sixteen at 4/4 engines,
+delivered rate within 0.1% of target, no flags. The archived deployment spec for
+every arm invocation carries the flag it was supposed to.
+
+**The baseline reproduces EXP-38.** At 60 req/s `fsbase` reads offered 36.1,
+SLO-meeting completions 21.3/s, goodput 12,638 tokens/s and chat median
+inter-token latency 49.7 ms, against EXP-38's 35.2, 20.69, 12,359 and 49.9. That
+is the check that the harness and the binary are the ones those numbers came
+from, and it is what makes the difference below readable.
+
+### Means over two repeats
+
+| rate | offered base → A | chat ITL base → A | goodput base → A | rejected base → A |
+|---|---|---|---|---|
+| 15 | 100.0 → 100.0 (+0.0) | 21.1 → 21.0 | 8,019 → 7,932 | 0.0 → 0.0 |
+| 30 | 100.0 → 100.0 (−0.0) | 25.1 → 26.5 | 15,707 → 15,588 | 0.0 → 0.0 |
+| **45** | 94.0 → **99.0** (**+5.0**) | 40.1 → **36.1** | 21,060 → **21,835** | 3.6 → **0.7** |
+| **60** | 36.1 → **49.3** (**+13.1**) | 49.7 → **44.9** | 12,638 → **16,846** | 35.0 → 46.7 |
+
+Per class on the offered denominator, and all three classes improve at both
+loaded rates:
+
+| rate | arm | chat | deepresearch | swe |
+|---|---|---|---|---|
+| 45 | base | 95.2 | 97.9 | 74.9 |
+| 45 | **A** | **99.7** | **100.0** | **90.9** |
+| 60 | base | 28.3 | 82.4 | 27.9 |
+| 60 | **A** | **41.7** | **92.0** | **44.2** |
+
+### The five conditions
+
+1. **The mechanism fired.** Shed share at 60 req/s 4.3% → 6.8%. The decision mix
+   moved the way the change predicts: **force fell 6.5% → 1.4%** as the
+   placements it was making became rejections, and **route rose 1.7% → 6.4%**,
+   because a fleet running at 44.9 ms rather than 49.7 has instances that pass
+   the routing test again.
+2. **Chat's inter-token latency fell below 47 ms**: 49.7 → 44.9, target < 47.0.
+3. **Offered attainment at 60 req/s rose above 45**: 36.1 → 49.3.
+4. **No regression at the lower rates.** 15 and 30 are unchanged to within 0.05
+   points, which is the harness check; 45 improved by 5.0.
+5. **Token goodput rose**: 12,638 → 16,846 tokens/s, +33%. The rejection rate
+   also rose, 35.0 → 46.7%, which is the point — the requests it now rejects are
+   the ones it used to place and then miss, and under the offered denominator
+   those scored zero either way.
+
+### The estimate was directional and too large
+
+Predicted −7.4 ms on the pace, measured **−4.8**. The sign and the mechanism are
+right; the magnitude is not. The estimate assumed every chat request predicted
+between 45 and 50 ms would stop being placed and that nothing would take its
+place, whereas route rose from 1.7% to 6.4%, so some of the freed capacity was
+immediately spent on requests that now pass the routing test. That is the
+intended behaviour and it damps the pace change.
+
+### Second result, not pre-registered: 45 req/s stopped being bistable
+
+The baseline reproduced the two regimes §35.6 recorded, **within one session**:
+
+| arm | repeat | route share | offered | rejected |
+|---|---|---|---|---|
+| base | 1 | 90.6% | 99.1 | 0.6% |
+| base | 2 | **9.1%** | **88.9** | **6.6%** |
+| **A** | 1 | 90.2% | 99.2 | 0.5% |
+| **A** | 2 | 90.7% | 98.8 | 0.9% |
+
+The baseline's two repeats differ by 10.2 points and land in different operating
+regimes; candidate A's differ by 0.4 and both land in the routing regime. **Two
+repeats each is not enough to establish this** — it is four runs — but the
+mechanism is the one the change was made for: forcing placements that will miss
+is what pushes the fleet past the gate, and once past it nothing is feasible, so
+every subsequent arrival is held and then forced as well. Removing the forced
+placements removes the push. If it holds, it matters more than the 60 req/s
+number, because a policy whose result at its own knee depends on which regime a
+run falls into is not one whose numbers can be quoted.
+
+**Follow-up worth running**: 36, 40, 45 req/s with four or more repeats per arm,
+which is the knee measurement already on the list, now with a specific question
+attached rather than only "where is the knee".
+
+### What is not established
+
+- Two repeats per condition. The 60 req/s difference (+13.1) is far outside the
+  baseline's own spread there (36.1 ± 1.2), and the 45 req/s difference (+5.0) is
+  not, because the baseline's spread at 45 is 10.2.
+- One mix (m1) and one engine scheduler (stock FIFO). EXP-40 showed the
+  control-plane advantage does not depend on the engine, but that was measured
+  without this change.
+- The change was tested only where it is reachable. At 15 and 30 req/s the
+  routing path takes 99.7% of decisions and the changed line is never evaluated,
+  so those conditions test the harness rather than the change.
