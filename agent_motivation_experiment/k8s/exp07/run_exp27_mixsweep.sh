@@ -81,6 +81,19 @@ set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
   local policy
   case "$1" in
     fluidserve)  policy=fluidserve ;;
+    # EXP-42. Both are the FluidServe policy from the SAME binary; they differ
+    # only in whether the forced-placement test applies the allowance margin
+    # that routing already applies. Set explicitly in both directions so the
+    # scheduler's start-up line carries a positive confirmation either way,
+    # rather than the treatment arm being the only one that can be checked.
+    # FS_CLASS_HARM is pinned to false in BOTH arms, not because false is the
+    # intended setting but because every FluidServe condition from 2026-07-28
+    # 10:28 to EXP-41 ran that way (the flag stuck in the deployment), and a
+    # baseline that silently differs from EXP-38 would make this comparison
+    # incomparable with everything it is being read against. Turning it back on
+    # is its own experiment, EXP-43, run one change at a time.
+    fsa)         policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=false ;;
+    fsbase)      policy=fluidserve; export FS_FORCE_MARGIN=false FS_CLASS_HARM=false ;;
     polyserve)   policy=polyserve ;;
     # Llumnix's own SLO-aware policy, as shipped apart from the neutral branch
     # that lets it run on a co-located fleet. It is NOT class-aware: --ttft-slo
