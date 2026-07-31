@@ -6,11 +6,23 @@ These panels put every quantity on the same time axis so a difference can be
 read against the load that produced it.
 
   A  offered rate, the context every other panel is read against
-  B  SLO attainment, offered denominator, in a sliding window
-  C  token goodput, output tokens/s from requests that met their rule
-  D  rejection rate, which is the gap between B and the admitted view
-  E  attainment per class, one line style per policy
-  F  what the four engines were holding, summed per policy
+  B  rejection rate, which is what separates the two attainment panels
+  C  SLO attainment, OFFERED denominator: every request that arrived is in the
+     denominator and a rejection is a violation
+  D  SLO attainment, ADMITTED denominator: rejections leave the population
+     entirely, so this is the quality of the work the policy chose to do
+  E  attainment per class, offered
+  F  attainment per class, admitted
+  G  token goodput, output tokens/s from requests that met their rule
+  H  what the four engines were holding, summed per policy
+
+The two denominators are drawn side by side rather than as one line because
+they answer different questions and a policy that can reject can move them in
+opposite directions. Read alone, the admitted view rewards refusing everything:
+a policy that rejects 80% of arrivals and serves the remainder perfectly scores
+100 on D and 20 on C. Neither is the "real" number -- C is what the workload
+asked for, D is how well the accepted work was done, and the rejection rate in B
+is the exchange rate between them.
 
 Requests are anchored on ARRIVAL, so a point at minute t is "of the requests
 that arrived around t, what fraction met their rule" -- the queueing-theory
@@ -101,66 +113,80 @@ def main():
     dur = min(r["rel"].max() for r in data.values())
 
     with plt.rc_context(PAPER_STYLE):
-        fig, ax = plt.subplots(3, 2, figsize=(11.0, 8.4), sharex=True)
+        fig, ax = plt.subplots(4, 2, figsize=(11.0, 10.6), sharex=True)
         ax = ax.ravel()
 
         for arm, r in data.items():
             lab, c, ls = ARMS[arm]
-            x, att, gp, rej = [], [], [], []
-            per = {cl: [] for cl in CLASSES}
+            x, off, adm, gp, rej = [], [], [], [], []
+            per_off = {cl: [] for cl in CLASSES}
+            per_adm = {cl: [] for cl in CLASSES}
             for t, g in windows(r, dur):
                 if len(g) < 30:
                     continue
                 x.append(t)
-                att.append(attain(g, "violate_offered"))
+                off.append(attain(g, "violate_offered"))
+                adm.append(attain(g, "violate_served"))
                 ok = g[(~g["violate_offered"]) & (~g["cutoff"])]
                 gp.append(pd.to_numeric(ok.get("output_tokens"), errors="coerce")
                           .fillna(0).sum() / WIN)
                 rej.append(100.0 * g["rejected"].mean())
                 for cl in CLASSES:
-                    per[cl].append(attain(g[g["class"] == cl], "violate_offered"))
+                    sub = g[g["class"] == cl]
+                    per_off[cl].append(attain(sub, "violate_offered"))
+                    per_adm[cl].append(attain(sub, "violate_served"))
             # A: the load. Drawn once per arm; they see the same trace, so the
             # two lines lying on top of each other is the check that they did.
             b = (r["rel"] // STEP).astype(int)
             ax[0].plot(np.array(sorted(b.unique())) * STEP / 60.0,
                        b.value_counts().sort_index().values / STEP,
                        color=c, ls=ls, lw=0.7, alpha=0.8, label=lab)
-            ax[1].plot(x, att, color=c, ls=ls, label=lab)
-            ax[2].plot(x, gp, color=c, ls=ls, label=lab)
-            ax[3].plot(x, rej, color=c, ls=ls, label=lab)
+            ax[1].plot(x, rej, color=c, ls=ls, label=lab)
+            ax[2].plot(x, off, color=c, ls=ls, label=lab)
+            ax[3].plot(x, adm, color=c, ls=ls, label=lab)
             for cl in CLASSES:
-                ax[4].plot(x, per[cl], color=CLASS_COLORS[cl], ls=ls, lw=1.1)
+                ax[4].plot(x, per_off[cl], color=CLASS_COLORS[cl], ls=ls, lw=1.1)
+                ax[5].plot(x, per_adm[cl], color=CLASS_COLORS[cl], ls=ls, lw=1.1)
+            ax[6].plot(x, gp, color=c, ls=ls, label=lab)
             eng = engine_total(runs[arm])
             if eng:
-                ax[5].plot(eng[0], eng[1], color=c, ls=ls, label=f"{lab} batch")
-                ax[5].plot(eng[0], eng[2] * 20, color=c, ls=":", lw=0.8, alpha=0.6)
+                ax[7].plot(eng[0], eng[1], color=c, ls=ls, label=f"{lab} batch")
+                ax[7].plot(eng[0], eng[2] * 20, color=c, ls=":", lw=0.8, alpha=0.6)
 
         titles = ["A. offered rate (30 s bins) — both arms see the same trace",
-                  f"B. SLO attainment, offered denominator ({WIN:.0f} s window)",
-                  "C. token goodput — output tokens/s from requests that met their rule",
-                  "D. rejection rate",
-                  "E. attainment per class (colour = class, style = policy)",
-                  "F. fleet decode batch (solid) and mean KV % x20 (dotted)"]
-        ylabs = ["req/s", "attainment (%)", "tokens/s", "rejected (%)",
-                 "attainment (%)", "requests"]
+                  "B. rejection rate — what separates C from D",
+                  f"C. attainment, OFFERED denominator: rejection counts as a "
+                  f"violation ({WIN:.0f} s window)",
+                  "D. attainment, ADMITTED denominator: rejections leave the population",
+                  "E. attainment per class, OFFERED (colour = class, style = policy)",
+                  "F. attainment per class, ADMITTED",
+                  "G. token goodput — output tokens/s from requests that met their rule",
+                  "H. fleet decode batch (solid) and mean KV % x20 (dotted)"]
+        ylabs = ["req/s", "rejected (%)", "attainment (%)", "attainment (%)",
+                 "attainment (%)", "attainment (%)", "tokens/s", "requests"]
         for i, (t, y) in enumerate(zip(titles, ylabs)):
             ax[i].set_title(t, fontsize=8)
             ax[i].set_ylabel(y)
             ax[i].grid(axis="y", ls=":", lw=0.7, alpha=0.6)
             ax[i].set_xlim(0, dur / 60.0)
-        for i in (1, 4):
+        # The two denominators, and the two per-class panels, are only readable
+        # against each other on one scale.
+        for i in (2, 3, 4, 5):
             ax[i].set_ylim(0, 105)
-        for i in (4, 5):
+        for i in (6, 7):
             ax[i].set_xlabel("time (minutes)")
-        ax[1].legend(fontsize=7, loc="lower left")
+        ax[2].legend(fontsize=7, loc="lower left")
         h = [plt.Line2D([], [], color=CLASS_COLORS[c], lw=1.1) for c in CLASSES]
         h += [plt.Line2D([], [], color="#666666", ls=ARMS[k][2], lw=1.1) for k in data]
+        # Five entries over a panel whose lines cover the whole 0-100 range, so
+        # this one legend gets a background rather than sitting on the data.
         ax[4].legend(h, list(CLASSES) + [ARMS[k][0] for k in data],
-                     fontsize=6, ncol=2, loc="upper right")
+                     fontsize=6, ncol=3, loc="lower center", frameon=True,
+                     framealpha=0.85, edgecolor="none")
         # The mix steps every 15 minutes on the compressed trace; the verbatim
         # one holds m1 throughout, so the guides would be meaningless there.
         if a.variant == "full":
-            for i in range(6):
+            for i in range(8):
                 for m in (15, 30, 45):
                     ax[i].axvline(m, color="#999999", lw=0.5, ls=":")
             ax[0].annotate("mix m1 | m2 | m3 | m1", (0.5, 0.92), xycoords="axes fraction",

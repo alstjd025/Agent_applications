@@ -199,13 +199,26 @@ its decode batch is 797.6 against 772.5, its mean KV is 68.7% against 78.1%, and
 its ITL is 55 ms against 60 ms. It is spending a faster fleet on a class that
 cannot meet 50 ms at this load.
 
-**Leading explanation, not yet measured on this run.** Section 33 measured
-`gate_allowance_ms` at exactly 50.0 on all four instances at all times, because
-an instance's gate is the minimum `nominalMs` over the requests live on it and
-chat's budget is the smallest. The pace in this window is 55 ms. A deep research
-request therefore cannot ROUTE — it is judged against chat's 50 ms gate rather
-than its own 100 ms budget — falls through to PEND, and ends in a shed. Scraping
-`gate_allowance_ms` over minutes 50–56 is what would confirm it.
+**Confirmed from the scheduler's own gauges.** The per-instance FluidServe
+gauges are in `server_metrics/scheduler.jsonl` for this run, so the section 33
+explanation could be checked directly rather than inferred. Over minutes 50–56:
+
+| engine | `gate_allowance_ms` | `tightest_allowance_ms` | predicted step | observed step | headroom |
+|---|---|---|---|---|---|
+| 8000 | **50.0** | 72.7 | 56.4 | 56.5 | −697k |
+| 8001 | **50.0** | 68.6 | 55.7 | 55.7 | −659k |
+| 8002 | **50.0** | 69.1 | 55.7 | 55.8 | −666k |
+| 8003 | **50.0** | 68.3 | 55.6 | 55.7 | −653k |
+
+An instance's gate is the minimum `nominalMs` over the requests live on it, and
+by this point in the hour every instance holds chat, so every gate is chat's 50
+ms. The routing test is `meanAfter <= min(gateAllowance, req.nominalMs) * 0.90`,
+which for a deep research request is `55.6 <= 45.0` — false on all four
+instances even though the request's own budget is 100 ms and the fleet is
+running at 55.6. **Nothing can ROUTE, so every arrival falls to PEND, and deep
+research spends nine seconds of its ten-second budget there before being shed.**
+The prediction is also not the error: predicted and observed step agree to
+within 0.1 ms on all four.
 
 Two fixes follow without needing class priorities, which remain future work:
 judge the gate against **the arriving request's own budget** rather than the
@@ -213,6 +226,19 @@ instance minimum, so a class with large slack is not held behind a class with
 none; and **shorten the hold deadline when recent holds have been ending in
 sheds**, so the nine seconds are not spent before the request is discarded
 anyway.
+
+Two fixes follow without needing class priorities, which remain future work:
+judge the gate against **the arriving request's own budget** rather than the
+instance minimum, so a class with large slack is not held behind a class with
+none; and **shorten the hold deadline when recent holds have been ending in
+sheds**, so the nine seconds are not spent before the request is discarded
+anyway.
+
+Note what 6.2 below adds to this: during minutes 5–20 engine 8003's gate **was**
+100 ms, because the class packing had given it only deep research to hold. The
+policy can produce the state that 6.1 says is missing. What it cannot do is hold
+that state at 1.6x capacity, because packing only happens on the ROUTE path and
+at that load nothing routes.
 
 ### 6.2 Minutes 6–16: FluidServe overloads one engine and pays 1,471 recomputes
 
@@ -275,16 +301,170 @@ this workload for a 93/60 split in class share to move the counter. **The
 engine-reported hit rate is therefore not a reliable read-out of routing on this
 workload; the dispatch log is.**
 
-### 6.3 What is measured and what is not
+### 6.2.1 Why 8003: the class packing is deliberate, and its brake is too short-sighted
+
+The whole-hour mix hides what happened. Broken out by five-minute block, the
+share of each block's deep research arrivals that went to each engine:
+
+| block | 8000 | 8001 | 8002 | 8003 | n |
+|---|---|---|---|---|---|
+| 0–5 | 0.3 | 0.8 | 0.0 | **98.9** | 989 |
+| 5–10 | 13.1 | 15.8 | 7.3 | **63.8** | 2,292 |
+| 10–15 | 15.3 | 9.8 | 3.6 | **71.3** | 2,037 |
+| 15–20 | 0.0 | 0.0 | 0.0 | **100.0** | 759 |
+| 20–25 | 22.8 | 26.9 | 2.7 | 47.6 | 824 |
+| 25–30 | 3.9 | **93.9** | 0.5 | 1.7 | 593 |
+| 30–35 | 20.6 | 45.8 | 13.1 | 20.5 | 1,170 |
+| 35–60 | 24–30 | 24–30 | 12–24 | 25–30 | — |
+
+**Engine 8003 was receiving essentially every deep research request.** Read
+minute by minute over minutes 1–16 its class mix is `0/100/0`: it held nothing
+but deep research. It received the *fewest* requests of the four (250–420 per
+minute against 8000's 626) and the *most* input tokens (1.0–1.9M per minute),
+because deep research averages 4,639 input tokens against chat's 649.
+
+**This is the policy working as designed.** `sortCandidates`
+(`pkg/scheduler/policy/fluidserve.go:1156`) orders the feasible candidates by
+`share` descending — the instance already holding the most of the arriving
+request's class is chosen first. The comment states the intent: an instance's
+admissible occupancy is set by the tightest pace on it, so mixing classes wastes
+capacity in both directions, and "filling one instance with one class until it
+can take no more is what produces a separation without any instance being
+assigned to a class, and the feasibility test is what stops the filling."
+
+It works. `scheduler_fluidserve_gate_allowance_ms` per engine, by block:
+
+| block | 8000 | 8001 | 8002 | **8003** |
+|---|---|---|---|---|
+| 0–5 | 50.0 | 58.6 | 50.0 | 78.4 |
+| 5–10 | 50.0 | 51.4 | 50.0 | **100.0** |
+| 10–15 | 50.3 | 50.0 | 50.0 | **100.0** |
+| 15–20 | 52.4 | 50.0 | 50.0 | **90.7** |
+| 20–25 | 50.0 | 50.0 | 50.0 | 56.2 |
+| 25–60 | 50.0 | 50.0–52.3 | 50.0 | 50.0 |
+
+Engine 8003's gate reaches **100 ms** — deep research's own budget — precisely
+because nothing else is on it. That is the state section 6.1 says is missing at
+the end of the hour, and it is worth twice the occupancy a 50 ms gate allows.
+
+**What fails is the brake, and it fails because its horizon is shorter than the
+class's residency.** Measured over minutes 5–16:
+
+| class | e2e p50 | e2e p90 | mean |
+|---|---|---|---|
+| chat | 17.7 s | 35.4 s | 20.2 s |
+| **deepresearch** | **78.7 s** | **119.1 s** | **80.0 s** |
+| swe | 17.2 s | 28.6 s | 18.4 s |
+
+The projection horizon is `horizonSteps = 100` iterations, which at the 40–100
+ms paces observed here is **4 to 10 seconds**. Deep research lives **80**. Two
+consequences, both in the direction of admitting too much:
+
+- `costOf` (line 1206) charges an arriving request `promptTokens + min(100,
+  expectedToks)` of KV. For deep research that is 4,639 + **100**, against an
+  actual output of roughly 840 tokens over its 80-second life — the decode
+  footprint is undercharged by about eight times.
+- `proj = kvLogical + nDecode·100 − outflow` (line 911) credits every resident
+  request with 100 more tokens of growth. With 400 deep research requests
+  resident, the projection anticipates 40k more tokens; those requests will
+  actually add about 336k before they finish.
+
+So during minutes 3–6, while 8003's headroom was still comfortably positive
+(+858k, +945k, +1,273k, +429k), the policy admitted a cohort whose eventual
+footprint was several times what it had charged. Concurrently-live requests on
+8003, reconstructed from client start and end times:
+
+| min | live | of which deep research | logical KV estimate |
+|---|---|---|---|
+| 4 | 175 | 174 | 791k |
+| 5 | 219 | 219 | 985k |
+| 6 | **565** | 565 | **2,804k** |
+| 7 | 509 | 509 | 2,643k |
+| 13 | 565 | 565 | 2,708k |
+| 16 | 245 | 245 | 1,263k |
+
+By minute 6 **both brakes are engaged** — the predicted step is 92.9 ms against
+a gate of 90 (100 x 0.90), and headroom has gone negative (−505k at minute 7,
+−1,030k at minute 9). The policy correctly stops admitting. **But a dispatched
+request cannot be recalled, and 400 to 565 deep research requests are already
+resident and will keep generating tokens for another eighty seconds.** That
+growth, not any subsequent admission, is what carries KV to 100% and forces the
+1,471 recomputes. The Llumnix SLO arm never reaches this state because it has no
+affinity term: deep research is spread roughly evenly, so each engine carries
+about a quarter as many concurrent long requests.
+
+The defect is therefore not the packing but the **mismatch between the horizon
+the feasibility test looks over and the residency of the class being packed**. A
+brake that looks 5 seconds ahead cannot stop a filling whose consequences
+accumulate over 80. Three candidate fixes, none tried yet:
+
+1. Scale the horizon to the arriving request's own expected residency rather
+   than fixing it at 100 steps, so a class that lives 80 seconds is charged
+   against an 80-second projection.
+2. Charge `costOf` the request's full expected output rather than `min(100,
+   expectedToks)`; the estimate already exists in `req.expectedToks`.
+3. Bound the per-instance concentration of any one class directly, which is the
+   crude version and the only one that does not depend on the output-length
+   estimate being right.
+
+### 6.3 The two denominators, drawn apart
+
+`exp41_dynamic_timeline.py` now draws attainment twice, panel C on the offered
+denominator and panel D on the admitted one, with the rejection rate that
+separates them in panel B and the per-class version of each in E and F. They
+were one panel before, which hid the only place in the hour where the two
+denominators disagree about which policy is ahead.
+
+| window | | offered | admitted | rej% | chat off/adm | dr off/adm | swe off/adm |
+|---|---|---|---|---|---|---|---|
+| whole hour | SLO | 38.5 | 66.7 | 42.1 | 26.7 / 56.4 | 100.0 / 100.0 | 58.5 / 65.9 |
+| | **FS** | **59.7** | **84.3** | **29.1** | 59.3 / 82.9 | 83.7 / 94.9 | 35.1 / 77.4 |
+| 0–15 | SLO | 43.8 | 74.5 | 41.2 | 29.2 / 62.6 | 100.0 / 100.0 | 77.4 / 78.7 |
+| | **FS** | **71.2** | **90.8** | **21.6** | 72.6 / 91.9 | 75.3 / 84.9 | 49.4 / 94.3 |
+| 15–30 | SLO | 67.5 | 68.6 | 1.5 | 65.3 / 66.4 | 100.0 / 100.0 | 82.4 / 82.4 |
+| | **FS** | **89.9** | **92.0** | 2.4 | 89.6 / 91.6 | 98.9 / 99.5 | 82.6 / 91.2 |
+| 30–45 | SLO | 29.3 | 63.6 | 53.9 | 8.4 / 35.6 | 100.0 / 100.0 | 59.8 / 66.1 |
+| | **FS** | **52.8** | **78.3** | **32.6** | 54.3 / 75.0 | 90.6 / 99.4 | 29.1 / 73.1 |
+| 45–60 | SLO | 19.2 | 58.0 | 66.9 | 1.3 / 8.6 | 100.0 / 100.0 | 36.4 / 48.3 |
+| | **FS** | **32.1** | **69.6** | **53.9** | 22.8 / 58.2 | 81.8 / 98.3 | 26.1 / 64.1 |
+| **50–57** | **SLO** | **17.4** | **87.6** | 80.2 | 0.0 / *no chat admitted* | 100.0 / 100.0 | 25.7 / 44.5 |
+| | FS | 14.9 | 52.5 | 71.5 | 1.5 / 8.8 | 80.2 / **98.3** | 18.5 / 58.7 |
+
+**On the admitted denominator FluidServe leads by more, not less** — 84.3
+against 66.7 over the hour, and in every fifteen-minute segment. That is the
+expected direction: the offered denominator charges FluidServe for the 29.1% it
+rejects, and the admitted one asks only how well the accepted work was done.
+
+**Minutes 50–57 are where the two denominators point opposite ways, and the
+admitted view there is the reason it is never reported alone.** The Llumnix SLO
+arm reads **87.6** on the admitted denominator — its best number anywhere in the
+hour — while rejecting **80.2%** of arrivals and admitting **zero chat requests**
+(the chat column is undefined, not zero). A denominator that removes rejections
+scores a policy highest exactly where it refused the most. The offered view puts
+the same window at 17.4.
+
+The per-class admitted column also settles what 6.1 argued: FluidServe's deep
+research reads **98.3% admitted** in that window against 80.2% offered. Its 3.1
+point loss is entirely the 18.4% it shed, and the requests it did admit were
+served correctly.
+
+### 6.4 What is measured and what is not
 
 - Both subsections are one run per arm. In 6.1 the −2.5-point crossing is inside
   the repeat spread seen elsewhere (up to 4.2 points, 11.4 at the knee), so **the
   crossing as a number is not established**; the mechanism is — an 18.4% versus
   0% shed rate on deep research, and 91.2% failure among admitted chat, are far
   outside any measured spread.
-- In 6.2 the preemption count, the imbalance, and the class shares are direct
-  counter readings, not estimates. The link from the preemption burst to the
-  narrowed advantage at minute 9 is temporal co-occurrence only.
+- In 6.2 the preemption count, the imbalance, the class shares, the gate
+  allowances and the headroom are direct counter readings, not estimates. The
+  link from the preemption burst to the narrowed advantage at minute 9 is
+  temporal co-occurrence only.
+- In 6.2.1 the concurrency and the logical-KV estimate are reconstructed from
+  client start and end times, so they are the number of requests the client
+  believed were in flight rather than the engine's own count; the engine's
+  `num_requests_running` for the same minutes is 400–540, which agrees. The
+  eight-times undercharge in `costOf` is arithmetic from the code and the
+  measured output lengths, not a measurement of the scheduler's internal state.
 - The engine attainment column uses the **admitted** denominator and is not
   comparable with the offered numbers in sections 3 and 6.1. A rejected request
   is never dispatched, so it has no engine to be attributed to.
