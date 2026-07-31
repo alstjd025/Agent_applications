@@ -116,11 +116,102 @@ eight-minute condition.
 - Recovery is described from the timeline, not yet measured. The per-segment and
   transition-only breakdown is the measurement.
 
-## 5. Result — `azcode`
+## 5. Result — `azcode`, one run each, both healthy
 
-(running, expected ~17:00 KST 2026-07-31)
+Finished 17:05 KST. `run_health.py`: both arms delivered 34.8 req/s against the
+trace's 35.0 mean, 4/4 engines, no flags. The mix is fixed at m1 and the window
+is replayed verbatim, so **the only thing that moves is the rate**, which climbs
+from the mid-20s to the low 50s over the hour.
+
+| | offered | admitted | rej% | goodput | total tok/s | chat / dr / swe (offered) |
+|---|---|---|---|---|---|---|
+| Llumnix SLO | 55.7 | 67.4 | 17.3 | 11,151 | 15,387 | 45.3 / **100.0** / 72.9 |
+| **FluidServe** | **82.1** | **91.5** | **10.2** | **14,525** | **16,396** | **85.4** / 72.1 / 69.5 |
+
+**+26.4 points offered, +24.1 admitted, 30% more token goodput, 7 points less
+rejected.** The same direction and roughly the same size as `full` (+21.2), on a
+trace where the mix cannot be the explanation.
+
+By 15-minute segment. The load ramps monotonically, so the segments are a
+load ladder rather than four repetitions:
+
+| segment | mean rate | SLO | FluidServe | diff |
+|---|---|---|---|---|
+| 0–15 | 27.5 | 99.9 | 100.0 | +0.1 |
+| 15–30 | 32.6 | 98.0 | 100.0 | +2.0 |
+| 30–45 | 38.5 | 41.9 | **84.6** | **+42.7** |
+| 45–60 | 45.9 | 21.1 | **61.2** | **+40.1** |
+
+By 30-second offered-rate band, pooled over the hour:
+
+| band | n | SLO | FluidServe | diff |
+|---|---|---|---|---|
+| under 30 req/s | 39,530 | 98.0 | 99.4 | +1.5 |
+| 30–35 | 17,557 | 86.5 | 97.3 | +10.8 |
+| **35–40** | 20,642 | **31.4** | **83.0** | **+51.7** |
+| 40–50 | 42,777 | 21.4 | 63.5 | +42.1 |
+| 50+ | 6,339 | 17.7 | 54.7 | +36.9 |
+
+**Every band favours FluidServe, and nowhere in this hour do the two cross.**
+That is the answer to the question `azcode` was run for: the `full` crossing at
+minutes 50–56 is not something the rate alone produces at any rate this trace
+reaches. It is **not** a refutation either — `azcode` peaks at about 55 req/s in
+a 30-second bin, which is 1.25x the measured SLO capacity, while the `full`
+crossing needed 68–77 req/s held for six minutes, about 1.6x. The two traces
+address different parts of the load range.
+
+**This brackets the Llumnix SLO knee at between 35 and 40 req/s**: 86.5 in the
+30–35 band, 31.4 in the 35–40 band. FluidServe still reads 83.0 at 35–40 and
+does not fall below 55 anywhere. Under a ramping trace rather than static
+conditions, so it is not the same measurement as the planned static knee runs,
+but it bounds them.
+
+### 5.1 What the separation bought and what it cost
+
+`azcode` produces a much cleaner class partition than `full` did, and with the
+mix held fixed the trade is legible.
+
+| arm | port | requests | attainment (admitted) | chat% | dr% | swe% | chat ITL |
+|---|---|---|---|---|---|---|---|
+| SLO | 8000 | 21,908 | 80.7 | 64.7 | 22.5 | 12.8 | 38.7 |
+| SLO | 8001 | 25,443 | 69.9 | 70.8 | 18.8 | 10.3 | 42.2 |
+| SLO | 8002 | 29,073 | 60.4 | 76.3 | 16.6 | 7.1 | 49.3 |
+| SLO | 8003 | 28,480 | 62.2 | 74.7 | 17.4 | 7.9 | 48.0 |
+| FS | 8000 | 14,898 | 86.1 | 42.9 | 15.4 | **41.8** | 48.7 |
+| FS | 8001 | 44,731 | **98.2** | **97.7** | 1.5 | 0.8 | **32.6** |
+| FS | 8002 | 39,548 | **95.1** | **94.8** | 3.7 | 1.5 | **26.6** |
+| FS | **8003** | 14,609 | **66.4** | **0.0** | **99.4** | 0.6 | — |
+
+Two engines carrying 95–98% chat, one carrying 99.4% deep research and no chat
+at all, one carrying the swe class. **The gain is chat**: 45.3 → 85.4 offered,
+and among admitted requests the TBT failure rate falls from 41.3% (31,224 of
+75,585) to 4.9% (4,273 of 87,357), because chat's inter-token latency on its own
+engines is 26.6–32.6 ms against a 50 ms budget rather than 44.3 ms fleet-wide.
+Chat is 76.9% of arrivals, so this is most of the +26.4.
+
+**The cost is the deep research engine, and it is the same failure as 6.2, worse.**
+
+| | preemptions | imbalance (busiest/least) | peak queue | KV max |
+|---|---|---|---|---|
+| Llumnix SLO | 0 | 1.6x | 40 | 91–95% |
+| FluidServe | **5,513**, all on 8003 | **7.3x** | **128** | **100% on 8003** |
+
+Deep research falls 100.0 → 72.1 offered, and unlike in `full` the loss is not
+mainly shedding: 535 of 19,488 are shed (2.7%) and **4,807 of the 18,643 admitted
+miss on TTFT**, with p90 at **20.64 s** against a 10 s budget while only 13 miss
+on TBT. A TTFT of 20 s is past the hold deadline, so this is not the gateway
+holding the request — it is queueing behind an engine whose KV is full and which
+is preempting, exactly the state 6.2.1 describes. The Llumnix SLO arm's deep
+research sits at 100.0 with zero rejections all hour.
+
+Arithmetically, bringing deep research back to the SLO arm's 100.0 without giving
+up any of the chat gain would move FluidServe from 82.1 to about **86.4**. That
+is the size of the prize for fixing 6.2.1, on this trace.
 
 ## 6. Two failure modes an eight-minute condition cannot produce
+
+Both were found on `full` and both reappear on `azcode`; 6.2 in particular is
+larger there (5,513 preemptions against 1,471, imbalance 7.3x against 2.70x).
 
 Both were found by asking a question about the timeline rather than the whole-run
 mean, and neither appears anywhere in EXP-38 or EXP-40. They are at opposite
