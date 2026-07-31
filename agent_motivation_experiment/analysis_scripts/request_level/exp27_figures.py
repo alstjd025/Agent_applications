@@ -41,11 +41,22 @@ from exp22_fluidserve import (  # noqa: E402
 )
 
 ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
-         "fluidserveflat": "#9467bd"}
+         "fluidserveflat": "#9467bd",
+         # EXP-40 crosses two control planes with two engine schedulers. Hue is
+         # the control plane so it means what it means everywhere else; the
+         # lighter shade of the same hue is the deadline-aware engine. Reading
+         # the pair of shades is reading what the engine changed.
+         "slofifo": "#2ca02c", "sloqoserve": "#98df8a",
+         "fluidservefifo": "#1f77b4", "fluidserveqoserve": "#aec7e8"}
 ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
-         "fluidserve": "FluidServe", "fluidserveflat": "FluidServe (v20 off)"}
+         "fluidserve": "FluidServe", "fluidserveflat": "FluidServe (v20 off)",
+         "slofifo": "Llumnix SLO + FIFO", "sloqoserve": "Llumnix SLO + QoServe",
+         "fluidservefifo": "FluidServe + FIFO",
+         "fluidserveqoserve": "FluidServe + QoServe"}
 # Line style per arm for the latency CDFs, where colour already encodes class.
-ARM_LS = {"fluidserve": "-", "slo": "--", "polyserve": ":"}
+ARM_LS = {"fluidserve": "-", "slo": "--", "polyserve": ":",
+          "fluidservefifo": "-", "fluidserveqoserve": "--",
+          "slofifo": "-.", "sloqoserve": ":"}
 MIX_TITLE = {
     "m1": "m1 balanced\n31/37/31% of input tokens",
     "m2": "m2 chat-heavy\n64/19/16%",

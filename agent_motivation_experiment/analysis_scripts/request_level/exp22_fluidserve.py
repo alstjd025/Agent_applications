@@ -61,6 +61,11 @@ ARM_STYLE = {
     "polyserve":  dict(color="#d62728", ls="--", marker="o", label="PolyServe"),
     "fluidserve": dict(color="#1f77b4", ls="-", marker="s", label="FluidServe"),
     "loadbalance": dict(color="#7f7f7f", ls=":", marker="^", label="Llumnix load-balance"),
+    # EXP-40: hue = control plane, lighter shade = deadline-aware engine.
+    "slofifo": dict(color="#2ca02c", ls="-", marker="o", label="Llumnix SLO + FIFO"),
+    "sloqoserve": dict(color="#98df8a", ls="--", marker="o", label="Llumnix SLO + QoServe"),
+    "fluidservefifo": dict(color="#1f77b4", ls="-", marker="s", label="FluidServe + FIFO"),
+    "fluidserveqoserve": dict(color="#aec7e8", ls="--", marker="s", label="FluidServe + QoServe"),
 }
 PAPER_STYLE = {
     "font.family": "serif",
