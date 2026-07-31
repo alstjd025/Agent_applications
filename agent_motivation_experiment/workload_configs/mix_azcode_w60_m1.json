@@ -1,0 +1,47 @@
+{
+ "_comment": [
+  "A real 60-minute window of the Azure LLM Inference 2024 code trace, replayed",
+  "verbatim: no time compression, no rate rescaling, no rank transform. Built by",
+  "traces/dynamic/build_replay_window.py from minute 5,087 (2024-05-13 12:47 UTC).",
+  "125,864 measured arrivals, mean 35.0 req/s, per-minute rate 21 to 52, rising",
+  "from the mid-20s over the first half hour to the high 40s over the second.",
+  "",
+  "The class plan is in the same csv, one class per arrival, mix FIXED at m1. The",
+  "compressed trace (mix_dyn60_short_m123) moves rate and mix together and cannot",
+  "separate them; this one moves only the rate.",
+  "",
+  "Arrival timing comes from the trace; prompts and outputs come from the three",
+  "application workloads, as everywhere else. Say 'arrival timing from a 60-minute",
+  "segment of the Azure code trace, replayed at its recorded rate'."
+ ],
+ "mean_input_tokens": {
+  "chat": 649,
+  "deepresearch": 4639,
+  "swe": 5557
+ },
+ "chat_config": {
+  "num_conversations": 1000
+ },
+ "deepresearch_config": {},
+ "swe_config": {
+  "transcript_file": "/work/results/exp10_transcript/transcript_swe_short7k_mix1500.jsonl"
+ },
+ "slo": {
+  "chat": {
+   "ttft_ms": 5000,
+   "tbt_ms": 50,
+   "out_len": 386
+  },
+  "deepresearch": {
+   "ttft_ms": 10000,
+   "tbt_ms": 100,
+   "out_len": 275
+  },
+  "swe": {
+   "ttft_ms": 11800,
+   "tbt_ms": 25,
+   "out_len": 728
+  }
+ },
+ "class_plan_file": "/work/traces/dynamic/canonical/azcode_w60_m1.csv"
+}

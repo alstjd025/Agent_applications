@@ -40,10 +40,22 @@ mkdir -p "$META"
 declare -A TRACE=(
   [ablation]=/work/traces/dynamic/canonical/dyn09_short_mixcycle_flat.csv
   [full]=/work/traces/dynamic/canonical/dyn60_short_m123.csv
+  [azcode]=/work/traces/dynamic/canonical/azcode_w60_m1.csv
 )
+# The SLO filter has no end-to-end mode and reads tbt_ms literally, so on the
+# stock config it judges the agent class 2.3x tighter than FluidServe judges it
+# and rejects ~98% of it (EXP-28). Each variant therefore has a "fair" config
+# that restates that class as (2500, 52); scoring is unaffected because the
+# analysis judges it end to end whatever the config says. Chosen by ARM, the
+# same way run_exp27_mixsweep picks m1 or m1f.
 declare -A WCFG=(
   [ablation]=/work/workload_configs/mix_dyn09_short_mixcycle_flat.json
   [full]=/work/workload_configs/mix_dyn60_short_m123.json
+  [azcode]=/work/workload_configs/mix_azcode_w60_m1.json
+)
+declare -A WCFG_FAIR=(
+  [full]=/work/workload_configs/mix_dyn60_short_m123_slofair.json
+  [azcode]=/work/workload_configs/mix_azcode_w60_m1_slofair.json
 )
 SHORT_TRANSCRIPT="$HOSTWORK/results/exp10_transcript/transcript_swe_short7k_mix1500.jsonl"
 
@@ -94,6 +106,9 @@ set_arm() {
 run_cell() {  # $1 arm, $2 variant (ablation|full)
   local arm=$1 variant=$2
   local trace=${TRACE[$variant]:-} wcfg=${WCFG[$variant]:-}
+  if [ "$arm" = "slo" ] && [ -n "${WCFG_FAIR[$variant]:-}" ]; then
+    wcfg=${WCFG_FAIR[$variant]}
+  fi
   [ -n "$trace" ] || { echo "[exp30] unknown variant '$variant'"; return 1; }
   [ -s "${HOSTWORK}${trace#/work}" ] || { echo "[exp30] missing $trace"; return 1; }
   [ -s "${HOSTWORK}${wcfg#/work}" ]  || { echo "[exp30] missing $wcfg"; return 1; }
@@ -119,13 +134,13 @@ case "${1:-}" in
     check_stack
     SESSION_PREFIX=exp30smoke run_cell fluidserve ablation
     ;;
-  ablation|full)
+  ablation|full|azcode)
     check_stack
     VARIANT=$1
     REPS=${2:-2}
     for rep in $(seq 1 "$REPS"); do
-      for arm in polyserve slo fluidserve; do
-        SESSION_PREFIX="exp30r${rep}" run_cell "$arm" "$VARIANT" \
+      for arm in ${ARMS:-polyserve slo fluidserve}; do
+        SESSION_PREFIX="${SESSION_PREFIX_BASE:-exp30}r${rep}" run_cell "$arm" "$VARIANT" \
           || echo "[exp30] rep$rep $arm/$VARIANT FAILED"
       done
       echo "[exp30] REPEAT $rep DONE $(date -u +%H:%M)"

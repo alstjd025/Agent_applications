@@ -1,0 +1,74 @@
+{
+ "_comment": [
+  "The agent class restated for a policy with no end-to-end mode, exactly as mix_short_m1_slofair.json does for the static sweep: 2500 + 520.2*52 = 29,550 <= 30,000. Scoring is unaffected -- the analysis judges that class end to end whatever this says. Without it the SLO filter reads tbt_ms 25 literally, judges the agent class 2.3x tighter than FluidServe judges it, and rejects ~98% of it (EXP-28). SLO arm only: tbt_ms doubles as PolyServe's tier key.",
+  "EXP-30. One hour of Azure-shaped load with the mix cycling under it, on the",
+  "shortened agent transcript.",
+  "",
+  "Why this workload exists. Every result so far was measured at a fixed rate",
+  "with a fixed mix, and both baselines are well matched to that: PolyServe's",
+  "partition is recomputed every 10 s from an EWMA with alpha 0.5 and applied",
+  "after two consecutive agreeing windows, which tracks a mix that never moves",
+  "perfectly, and the SLO filter is per-request and has no notion of the mix at",
+  "all. Measured, the partition changes once or twice in an eight-minute",
+  "condition and every change is in the start-up transient. A stationary",
+  "workload therefore cannot separate a policy that adapts from one that does",
+  "not, because nothing has to be adapted to.",
+  "",
+  "What varies here, and what each part is for:",
+  "",
+  "  rate   25 to 75 req/s, quantile-mapped from four days of Azure conv+code",
+  "         minute counts starting at 06:00, compressed 720x. The range spans",
+  "         the whole region the fixed-rate sweep found: below 40 every policy",
+  "         holds, at 40 PolyServe's chat class collapses, near 60 the fleet is",
+  "         at its decode bound, and 75 is past it. A rate that moves is what",
+  "         exercises admission control, which is the mechanism neither",
+  "         baseline has -- PolyServe queues instead (549 preemptions in 8 min",
+  "         at a fixed 40 req/s, about 27% of two engines' time spent",
+  "         recomputing) and the Llumnix SLO arm rejects only when no instance",
+  "         passes its filter.",
+  "",
+  "  mix    m1 -> m2 -> m3 -> m1, fifteen minutes each, stated by input-token",
+  "         share against the shortened transcript. A mix that moves is what",
+  "         exercises the partition. This is an OPEN question rather than a",
+  "         confirmation: a 15-minute segment is far longer than PolyServe's",
+  "         ~30 s adaptation time, so the partition should track it, and the",
+  "         cost if any is confined to the transient at each of the three",
+  "         boundaries.",
+  "",
+  "The two are deliberately varied together in this file and separately in",
+  "mix_dyn08_short_mixcycle.json, which holds the rate flat at 40 req/s and",
+  "cycles the mix on two-minute segments. If the flat-rate run shows no",
+  "difference between the policies and this one does, the effect is the rate,",
+  "not the mix.",
+  "",
+  "The SLO block is unchanged from EXP-27 so attainment is scored on the same",
+  "rule as every run since 2026-07-27: chat 5 s / 50 ms, deep research 10 s /",
+  "100 ms, agent end-to-end 30 s (the analysis reads the agent class as an",
+  "end-to-end budget whatever ttft_ms and tbt_ms say here)."
+ ],
+ "class_plan_file": "/work/traces/dynamic/canonical/dyn60_short_m123.csv",
+ "chat_config": {
+  "num_conversations": 1000
+ },
+ "deepresearch_config": {},
+ "swe_config": {
+  "transcript_file": "/work/results/exp10_transcript/transcript_swe_short7k_mix1500.jsonl"
+ },
+ "slo": {
+  "chat": {
+   "ttft_ms": 5000,
+   "tbt_ms": 50,
+   "out_len": 386
+  },
+  "deepresearch": {
+   "ttft_ms": 10000,
+   "tbt_ms": 100,
+   "out_len": 275
+  },
+  "swe": {
+   "ttft_ms": 2500,
+   "tbt_ms": 52,
+   "out_len": 728
+  }
+ }
+}
