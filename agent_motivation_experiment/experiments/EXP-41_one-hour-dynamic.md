@@ -118,4 +118,173 @@ eight-minute condition.
 
 ## 5. Result — `azcode`
 
-(running, expected 16:45 KST 2026-07-31)
+(running, expected ~17:00 KST 2026-07-31)
+
+## 6. Two failure modes an eight-minute condition cannot produce
+
+Both were found by asking a question about the timeline rather than the whole-run
+mean, and neither appears anywhere in EXP-38 or EXP-40. They are at opposite
+ends of the hour and have nothing to do with each other.
+
+### 6.1 Minutes 50–56: the hold turns into a loss, and the arm difference goes negative
+
+This is the only stretch of the hour in which Llumnix SLO scores higher than
+FluidServe.
+
+| min | rate (req/s) | SLO | FluidServe | diff |
+|---|---|---|---|---|
+| 50 | 68.3 | 17.1 | 15.0 | −2.2 |
+| 51 | 72.7 | 17.3 | 14.8 | −2.5 |
+| 52 | 73.0 | 17.3 | 13.7 | **−3.6** |
+| 53 | 74.5 | 17.5 | 14.7 | −3.1 |
+| 54 | 73.0 | 17.3 | 14.2 | −3.1 |
+| 55 | 69.6 | 17.1 | 15.2 | −1.9 |
+| 56 | 58.8 | 17.9 | 17.6 | −0.4 |
+| 57 | 56.6 | 18.3 | **31.5** | +13.2 |
+
+**It is the only sustained extreme overload in the trace.** Counting stretches
+whose 30-second rate stays above 65 req/s: minute 6.5 for 1.0 min, minute 8.0
+for 2.5 min, minute 21.0 for 1.0 min, minute 36.0 for 1.0 min, and **minute 50.0
+for 6.0 min** (peak 77.1 req/s at 53.5). Measured SLO capacity is about 44
+req/s, so this is 1.6–1.7x capacity held for six minutes. The difference returns
+to +13.2 in the first minute the rate drops below 60.
+
+Decomposed over minutes 50–57 by what each class contributes to the offered
+score (attainment x that class's share of arrivals):
+
+| class | share | SLO att | FS att | SLO contrib | FS contrib | diff |
+|---|---|---|---|---|---|---|
+| chat | 76.9% | 0.0 | 1.5 | 0.0 | 1.2 | +1.2 |
+| deepresearch | 15.4% | 100.0 | 80.2 | 15.4 | 12.3 | **−3.1** |
+| swe | 7.7% | 25.7 | 18.5 | 2.0 | 1.4 | −0.6 |
+
+**The Llumnix SLO arm's 17.4 is arithmetic, not adaptation.** It rejects
+**100%** of chat (22,604 of 22,604) and **0%** of deep research, so it collects
+that class's 15.4 points in full and nothing else. Because the offered
+denominator counts a rejection as a violation, refusing a class costs exactly
+what that class could have contributed — which at 1.6x capacity is nothing that
+either policy can collect anyway.
+
+**Deep research is not failing on latency for FluidServe; it is being shed by
+FluidServe.** Of 4,517 arrivals it sheds 829 (18.4%), and of the 3,688 it admits
+only 64 (1.7%) miss a rule. The whole 3.1-point loss is its own admission
+decision. The mechanism is the hold:
+
+| | dr TTFT p50 | dr TTFT p90 | budget |
+|---|---|---|---|
+| Llumnix SLO | 0.45 s | 0.97 s | 10 s |
+| FluidServe | **8.91 s** | **9.59 s** | 10 s |
+
+`canWait` sets the hold deadline at `ttftSlo − prefillMs − placementDelayBound −
+recheckMs`, so FluidServe spends about nine of deep research's ten TTFT seconds
+waiting for an instance that can meet the deadline. At 1.6x capacity sustained
+for six minutes that instance never appears, so 18.4% reach the deadline with no
+feasible target and are shed, and the rest are dispatched with under a second of
+margin left. **This is the same hold that produces the advantage at 40–60 req/s**
+and that section 35 credited for the result being insensitive to the engine
+scheduler; past the capacity point it converts a class that would have passed on
+immediate dispatch into an 18.4% loss.
+
+Where the capacity went: FluidServe admits 3,965 chat requests (17.5% of chat
+arrivals) of which **91.2% fail, 3,546 of them on TBT** at an ITL p50 of 55.1 ms
+against a 50 ms budget. Those requests produce output that scores nothing.
+
+| | total output | goodput | share that scored |
+|---|---|---|---|
+| Llumnix SLO | 12,115 tok/s | **11,132** | 92% |
+| FluidServe | **13,747** | 9,035 | 66% |
+
+The engine is not the constraint and FluidServe is not producing a slower fleet:
+its decode batch is 797.6 against 772.5, its mean KV is 68.7% against 78.1%, and
+its ITL is 55 ms against 60 ms. It is spending a faster fleet on a class that
+cannot meet 50 ms at this load.
+
+**Leading explanation, not yet measured on this run.** Section 33 measured
+`gate_allowance_ms` at exactly 50.0 on all four instances at all times, because
+an instance's gate is the minimum `nominalMs` over the requests live on it and
+chat's budget is the smallest. The pace in this window is 55 ms. A deep research
+request therefore cannot ROUTE — it is judged against chat's 50 ms gate rather
+than its own 100 ms budget — falls through to PEND, and ends in a shed. Scraping
+`gate_allowance_ms` over minutes 50–56 is what would confirm it.
+
+Two fixes follow without needing class priorities, which remain future work:
+judge the gate against **the arriving request's own budget** rather than the
+instance minimum, so a class with large slack is not held behind a class with
+none; and **shorten the hold deadline when recent holds have been ending in
+sheds**, so the nine seconds are not spent before the request is discarded
+anyway.
+
+### 6.2 Minutes 6–16: FluidServe overloads one engine and pays 1,471 recomputes
+
+`exp41_engine_view.py`, two figures in `results/aggregate_analysis/exp41/`.
+EXP-38 and EXP-40 recorded **zero preemptions in every condition**; an hour of
+moving load is where they appear, and they appear on one engine of one arm.
+
+| arm | port | batch | KV mean | KV max | queue | preemptions | prefix hit |
+|---|---|---|---|---|---|---|---|
+| SLO | 8000 | 196 | 54.2 | 92 | 0.4 | 0 | 78.8% |
+| SLO | 8001 | 191 | 54.7 | 95 | 0.4 | 0 | 78.4% |
+| SLO | 8002 | 203 | 54.9 | 92 | 0.4 | 0 | 78.3% |
+| SLO | 8003 | 199 | 54.8 | 95 | 0.4 | 0 | 78.7% |
+| FS | 8000 | 183 | 41.4 | 82 | 0.4 | 0 | 79.8% |
+| FS | 8001 | 177 | 46.1 | 83 | 0.4 | 0 | 79.3% |
+| FS | 8002 | 231 | 35.7 | 87 | 0.6 | 0 | 81.1% |
+| **FS** | **8003** | **220** | **55.9** | **100** | **2.6** | **1,471** | 80.0% |
+
+Busiest-over-least-busy decode batch, averaged per window: **1.25x for the SLO
+arm, 2.70x for FluidServe.** The preemptions are confined to minutes 7–15 (149 /
+158 / 174 / 177 / 113 / 417 / — / 254 / 29), during which engine 8003's batch
+reaches 540, its KV touches 100%, and its engine queue reaches 27 while the
+other three stay at 0. vLLM V1 preempts by recompute, so each one discards a
+completed prefill and pays for it again, and no request-level metric attributes
+that cost to anything.
+
+Minutes 7–15 are the first peak, and they are where FluidServe's per-minute
+advantage is at its most erratic in the whole first half: +11.6 at minute 7 and
+**+1.4 at minute 9**, against +34 to +61 in the surrounding minutes. The two
+observations are consistent in time; attributing one to the other needs the
+repeat, since a single run cannot separate them from the peak itself.
+
+**The dispatch side** (`analysis/request_engine.csv`, every admitted request
+matched to the engine the scheduler dispatched it to, 100% of 103,801 and
+127,266 respectively):
+
+| arm | port | requests | attainment (admitted) | chat% | dr% | swe% | chat ITL |
+|---|---|---|---|---|---|---|---|
+| SLO | 8000 | 25,867 | 65.7 | 63.6 | 20.6 | 15.7 | 47.6 |
+| SLO | 8001 | 25,406 | 69.2 | 63.2 | 20.7 | 16.1 | 44.3 |
+| SLO | 8002 | 26,241 | 64.2 | 65.8 | 19.7 | 14.5 | 47.7 |
+| SLO | 8003 | 26,287 | 67.7 | 64.3 | 20.5 | 15.2 | 44.7 |
+| FS | 8000 | 31,149 | 84.1 | 79.9 | 12.3 | 7.8 | 43.6 |
+| FS | 8001 | 26,908 | 77.8 | 70.9 | 17.3 | 11.9 | 45.0 |
+| FS | 8002 | **45,118** | **91.7** | **93.0** | 5.1 | 1.9 | **41.2** |
+| FS | 8003 | 24,091 | 77.7 | 60.2 | **32.9** | 6.9 | 44.8 |
+
+The Llumnix SLO arm gives all four engines the same request count to within 3%
+and the same class mix to within 3 points, which is what a policy with no class
+concept produces. FluidServe does separate the classes without being asked to —
+engine 8002 receives 93.0% chat and 45,118 requests, engine 8003 receives 32.9%
+deep research — and its per-engine attainment tracks that separation, with the
+chat-concentrated engine scoring highest (91.7%) at the lowest chat ITL (41.2 ms).
+
+**The prefix cache hit rate does not read out this separation here**, contrary to
+what it did for PolyServe (94.5% on the chat engine against 66.7% on the agent
+engines). All eight engines report 78–81%. The separation is partial rather than
+a partition, and the three classes do not have disjoint enough prompt prefixes on
+this workload for a 93/60 split in class share to move the counter. **The
+engine-reported hit rate is therefore not a reliable read-out of routing on this
+workload; the dispatch log is.**
+
+### 6.3 What is measured and what is not
+
+- Both subsections are one run per arm. In 6.1 the −2.5-point crossing is inside
+  the repeat spread seen elsewhere (up to 4.2 points, 11.4 at the knee), so **the
+  crossing as a number is not established**; the mechanism is — an 18.4% versus
+  0% shed rate on deep research, and 91.2% failure among admitted chat, are far
+  outside any measured spread.
+- In 6.2 the preemption count, the imbalance, and the class shares are direct
+  counter readings, not estimates. The link from the preemption burst to the
+  narrowed advantage at minute 9 is temporal co-occurrence only.
+- The engine attainment column uses the **admitted** denominator and is not
+  comparable with the offered numbers in sections 3 and 6.1. A rejected request
+  is never dispatched, so it has no engine to be attributed to.
