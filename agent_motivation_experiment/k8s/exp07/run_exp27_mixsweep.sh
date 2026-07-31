@@ -94,6 +94,12 @@ set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
     # is its own experiment, EXP-43, run one change at a time.
     fsa)         policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=false ;;
     fsbase)      policy=fluidserve; export FS_FORCE_MARGIN=false FS_CLASS_HARM=false ;;
+    # EXP-43. Candidate A is in the baseline now, so both arms carry it and the
+    # single difference is the class term in the damage estimate. Its compiled
+    # default is true; it has been false in every deployment since 2026-07-28
+    # through a flag that stuck in the spec, so this is the first measurement of
+    # the policy as designed.
+    fsah)        policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=true ;;
     polyserve)   policy=polyserve ;;
     # Llumnix's own SLO-aware policy, as shipped apart from the neutral branch
     # that lets it run on a co-located fleet. It is NOT class-aware: --ttft-slo
