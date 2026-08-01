@@ -83,7 +83,14 @@ check_stack() {
 set_arm() {
   local policy
   case "$1" in
-    fluidserve)  policy=fluidserve ;;
+    # EXP-44. class-harm is pinned in BOTH arms rather than left unset, because
+    # set_scheduler_profiling.py now returns an unset ablation to its compiled
+    # default and this flag's default is true, while every FluidServe condition
+    # from EXP-27 pass 2 to EXP-43 ran with it false (implementation.md 38).
+    # Without pinning, the fluidserve arm would differ from EXP-41 in two ways
+    # instead of none.
+    fluidserve)  policy=fluidserve; export FS_FORCE_MARGIN=false FS_CLASS_HARM=false ;;
+    fsa)         policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=false ;;
     polyserve)   policy=polyserve ;;
     slo)         policy=slo ;;
     loadbalance) policy=load-balance ;;
