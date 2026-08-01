@@ -164,4 +164,75 @@ reason has to be found before any score is read, whatever the score says.
 
 ## 7. Result
 
-(to be filled in)
+### 7.1 Part 1: no difference at 60 req/s, and one bad repeat at 45
+
+| arm | rate | rep | offered | admitted | rej% | goodput | chat ITL | route% |
+|---|---|---|---|---|---|---|---|---|
+| fluidserve | 45 | 1 / 2 | 99.1 / 98.9 | 99.7 / 99.6 | 0.6 / 0.7 | 22,019 / 21,830 | 35.9 / 35.3 | 91.8 / 87.4 |
+| **fskv** | 45 | 1 / 2 | 98.2 / **87.8** | 99.6 / 97.5 | 1.4 / **9.8** | 21,734 / 19,970 | 34.2 / 42.9 | 72.4 / **12.5** |
+| fluidserve | 60 | 1 / 2 | 61.1 / 59.2 | 97.1 / 91.3 | 36.5 / 34.6 | 19,765 / 19,263 | 43.6 / 43.9 | 9.3 / 7.1 |
+| **fskv** | 60 | 1 / 2 | 58.6 / **61.4** | 87.5 / 90.4 | 32.6 / 31.5 | 18,829 / 19,524 | 44.6 / 43.8 | 5.6 / 6.1 |
+
+**At 60 req/s the two arms are the same**: 60.2 against 60.0 mean offered, with
+repeat spreads of 1.9 and 2.8. Rule 2 passes — there is no regression — but
+there is no gain either. At 45 req/s `fskv` has one repeat at 87.8 with a
+rejection rate of 9.8% and a route share that collapses from 72.4% to 12.5%,
+against a baseline that reads 99.1 and 98.9. One repeat, at the rate whose spread
+has always been about ten points, so it is recorded rather than read.
+
+### 7.2 Rule 0 is ambiguous on a static condition, and that is the rule's fault
+
+| | mean error | MAE | under |
+|---|---|---|---|
+| `fskv` 45 req/s, **deployed** | **+12,924** | 51,444 | **38.3%** |
+| `fskv` 60 req/s, **deployed** | **+15,903** | 37,157 | **31.8%** |
+| `fluidserve` 45 req/s, deployed | −42,974 | 68,410 | 72.2% |
+| `fluidserve` 60 req/s, deployed | −20,022 | 43,839 | 63.0% |
+
+The magnitude clause passes — both are inside ±20,000 — and the sign flips from
+under-predicting to over-predicting, which is the conservative direction. The
+centring clause fails: 38.3% and 31.8% against the required 40–60%.
+
+**The reason is that the rule cannot be read on a stationary load.** In a static
+condition the occupancy does not trend, so the expected change over a horizon is
+zero and the best unbiased predictor is the current occupancy — which is exactly
+what the scoring shows: `kv` alone reads +663 and +751 at 49.3–51.8%. Any drift
+term can then only add variance plus whatever short-term rise it happens to catch,
+and both the deployed slope and an offline reconstruction of it come out slightly
+positive. **Rule 0 has to be read on the hour, where the load does trend**, and
+that is part 2.
+
+**One candidate explanation was tested and refuted before being written down.**
+The deployed filter advances once per status interval and the offline
+reconstruction once per published sample, so the deployed one is about twice as
+fast; re-running the offline scoring at α = 0.2, 0.35 and 0.5 moves the
+under-prediction fraction by less than 2 points and moves the mean *down*, not
+up. Filter speed is not the difference.
+
+### 7.3 The counter answers a question four experiments had to infer
+
+`scheduler_fluidserve_infeasible_total{reason}`, as a share of all refusals
+(they can sum above 100 because two conditions can fail on the same candidate):
+
+| arm | rate | gate | incumbents | unpredictable | **memory** |
+|---|---|---|---|---|---|
+| fluidserve | 45 | 97.7 / 97.5 | 1.2 / 1.3 | 1.1 / 1.2 | **never** |
+| fskv | 45 | 97.8 / 89.6 | 1.5 / 10.4 | 0.7 / — | **never** |
+| fluidserve | 60 | 99.2 / 97.1 | 0.8 / 2.9 | — | **never** |
+| fskv | 60 | 89.3 / 90.4 | 10.7 / 9.6 | — | **never** |
+
+**`newKv <= capMem` did not refuse a single placement in any of the eight
+conditions.** The pace gate refuses 89–99% of them.
+
+This is the measurement rule 4 asked for, and it bears directly on this
+experiment: the projection enters `feasible` only through the memory condition
+and through `meanAfter`, and the memory condition never binds. That is why
+changing the projection changes the score by nothing at 60 req/s. Under `fskv`
+the `incumbents` term does rise from 0.8–2.9% to about 10%, because a higher
+projected occupancy raises the predicted pace, but the gate still dominates.
+
+**The caveat that keeps this from being the whole answer**: these are static
+conditions, where occupancy peaks near 1,088k against a memory capacity around
+2.3 M logical tokens, and no static condition has ever preempted. On the hour the
+same engines reach 100%. Whether `memory` binds there is measured in part 2, on a
+run that carries the counter.
