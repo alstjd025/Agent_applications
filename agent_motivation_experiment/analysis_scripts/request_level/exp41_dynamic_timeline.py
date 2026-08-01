@@ -58,7 +58,7 @@ ARMS = {"slo": ("Llumnix SLO", "#2ca02c", "--"),
         # Dashed, not solid. Panels E and F encode the CLASS in the colour and
         # the POLICY in the line style, so two solid arms make those panels
         # unreadable however different their colours are elsewhere.
-        "fsa": ("FluidServe + forced-placement margin", "#ff7f0e", "--")}
+        "fsa": ("FluidServe + forced-placement margin", "#ff7f0e", "-.")}
 WIN, STEP = 90.0, 30.0
 
 
@@ -106,13 +106,20 @@ def main():
     ap.add_argument("--variant", default="full")
     ap.add_argument("--pattern", default="results/*exp41r1_{arm}_{variant}")
     ap.add_argument("--title", default="EXP-41")
+    # An aborted run leaves a directory whose name differs from the live one
+    # only by its timestamp, and the arm glob matches both. sorted()[-1] picks
+    # the later one, which is right by accident when the abort came first and
+    # wrong when it did not, so the exclusion is stated instead of relied on.
+    ap.add_argument("--exclude", nargs="*", default=[],
+                    help="substrings; any run directory containing one is dropped")
     ap.add_argument("--out-dir", required=True)
     a = ap.parse_args()
     os.makedirs(a.out_dir, exist_ok=True)
 
     runs = {}
     for arm in ARMS:
-        hits = glob.glob(a.pattern.format(arm=arm, variant=a.variant))
+        hits = [h for h in glob.glob(a.pattern.format(arm=arm, variant=a.variant))
+                if not any(x in h for x in a.exclude)]
         if hits:
             runs[arm] = sorted(hits)[-1]
     if not runs:
@@ -163,7 +170,7 @@ def main():
                 ax[7].plot(eng[0], eng[1], color=c, ls=ls, label=f"{lab} batch")
                 ax[7].plot(eng[0], eng[2] * 20, color=c, ls=":", lw=0.8, alpha=0.6)
 
-        titles = ["A. offered rate (30 s bins) — both arms see the same trace",
+        titles = [f"A. offered rate (30 s bins) — all {len(data)} arms see the same trace",
                   "B. rejection rate — what separates C from D",
                   f"C. attainment, OFFERED denominator: rejection counts as a "
                   f"violation ({WIN:.0f} s window)",
@@ -204,8 +211,12 @@ def main():
         # The arms present decide the title: this script now serves EXP-41
         # (two control planes) and EXP-44 (one control plane, one flag).
         who = " vs ".join(ARMS[k][0] for k in data)
-        fig.suptitle(f"{a.title} {a.variant} — one hour of moving load, "
-                     f"{who}, stock FIFO (one run each)", fontsize=9, y=1.01)
+        # Name the session each arm came from. Arms in different sessions is
+        # allowed (CLAUDE.md, 2026-08-01) but a reader has to be told, because
+        # the spread to judge a difference against depends on it.
+        src = ", ".join(f"{ARMS[k][0]}: {os.path.basename(runs[k])}" for k in data)
+        fig.suptitle(f"{a.title} {a.variant} — one hour of moving load, {who}, "
+                     f"stock FIFO (one run each)\n{src}", fontsize=8.5, y=1.02)
         fig.tight_layout()
         p = os.path.join(a.out_dir, f"{a.title.lower().replace('-','')}_"
                          f"{a.variant}_timeline.png")

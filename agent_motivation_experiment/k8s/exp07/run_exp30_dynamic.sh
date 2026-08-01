@@ -90,7 +90,8 @@ set_arm() {
     # Without pinning, the fluidserve arm would differ from EXP-41 in two ways
     # instead of none.
     fluidserve)  policy=fluidserve; export FS_FORCE_MARGIN=false FS_CLASS_HARM=false ;;
-    fsa)         policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=false ;;
+    fsa)         policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false ;;
+    fsac)        policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=true ;;
     polyserve)   policy=polyserve ;;
     slo)         policy=slo ;;
     loadbalance) policy=load-balance ;;

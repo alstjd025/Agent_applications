@@ -92,7 +92,7 @@ set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
     # baseline that silently differs from EXP-38 would make this comparison
     # incomparable with everything it is being read against. Turning it back on
     # is its own experiment, EXP-43, run one change at a time.
-    fsa)         policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=false ;;
+    fsa)         policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false ;;
     fsbase)      policy=fluidserve; export FS_FORCE_MARGIN=false FS_CLASS_HARM=false ;;
     # EXP-43. Candidate A is in the baseline now, so both arms carry it and the
     # single difference is the class term in the damage estimate. Its compiled
@@ -100,6 +100,10 @@ set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
     # through a flag that stuck in the spec, so this is the first measurement of
     # the policy as designed.
     fsah)        policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=true ;;
+    # EXP-46. Candidate A is in both arms; the single difference is C, which
+    # judges an arriving request's pace against its own class budget instead of
+    # the tightest nominal budget on the instance.
+    fsac)        policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=true ;;
     polyserve)   policy=polyserve ;;
     # Llumnix's own SLO-aware policy, as shipped apart from the neutral branch
     # that lets it run on a co-located fleet. It is NOT class-aware: --ttft-slo
