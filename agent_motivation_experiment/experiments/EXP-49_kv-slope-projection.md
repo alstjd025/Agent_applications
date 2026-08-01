@@ -236,3 +236,83 @@ conditions, where occupancy peaks near 1,088k against a memory capacity around
 2.3 M logical tokens, and no static condition has ever preempted. On the hour the
 same engines reach 100%. Whether `memory` binds there is measured in part 2, on a
 run that carries the counter.
+
+### 7.4 Part 2, the hour: H2 removes a third of the preemptions and loses on everything else
+
+| whole hour | offered | admitted | rej% | goodput | total tok/s | chat / dr / swe | preemptions |
+|---|---|---|---|---|---|---|---|
+| EXP-48 `fluidserve` | 70.2 | 95.7 | 26.6 | 17,998 | 18,909 | 73.3 / 81.9 / 32.3 | 2,776 |
+| **EXP-49 `fluidserve`** | 69.9 | 95.7 | 27.0 | 18,031 | 18,904 | 72.8 / 82.9 / 31.5 | **2,724** |
+| **EXP-49 `fskv` (H2)** | **67.5** | **92.3** | 26.9 | **17,413** | 18,812 | 70.2 / 80.1 / 31.4 | **1,748** |
+
+**The baseline reproduces EXP-48 across sessions to within 0.3 points offered,
+0.0 admitted and 52 preemptions**, which is what makes the difference below
+attributable to the flag.
+
+H2 takes preemptions from 2,724 to 1,748, a fall of 36%, and pays 2.4 points of
+offered attainment, 3.4 of admitted and 3.4% of token goodput. Every segment is
+slightly worse: 74.1 → 71.8, 93.1 → 91.2, 68.1 → 64.4, 48.8 → 47.2.
+
+### 7.5 Against the pre-registered rules
+
+**Rule 0 — the projection is genuinely fixed, and that is the point.** On a
+trending load, where the rule can be read:
+
+| deployed projection, `full` hour | mean error | MAE | under |
+|---|---|---|---|
+| `fluidserve` | −26,841 | 38,451 | 70.9% |
+| **`fskv`** | **+13,341** | **27,726** | 28.8% |
+
+The mean error moves inside the ±20,000 bound and the absolute error falls 28%.
+The centring clause still fails, at 28.8% against 40–60%, and in the conservative
+direction: extrapolating a measured rise over a 4.4 s horizon over-shoots when
+the rise is transient. **The change does to the projection roughly what it
+claimed it would.**
+
+1. **Preemptions below 500: FAIL.** 1,748.
+2. **No static regression: PASS.** 60.0 against 60.2 at 60 req/s.
+3. **Rejection rising without offered rising: not triggered** — rejection is flat
+   at 26.9 against 27.0 and offered is lower, so this is a straight loss rather
+   than a shedding artefact.
+4. **The refutation clause fires.** Rule 4 said: if the projection is fixed and
+   the outcome does not improve, the projection was never what limited admission.
+   That is what happened, and the counter now says what does limit it.
+
+### 7.6 The counter on the hour, and a correction to §7.3
+
+§7.3 recorded that `newKv <= capMem` never refused a placement. **That was true of
+the static conditions and does not generalise.** Over the hour, as a share of all
+refusal-condition events:
+
+| | gate | memory | incumbents | unpredictable |
+|---|---|---|---|---|
+| `fluidserve` | **90.8%** | **7.2%** | 2.0% | 0.0% |
+| `fskv` | 82.3% | 7.8% | 9.9% | 0.0% |
+
+Memory does bind on the trace where engines reach 100% KV — it simply never binds
+where they peak near half of capacity. The correction does not change the
+conclusion: **the pace gate refuses nine placements in ten**, and the projection
+reaches the decision mainly through a condition responsible for 7%.
+
+## 8. Verdict
+
+**Rejected.** H2 is not withdrawn as a description — it fixes the projection, and
+that fix is measured on the run itself rather than offline — but it costs 2.4
+points of offered attainment and 3.4% of goodput to remove a third of the
+preemptions, and rule 1 asked for the preemptions to be removed, not thinned.
+
+**What it establishes is worth more than what it cost.** Two things are now
+measured that four experiments had been inferring:
+
+- **The projection is not what limits admission.** §47.3 diagnosed the failure as
+  a stock condition (`newKv <= capMem`) being used to control a flow. That
+  condition accounts for 7.2% of refusals. The diagnosis was aimed at a term that
+  is not the binding one.
+- **The pace gate is.** 90.8%. And the one proposal on the table that changes it
+  is candidate C, which was measured as the largest static gain ever recorded and
+  rejected for a preemption count produced on a length profile now known to be
+  wrong about the class C exists to admit.
+
+**EXP-50 re-tests candidate C on the corrected profile.** The flag stays off in
+the code.
+
