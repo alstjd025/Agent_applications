@@ -48,8 +48,14 @@ from exp22_fluidserve import (  # noqa: E402
     PAPER_STYLE, CLASSES, CLASS_COLORS, load_run, attain,
 )
 
+# One entry per arm that may appear. An arm whose glob matches nothing is
+# skipped, so the same dict serves EXP-41 (slo vs fluidserve) and EXP-44
+# (fluidserve vs fluidserve+A). Colours are the fixed policy ones where a fixed
+# policy is meant; the candidate-A variant takes the same colour it has in
+# exp42_figures.py so it means the same thing across experiments.
 ARMS = {"slo": ("Llumnix SLO", "#2ca02c", "--"),
-        "fluidserve": ("FluidServe", "#1f77b4", "-")}
+        "fluidserve": ("FluidServe", "#1f77b4", "-"),
+        "fsa": ("FluidServe + forced-placement margin", "#ff7f0e", "-")}
 WIN, STEP = 90.0, 30.0
 
 
@@ -96,6 +102,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--variant", default="full")
     ap.add_argument("--pattern", default="results/*exp41r1_{arm}_{variant}")
+    ap.add_argument("--title", default="EXP-41")
     ap.add_argument("--out-dir", required=True)
     a = ap.parse_args()
     os.makedirs(a.out_dir, exist_ok=True)
@@ -191,10 +198,14 @@ def main():
                     ax[i].axvline(m, color="#999999", lw=0.5, ls=":")
             ax[0].annotate("mix m1 | m2 | m3 | m1", (0.5, 0.92), xycoords="axes fraction",
                            ha="center", fontsize=6.5, color="#666666")
-        fig.suptitle(f"EXP-41 {a.variant} — one hour of moving load, two control planes, "
-                     f"both on stock FIFO (one run each)", fontsize=9, y=1.01)
+        # The arms present decide the title: this script now serves EXP-41
+        # (two control planes) and EXP-44 (one control plane, one flag).
+        who = " vs ".join(ARMS[k][0] for k in data)
+        fig.suptitle(f"{a.title} {a.variant} — one hour of moving load, "
+                     f"{who}, stock FIFO (one run each)", fontsize=9, y=1.01)
         fig.tight_layout()
-        p = os.path.join(a.out_dir, f"exp41_{a.variant}_timeline.png")
+        p = os.path.join(a.out_dir, f"{a.title.lower().replace('-','')}_"
+                         f"{a.variant}_timeline.png")
         fig.savefig(p, dpi=300, bbox_inches="tight")
         plt.close(fig)
         print(f"wrote {p}")

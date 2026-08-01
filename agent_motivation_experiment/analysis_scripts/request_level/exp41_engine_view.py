@@ -51,7 +51,9 @@ from exp22_fluidserve import (  # noqa: E402
     PAPER_STYLE, CLASSES, CLASS_COLORS, load_run, attain,
 )
 
-ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe"}
+# Same dict for EXP-41 and EXP-44; an arm whose glob matches nothing is skipped.
+ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe",
+        "fsa": "FluidServe + margin"}
 # One colour per engine, held across every panel and both figures.
 ENG_C = {8000: "#1f77b4", 8001: "#ff7f0e", 8002: "#2ca02c", 8003: "#d62728"}
 WIN = 60.0  # seconds per point on the engine series
@@ -116,7 +118,7 @@ def engine_series(run):
     return out
 
 
-def fig_timeline(data, eng, variant, out_dir):
+def fig_timeline(data, eng, variant, out_dir, exp_title="EXP-41"):
     rows = [
         ("A", "run", "decode batch per engine", "requests", None),
         ("B", "kv", "KV occupancy per engine", "KV (%)", (0, 105)),
@@ -162,11 +164,11 @@ def fig_timeline(data, eng, variant, out_dir):
         h = [plt.Line2D([], [], color=ENG_C[p], lw=1.2) for p in sorted(ENG_C)]
         ax[0][0].legend(h, [f"engine {p}" for p in sorted(ENG_C)],
                         fontsize=6.2, ncol=4, loc="lower left")
-        fig.suptitle(f"EXP-41 {variant} — the four engines over the hour, "
+        fig.suptitle(f"{exp_title} {variant} — the four engines over the hour, "
                      f"{WIN:.0f} s windows (dotted on row B is the window maximum)",
                      fontsize=9, y=1.005)
         fig.tight_layout()
-        p = os.path.join(out_dir, f"exp41_{variant}_engine_timeline.png")
+        p = os.path.join(out_dir, f"{exp_title.lower().replace(chr(45),'')}_{variant}_engine_timeline.png")
         fig.savefig(p, dpi=300, bbox_inches="tight")
         plt.close(fig)
         print(f"wrote {p}")
@@ -204,7 +206,7 @@ def attribute_engines(run, r):
     return j[j["engine_port"].notna()], len(left)
 
 
-def fig_requests(data, runs, variant, out_dir):
+def fig_requests(data, runs, variant, out_dir, exp_title="EXP-41"):
     """The dispatch side: how many went where, and how they fared there."""
     per = {}
     for arm, r in data.items():
@@ -282,10 +284,10 @@ def fig_requests(data, runs, variant, out_dir):
         hc = [plt.Rectangle((0, 0), 1, 1, fc=CLASS_COLORS[c]) for c in CLASSES]
         ax[2].legend(hc, list(CLASSES), fontsize=6.5, ncol=3, loc="upper center",
                      bbox_to_anchor=(0.5, -0.20))
-        fig.suptitle(f"EXP-41 {variant} — the dispatch side: faded bars are "
+        fig.suptitle(f"{exp_title} {variant} — the dispatch side: faded bars are "
                      f"{ARMS[arms[0]]}, solid are {ARMS[arms[-1]]}", fontsize=9, y=1.04)
         fig.tight_layout()
-        p = os.path.join(out_dir, f"exp41_{variant}_engine_requests.png")
+        p = os.path.join(out_dir, f"{exp_title.lower().replace(chr(45),'')}_{variant}_engine_requests.png")
         fig.savefig(p, dpi=300, bbox_inches="tight")
         plt.close(fig)
         print(f"wrote {p}")
@@ -295,6 +297,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--variant", default="full")
     ap.add_argument("--pattern", default="results/*exp41r1_{arm}_{variant}")
+    ap.add_argument("--title", default="EXP-41")
     ap.add_argument("--out-dir", required=True)
     a = ap.parse_args()
     os.makedirs(a.out_dir, exist_ok=True)
@@ -323,8 +326,8 @@ def main():
         print(f"{'':>11} {'imbalance busiest/least, per window, mean':>52} "
               f"{(b.max(axis=1) / b.min(axis=1).replace(0, np.nan)).mean():>6.2f}x")
 
-    fig_timeline(data, eng, a.variant, a.out_dir)
-    fig_requests(data, runs, a.variant, a.out_dir)
+    fig_timeline(data, eng, a.variant, a.out_dir, a.title)
+    fig_requests(data, runs, a.variant, a.out_dir, a.title)
 
 
 if __name__ == "__main__":
