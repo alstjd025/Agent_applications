@@ -115,6 +115,63 @@ A result that passes 1 and 4 but fails 3 is the informative failure: it would
 mean the instance-minimum gate was doing real work for chat and the redundancy
 argument in §1 is wrong.
 
-## 5. Result
+## 5. Part 1 — the static gate, passed by a wide margin
 
-(to be filled in)
+Finished 2026-08-01 19:41 KST. Eight conditions, two repeats of each arm at each
+rate, all healthy: 4/4 engines, rate within 0.2% of target, no flags.
+
+| rate | arm | offered | chat | dr | swe | rej% | goodput | route% | dr shed | chat ITL | preempt |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 45 | fsa | 95.9 | 96.3 | 100.0 | 84.5 | 3.2 | 21,476 | 65.2 | 0.0 | 37.0 | 0 |
+| 45 | **fsac** | **99.6** | **99.9** | 97.8 | **100.0** | **0.0** | 21,840 | **99.9** | 0.0 | **32.2** | 0 |
+| 60 | fsa | 48.7 | 40.8 | 92.9 | 43.9 | 47.1 | 16,895 | 6.3 | 6.3 | 45.2 | 0 |
+| 60 | **fsac** | **72.4** | **66.5** | **99.9** | **82.2** | **24.8** | **22,334** | **22.7** | **0.0** | **40.6** | **112** |
+
+**+23.7 points at 60 req/s**, larger than candidate A's +13.1, with all three
+classes rising: chat 40.8 → 66.5, deep research 92.9 → 99.9, swe 43.9 → 82.2.
+Token goodput 16,895 → 22,334, which is **higher than the 21,840 this arm
+produces at 45 req/s** and higher than any figure recorded in this project at
+any rate.
+
+### Two things came out opposite to what was written down
+
+**Chat improved rather than degraded.** §4 named condition 3 as the one most
+likely to fail, on the grounds that `tightestAllowance` excludes incumbents
+already past their budgets so deep research could land on instances full of
+failing chat. Chat went 40.8 → 66.5 instead.
+
+The mechanism is the rejection rate: 47.1% → 24.8%. Once deep research can route,
+the requests that were being held at the gateway for 8.85 s each leave
+immediately — `route` rises 6.3% → 22.7% and deep research's shed rate goes
+6.3% → 0.0%. **Holding deep research was costing chat as well**: chat's median
+inter-token latency falls 45.2 → 40.6 ms. That is not what the redundancy
+argument in §1 predicted; it predicted no effect on chat.
+
+**The bimodality at 45 req/s disappeared.** `fsa` split into its two operating
+states again — route 93.2% scoring 99.1 and route 37.2% scoring 92.7 — while
+`fsac` read 99.9% routing in both repeats, for 99.3 and 99.9. Candidate A did
+not remove that split (EXP-42 §4 saw both repeats in the routing regime, but
+EXP-46's `fsa` shows it can still fall out). Two repeats, so this is not
+established.
+
+### The one thing that got worse
+
+**Preemptions at a static rate, for the first time since EXP-38.** `fsac` at 60
+req/s recorded 20 and 92 across its two repeats; every static condition of
+EXP-38, EXP-40, EXP-42 and EXP-43 recorded zero, and so does `fsa` here.
+
+112 is far below the 500 at which §4 says to reject, and far below the
+1,471–1,852 that EXP-41, EXP-44 and EXP-45 recorded on the dynamic trace. But it
+is the signal §4 said to watch for: **deep research is collecting on an engine
+again**, which is the mechanism whose cause has been open since §40. Recorded as
+a result, not as noise.
+
+### Against the pre-registered conditions
+
+1. **PASS** — deep research shed 6.3% → 0.0%, routing 6.3% → 22.7%.
+2. **PASS** — no regression at either static rate; both improved.
+3. **PASS**, and opposite to the stated expectation — chat 40.8 → 66.5.
+4. Part 2.
+5. **Recorded**: 0 → 112. Below the rejection threshold, above zero.
+
+Part 2 proceeds.
