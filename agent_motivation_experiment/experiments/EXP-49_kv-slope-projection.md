@@ -45,22 +45,48 @@ them, and at a mix-weighted footprint of some 1,732 logical tokens that is
 **about 83,000 tokens** the projection does not contain.
 
 **Measured (§48.2).** Pairing each published `projected_kv_tokens` with the
-occupancy the same engine reported one horizon later:
+occupancy the same engine reported one horizon later.
+
+**These numbers are restated on the corrected length profile, 2026-08-02 01:50
+KST.** The first version of this section quoted the scoring done on runs with
+the 2026-07-26 profile, where the shipped projection read a mean error of
+−101,633 and an absolute error 3.6 times that of making no projection at all.
+**Most of that was the stale profile, not the missing arrival term**, and
+quoting it here would have overstated what this change has left to fix.
 
 | run | predictor | mean error | MAE | under |
 |---|---|---|---|---|
-| `full` hour, 14,676 pairs | occupancy only | +537 | 29,380 | 51.4% |
-| | **shipped** | **−101,633** | 106,416 | **88.5%** |
-| | **slope (this change)** | **+1,393** | **29,106** | 50.3% |
-| static 60 req/s, 2,160 pairs | occupancy only | +1,730 | 35,841 | 49.7% |
-| | **shipped** | **−103,411** | 112,358 | **87.0%** |
-| | **slope** | +5,491 | 38,073 | 46.8% |
+| 45 req/s, **07-26 profile** | shipped | −84,826 | 91,809 | 84.3% |
+| 45 req/s, **corrected** (`exp48r1`) | occupancy only | −433 | **38,181** | 54.5% |
+| | shipped | **−24,350** | 44,660 | **69.9%** |
+| | slope (this change) | +2,933 | 39,545 | 51.4% |
+| 60 req/s, **07-26 profile** | shipped | −103,411 | 112,358 | 87.0% |
+| 60 req/s, **corrected** (`exp48r1`) | occupancy only | +2,517 | **43,767** | 54.0% |
+| | shipped | **−14,410** | 46,362 | **66.0%** |
+| | slope (this change) | +6,251 | 44,500 | 51.3% |
 
-The shipped projection is worse than making no projection at all, and its error
-is one-sided, so it does not average out over many decisions. The slope
-projection is unbiased and has about a third of the absolute error. On the run
-where the engines were driven hardest (`fsac`, 6,583 preemptions) it is also
-better than making no projection: MAE 38,767 against 43,756.
+What survives the profile correction, and what does not:
+
+- **The bias is still one-sided and still there.** 69.9% and 66.0% against the
+  50% an unbiased projection gives, with a mean error of −24,350 and −14,410.
+  That is the arrival term, and the slope projection removes it: +2,933 and
+  +6,251, 51.4% and 51.3%.
+- **The size no longer justifies the change on its own.** On the corrected
+  profile the three predictors are within about 15% of each other in absolute
+  error, and at 60 req/s making no projection at all is the most accurate of
+  them (43,767 against the slope's 44,500). A residual bias of 14,000-24,000
+  tokens on a memory capacity near 2.3 M logical tokens is about 1%.
+
+**So the case for this change now rests on where the bias is, not on its
+average size** — §48.2's per-occupancy table shows it concentrated on the
+engines closest to their limit, which is where preemption happens. **EXP-48
+part 2 measures exactly that**, and if the corrected profile alone takes
+preemptions on the `full` hour to near zero, this experiment has little left to
+fix and the next change should be re-applying candidate C instead, which was the
+largest static gain on record (+23.7) and was rejected only on preemptions.
+
+**This experiment is therefore conditional on EXP-48 part 2** and is not
+launched before it is read.
 
 ## 3. Why this is not the offered-rate projection that was removed in v19
 

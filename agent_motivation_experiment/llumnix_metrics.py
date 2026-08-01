@@ -99,6 +99,10 @@ SCHEDULER_METRICS = {
     # to be able to answer afterwards is why each request went where it did, so
     # the per-instance state at decision time is exported.
     "scheduler_fluidserve_decisions_total",       # route / pend / shed / force
+    # EXP-49. Which of the four conditions in `feasible` refused a placement --
+    # unpredictable / gate / incumbents / memory -- counted separately per
+    # condition, so two failing on the same candidate is visible as such.
+    "scheduler_fluidserve_infeasible_total",
     "scheduler_fluidserve_headroom_tokens",       # per instance
     "scheduler_fluidserve_cap_kv_tokens",         # latency-imposed capacity
     "scheduler_fluidserve_projected_kv_tokens",

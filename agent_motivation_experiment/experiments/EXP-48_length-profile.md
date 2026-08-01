@@ -188,4 +188,88 @@ preemptions**.
 
 ## 6. Result
 
-(to be filled in)
+### 6.1 The mechanism is confirmed, and the size was predicted correctly
+
+Written 2026-08-02 01:20 KST, while part 1's second rate is still running. This
+compares two runs of the **same binary at the same rate** where the profile is
+the only difference, so nothing else can account for it.
+
+| 45 req/s, `shipped` projection scored against the occupancy one horizon later | 07-26 profile | corrected profile |
+|---|---|---|
+| run | `260801_0706_exp47r1` | `260801_0857_exp48r1` |
+| mean error | −84,826 | **−24,350** |
+| mean absolute error | 91,809 | **44,660** |
+| under-predicting | 84.3% | **69.9%** |
+| bias on the fullest fifth of samples | −19.1% of the actual value | **−5.8%** |
+
+**71% of the bias is gone and the absolute error is halved.** §48.3 predicted the
+release term would fall by about 59% and therefore leave a residual near −30,000
+at this rate; the measurement is −24,350, and that number was written before the
+run.
+
+The residual is what §48.4 attributes to the missing arrival term, and it is
+still one-sided — 69.9% rather than the 50% an unbiased projection would give.
+
+**One consequence for EXP-49 that has to be said before it runs.** The
+alternative projection's advantage was scored on runs with the *old* profile,
+where it beat the shipped one by a factor of 3.5 in absolute error. On the
+corrected profile at this rate the three predictors are much closer: shipped
+44,660, observed slope 39,545, current occupancy alone 38,181. **EXP-49's premise
+section quotes the old-profile numbers and overstates the remaining gap**; it is
+corrected there before that experiment is launched.
+
+### 6.2 Part 1 at 60 req/s: the correction is worth about twenty points
+
+Repeat 1, and the gate is passed by a wide margin in the direction opposite to
+the one the gate was written to catch.
+
+| 60 req/s, arm `fluidserve` | offered | admitted | rej% | goodput | chat ITL | route% |
+|---|---|---|---|---|---|---|
+| EXP-38, old profile | 35.2 | — | — | 12,359 | 49.9 | — |
+| EXP-42 `fsbase`, old profile | 36.1 | 55.5 | 35.0 | 12,638 | 49.7 | 1.7 |
+| EXP-47 rep 1, old profile, **this binary** | 38.3 | 60.0 | 35.5 | 13,250 | 49.0 | 1.8 |
+| EXP-47 rep 2, old profile, **this binary** | 36.8 | 58.6 | 36.4 | 13,024 | 49.6 | 1.7 |
+| **EXP-48 rep 1, corrected profile** | **56.9** | **86.0** | **33.4** | **18,636** | **44.3** | **6.2** |
+
+**Four measurements with the 07-26 profile read 35.2, 36.1, 38.3 and 36.8 — mean
+36.6, spread 3.1. The corrected profile reads 56.9.** Token goodput rises 43%
+over the same binary's own two runs, chat's median inter-token latency falls 5.0
+ms, and the rejection rate does not rise, so this is not the failure mode of
+§33.3 where a policy scores better only by refusing more.
+
+Per class, offered denominator, against EXP-47's two runs on the same binary:
+chat **29.9 → 55.1**, deep research **82.8 → 85.0**, swe **28.7 → 21.9**. Almost
+all of it is chat.
+
+**The binary is the same as EXP-47's** (`809b823b`), which is the comparison that
+matters: EXP-42's `fsbase` used `d24861df`, and while the difference between the
+two is candidate C behind a flag that is off plus the placement probe, "should
+change nothing" is a weaker statement than "did not change". EXP-47's arm differs
+in one other way — it ran `classharm=true` where this pins false — but EXP-42's
+`fsbase` had `classharm=false` and read 36.1, so all four old-profile numbers
+agree across both settings of that flag and it is not what moved.
+
+**One repeat.** Repeat 2 is the confirmation and is running.
+
+At 45 req/s: 91.1, against EXP-47's 88.9 and 99.6 and EXP-42's 99.1 and 88.9.
+That rate has a repeat spread of over 10 points and nothing is readable there,
+which is why it was not gated.
+
+Preemptions are zero at both static rates and peak KV occupancy is 58%, as on
+every static condition ever run. **The preemption question belongs to part 2.**
+
+### 6.3 Repeat 2 was lost to an engine that did not restart, and is re-run
+
+The first attempt at repeat 2 produced no data. `llumnix_deploy.restart_llumnix`
+cold-restarts the engine pod before each condition, and engine 8002 did not
+report serving within its 1200 s deadline while the other three did — its API
+server never printed `Application startup complete`. The runner exited before
+generating any load, so **no result directory was written and there is nothing to
+exclude.**
+
+The failure cost time in a way worth fixing rather than only noting: the sweep
+driver waited with `kubectl wait --for=condition=complete`, which **never returns
+on a job that reaches condition Failed** — it sits until its own `--timeout`,
+five hours here. Both drivers now poll for either terminal condition (`wait_job`)
+and return non-zero on Failed, so a dead condition ends the wait instead of
+holding the chain open.
