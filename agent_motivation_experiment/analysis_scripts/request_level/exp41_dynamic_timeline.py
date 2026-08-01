@@ -53,7 +53,7 @@ from exp22_fluidserve import (  # noqa: E402
 # (fluidserve vs fluidserve+A). Colours are the fixed policy ones where a fixed
 # policy is meant; the candidate-A variant takes the same colour it has in
 # exp42_figures.py so it means the same thing across experiments.
-ARMS = {"slo": ("Llumnix SLO", "#2ca02c", "--"),
+ARMS = {"slo": ("Llumnix SLO", "#2ca02c", ":"),
         "fluidserve": ("FluidServe", "#1f77b4", "-"),
         # Dashed, not solid. Panels E and F encode the CLASS in the colour and
         # the POLICY in the line style, so two solid arms make those panels

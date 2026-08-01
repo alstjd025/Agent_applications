@@ -108,10 +108,24 @@ from exp27_figures import collect, rps, ARM_C, ARM_L  # noqa: E402
 #   - the baseline is one run, so its markers have no bars. A point with no bar
 #     beside points with bars reads as the more precise measurement, which is
 #     the opposite of the truth.
-#   - it is a cross-session comparison. Measured on PolyServe, whose code did not
-#     change across these passes, the session-to-session movement is 0.1 points
-#     of attainment at 20 req/s and 4.6 points at 80 req/s, so differences of
-#     that size at the high rates are not resolvable here.
+#   - it is a cross-session comparison, and the size of that movement is not
+#     currently known under the corrected scoring below. The figure it was
+#     measured on (0.1 points at 20 req/s, 4.6 at 80, from five PolyServe runs
+#     whose code never changed) was computed before the inter-token correction
+#     and has not been recomputed.
+#
+# SCORING. Attainment here uses the CORRECTED inter-token latency, derived as
+# (e2e - ttft) / (output_tokens - 1) by `exp22_fluidserve.mean_inter_token_ms`.
+# The recorded `tbt_mean_ms` column is about half the true value on every run
+# collected before 2026-07-30, so these same runs scored very differently before
+# that correction landed: FluidServe at 80 req/s read 87.0% admitted then and
+# 48.1% now, and the Llumnix baseline at 60 req/s read 93.7% then and 28.6% now.
+# Any figure or table of these runs quoted from before 2026-07-30 is on the
+# uncorrected basis. FS_LEGACY_TBT=1 reproduces it.
+#
+# The n=2 spread is NOT uniformly small. It is under 0.5 points at 20-60 req/s
+# on every arm, and 16.1 points on FluidServe at 80 req/s (40.1 vs 56.2), which
+# is why that point carries a visible bar and no claim should rest on it.
 RUNS = ["results/*exp27p3*", "results/*exp27p5*"]
 
 COL_W = 3.335   # USENIX single column, inches. See the sizing note above.
@@ -151,9 +165,10 @@ XLABEL = "Offered rate (request/s)"
 def agg(df, arm):
     """Per-rate mean and min/max over the repeats of one arm.
 
-    Two repeats per condition, so the bars span the two observations rather
-    than estimating a confidence interval; they are the observed spread and
-    should be described that way in the caption.
+    Two repeats per condition for PolyServe and FluidServe, one for the
+    baseline, so the bars span the observations rather than estimating a
+    confidence interval; they are the observed spread and should be described
+    that way in the caption.
     """
     return df[df.arm == arm].groupby("rpm").agg(
         sloA=("attain", "mean"), sloALo=("attain", "min"), sloAHi=("attain", "max"),

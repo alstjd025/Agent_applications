@@ -119,11 +119,24 @@ SCHEDULER_METRICS = {
     # minute and §41 measured 50.4% of 500 ms steps carrying more than one
     # placement; §42 could not settle it from a 1 Hz gauge because the quantity
     # is per DECISION, not per scrape.
-    "scheduler_fluidserve_dispatch_ordinal_in_step",  # how many placements one step carried
-    "scheduler_fluidserve_headroom_move_in_step",     # change in the headroom the
-                                                      # decision read, 2nd placement on.
-                                                      # ZERO is the defect: the same
-                                                      # capacity offered twice.
+    # A histogram is exposed under THREE names -- _sum, _count and _bucket -- and
+    # this allowlist matches exactly (`if name not in wanted`), so listing the
+    # base name collects nothing. Every other histogram family here is listed as
+    # an explicit _sum/_count pair for that reason; these were added as base
+    # names on 2026-08-01 and the first EXP-47 run collected neither.
+    "scheduler_fluidserve_dispatch_ordinal_in_step_sum",
+    "scheduler_fluidserve_dispatch_ordinal_in_step_count",
+    "scheduler_fluidserve_headroom_move_in_step_sum",
+    "scheduler_fluidserve_headroom_move_in_step_count",
+    # Same omission, older: these three are observed in commit() and have never
+    # been collected. headroom_at_dispatch is what §40.3's "3.2 times its own
+    # headroom" question is asked of directly.
+    "scheduler_fluidserve_headroom_at_dispatch_sum",
+    "scheduler_fluidserve_headroom_at_dispatch_count",
+    "scheduler_fluidserve_harm_sum",
+    "scheduler_fluidserve_harm_count",
+    "scheduler_fluidserve_class_share_sum",
+    "scheduler_fluidserve_class_share_count",
     "scheduler_fluidserve_prefill_duty",          # per-instance share of engine time on
                                                   # prefill; what the projection is built
                                                   # from since v19
