@@ -258,7 +258,7 @@ which is why it was not gated.
 Preemptions are zero at both static rates and peak KV occupancy is 58%, as on
 every static condition ever run. **The preemption question belongs to part 2.**
 
-### 6.3 Repeat 2 was lost to an engine that did not restart, and is re-run
+### 6.3 Repeat 2 was lost twice, to two different faults
 
 The first attempt at repeat 2 produced no data. `llumnix_deploy.restart_llumnix`
 cold-restarts the engine pod before each condition, and engine 8002 did not
@@ -273,3 +273,29 @@ on a job that reaches condition Failed** — it sits until its own `--timeout`,
 five hours here. Both drivers now poll for either terminal condition (`wait_job`)
 and return non-zero on Failed, so a dead condition ends the wait instead of
 holding the chain open.
+
+**The second attempt was lost to an edit of mine, and the cause is worth stating
+plainly.** While part 1 was running I added the `fskv` arm for EXP-49 to both
+sweep drivers and, for the same reason the other ablations are pinned, made the
+baseline arms pin `FS_KV_SLOPE=false` as well. But
+`--fluidserve-kv-slope-projection` exists only in the EXP-49 binary, which is not
+deployed; pflag rejects an unknown flag and the scheduler exits at start-up, so
+the deployment went into CrashLoopBackOff and every condition after that failed
+at the step that reads the policy from the start-up line. The driver reported it
+as `scheduler pod ... reported no policy`, which is what a slow rollout also
+looks like, and that is why it took a second failure to identify.
+
+The pin is removed from the baseline arms. With the flag unset,
+`set_scheduler_profiling.py` leaves it off the command line entirely, which works
+with both binaries, and once the EXP-49 binary is deployed the compiled default
+is `false` and the start-up line still says so positively. **No data is affected**
+— both attempts died before generating load.
+
+Two rules this run cost, and both were already in `CLAUDE.md` in weaker forms:
+a flag pinned in a driver must exist in the binary that driver will run against,
+and **the measurement path is not only `bin/` and `workloads/` — it is anything
+the running sweep invokes**, which includes the driver scripts' arm definitions
+and `set_scheduler_profiling.py`. Editing them while a sweep is in progress is
+the same class of mistake as editing a running shell script, and the snapshot
+pattern does not protect against it because the snapshot is taken once at the
+start of the chain and the arm definitions inside it are read per condition.

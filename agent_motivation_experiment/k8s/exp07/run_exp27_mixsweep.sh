@@ -84,7 +84,7 @@ set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
     # ablation to its compiled default, which for class-harm is true, while every
     # FluidServe condition from EXP-27 pass 2 to EXP-46 ran with it false (§38).
     # EXP-47's first run went out with classharm=true for exactly this reason.
-    fluidserve)  policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_KV_SLOPE=false ;;
+    fluidserve)  policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false ;;
     # EXP-42. Both are the FluidServe policy from the SAME binary; they differ
     # only in whether the forced-placement test applies the allowance margin
     # that routing already applies. Set explicitly in both directions so the
