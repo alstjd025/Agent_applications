@@ -175,3 +175,76 @@ a result, not as noise.
 5. **Recorded**: 0 → 112. Below the rejection threshold, above zero.
 
 Part 2 proceeds.
+
+## 6. Part 2 — rejected on condition 5, and the static gain does not transfer
+
+Finished 2026-08-01 22:50 KST. Both arms healthy: 4/4 engines, 50.1 req/s, no flags.
+
+| whole hour | offered | admitted | rej% | goodput | chat / dr / swe | dr shed | **preemptions** |
+|---|---|---|---|---|---|---|---|
+| fsa | 62.9 | **94.6** | 33.4 | **16,597** | 61.8 / **89.1** / 41.1 | 8.1% | **1,899** |
+| fsac | 63.4 | 91.0 | 30.2 | 16,471 | 59.0 / 82.4 / **76.4** | **0.0%** | **6,583** |
+
+### Condition 5 rejects it
+
+Preemptions **1,899 → 6,583**, on three engines rather than one (8000: 2,059,
+8001: 4,330, 8002: 194). §4 set the rejection threshold at 500 "regardless of
+the score, because the cause of that failure mode is open". 6,583 is thirteen
+times it, and larger than anything recorded on this trace by any policy
+(EXP-41 1,471, EXP-44 1,852, EXP-45 1,605).
+
+**The mechanism is exactly what §4 said to watch for, at a scale it did not
+anticipate.** Deep research can now route, so it does — its shed rate is 0.0% in
+every segment — and it collects on engines that then reach their memory bound.
+Part 1 saw the beginning of this at a static rate: 112 preemptions where every
+previous static condition read zero.
+
+### Condition 4 fails too: the window was not won
+
+| minutes 50–57 | offered | admitted | rej% | chat | dr | swe | dr shed |
+|---|---|---|---|---|---|---|---|
+| Llumnix SLO (EXP-45) | **17.4** | 87.7 | 80.2 | 0.0 | **100.0** | 25.9 | 0.0 |
+| fsa | 16.6 | 73.5 | 77.5 | 2.6 | 82.5 | 24.5 | 16.4% |
+| fsac | **16.6** | 55.0 | 69.8 | 5.7 | **53.0** | 53.6 | **0.0%** |
+
+**The shedding stopped and the score did not move.** §44 predicted 16.7 → 19.3
+on the arithmetic that deep research would go from 83.0 to 100 once it could
+route. It routes — shed 16.4% → 0.0% — and deep research goes to **53.0**
+instead. The requests that used to be rejected are now admitted onto a fleet
+already at 1.6x capacity and miss on latency, which scores the same zero under
+the offered denominator while consuming the capacity a rejection would have
+returned.
+
+**That is §33.3's case, which was on record and which §44 did not weigh:**
+"rejecting earlier moves the numerator and the denominator together and the
+offered score does not move." §44 priced the fix as if the shed requests would
+convert to passes. They converted to misses.
+
+### What C did buy
+
+**swe, and a lot of it**: 41.1 → 76.4 over the hour. §4 predicted no effect,
+reasoning that swe's `nominalMs` of about 57.7 gives `57.7 × 0.9 = 51.9`, below
+the 55.6 delivered at saturation. That is right at saturation and wrong
+everywhere else: for most of the hour the pace is between 45 and 51.9, which is
+above the old instance-minimum gate of 45 and below swe's own, so swe routes
+where it previously could not. **The prediction was made for one load and
+applied to a whole hour.**
+
+Chat 61.8 → 59.0 and deep research 89.1 → 82.4 pay for it, and the total moves
++0.5 — inside the 6.4-point spread §45 measured for this arm on this trace.
+
+### Verdict
+
+**Accepted on static conditions, rejected on the dynamic trace.** Part 1 is not
+withdrawn: +23.7 at 60 req/s with all three classes rising and goodput above
+what the same arm produces at 45 req/s is a real measurement, repeated twice.
+What part 2 shows is that the same change on load that moves produces the
+failure mode whose cause has been open since §40, at thirteen times the level
+that was set as the limit.
+
+**The blocking question is now the same one for both remaining candidates.**
+C makes deep research route and it collects and breaks an engine; B would make
+deep research shed and its premise is that the freed capacity helps chat. Both
+depend on why an engine takes 3.2 times its own headroom in a minute (§40.3),
+which §41 measured and §42 could not attribute. **That measurement comes before
+either.**
