@@ -114,6 +114,16 @@ SCHEDULER_METRICS = {
     "scheduler_fluidserve_prefill_fraction",      # measured share of a prompt actually computed
     "scheduler_fluidserve_arriving_prefill_tokens",  # projected over the horizon
     "scheduler_fluidserve_queued_prefill_tokens",    # what the engine reports right now
+    # EXP-47. Whether the second placement inside one engine status step sees
+    # the first. §40.3 measured an engine taking 3.2x its own headroom in a
+    # minute and §41 measured 50.4% of 500 ms steps carrying more than one
+    # placement; §42 could not settle it from a 1 Hz gauge because the quantity
+    # is per DECISION, not per scrape.
+    "scheduler_fluidserve_dispatch_ordinal_in_step",  # how many placements one step carried
+    "scheduler_fluidserve_headroom_move_in_step",     # change in the headroom the
+                                                      # decision read, 2nd placement on.
+                                                      # ZERO is the defect: the same
+                                                      # capacity offered twice.
     "scheduler_fluidserve_prefill_duty",          # per-instance share of engine time on
                                                   # prefill; what the projection is built
                                                   # from since v19
