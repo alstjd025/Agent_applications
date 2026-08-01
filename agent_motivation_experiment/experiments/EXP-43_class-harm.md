@@ -105,6 +105,80 @@ regimes, and which one a run lands in persists for the whole eight minutes. A
 difference at 45 req/s between two arms of this experiment is therefore only
 readable if both arms landed in the same regime, which the route share reports.
 
-## 4. Result
+## 4. Result — null where it was supposed to act
 
-(to be filled in)
+Finished 2026-08-01 09:46 KST. Sixteen conditions, two repeats per arm per rate,
+one session, one binary (the same one EXP-42 ran, asserted by md5 before launch).
+All sixteen at 4/4 engines, delivered rate within 0.2% of target, no flags.
+
+### Means over two repeats
+
+| rate | offered | separation index | chat ITL | goodput | preemptions |
+|---|---|---|---|---|---|
+| 15 | 100.0 → 100.0 | 0.711 → 0.849 | 20.6 → 20.1 | 7,968 → 8,000 | 0 → 0 |
+| 30 | 100.0 → 100.0 | 0.888 → 0.891 | 23.5 → 25.4 | 15,657 → 15,635 | 0 → 0 |
+| 45 | 99.0 → 96.1 | 0.841 → 0.788 | 35.2 → 36.1 | 21,840 → 21,501 | 0 → 0 |
+| **60** | **48.2 → 48.3** | **0.501 → 0.509** | **45.3 → 45.4** | 16,693 → 16,641 | 0 → 0 |
+
+**At 60 req/s nothing moved.** Offered attainment +0.1, separation +0.008, chat's
+inter-token latency +0.1 ms, goodput −52 tokens/s. Every one of those is far
+inside the repeat spread of the arm itself.
+
+### Why: candidate A removed the path this term acts on
+
+The class term enters `harm`, which orders candidates **only when none of them is
+feasible**. On that path the sole decision that actually places a request is
+FORCE. Candidate A cut FORCE from 6.5% of decisions to 1.4% by rejecting the
+placements it used to make, so the ordering this term changes now decides where
+1.4% of requests go.
+
+| | force share at 60 req/s |
+|---|---|
+| shipped policy (EXP-42 `fsbase`) | 6.5% |
+| candidate A (this experiment's baseline) | **1.4%** |
+
+**The two candidates interact, and the design of this experiment is what exposed
+it.** Moving the baseline to A was the right call for attributing a result — but
+the result it attributes is "on top of A, at these rates, this term does
+nothing", not "this term does nothing". Whether it would have mattered on the
+shipped policy, where its reach was 6.5% rather than 1.4%, is not measured here
+and is now of limited interest: the policy has moved.
+
+### The 45 req/s difference is the bistability, not the term
+
+The −3.0 points at 45 come from one condition:
+
+| arm | repeat | route share | offered |
+|---|---|---|---|
+| fsa | 1 | 87.3% | 98.9 |
+| fsa | 2 | 90.2% | 99.1 |
+| fsah | 1 | **36.7%** | **92.5** |
+| fsah | 2 | 95.9% | 99.6 |
+
+`fsah` fell into the low-routing regime once in two runs and `fsa` zero times in
+two. That is one event, and EXP-42 §4 recorded the same condition producing both
+regimes on the shipped policy within one session. **Two repeats cannot separate
+"this term makes the bad regime more likely" from "the bad regime happens".**
+It is a reason to include 45 req/s in the knee measurement with four or more
+repeats, not a finding.
+
+### The separation index at 15 and 30 req/s is not readable
+
+`fsa` reads 0.772 and 0.651 at 15 req/s; `fsah` reads 0.834 and 0.863. The
+difference between the arms (0.14) is the same size as the spread inside one arm
+(0.12). At those rates routing takes 99.7–99.9% of decisions, so the changed
+term is essentially never reached and there is nothing for it to do — the
+variation is which engine happened to collect which class, which §37.3 measured
+as arbitrary and decided by the first arrival.
+
+### Verdict
+
+**Null on condition 1**, which the pre-registered rules say to record as a
+statement about the term's reach rather than as a negative result about the
+mechanism. Conditions 2 to 5 pass trivially, because nothing changed.
+
+The flag stays at its compiled default of `true` in the code and **`false` in
+the experiments**, because that is what every measurement from EXP-27 to EXP-42
+used and there is now a measured reason to believe it does not matter at the
+rates tested. If a later change raises the FORCE share again, this becomes worth
+re-measuring.
