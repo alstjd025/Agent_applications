@@ -89,12 +89,9 @@ set_arm() {
     # from EXP-27 pass 2 to EXP-43 ran with it false (implementation.md 38).
     # Without pinning, the fluidserve arm would differ from EXP-41 in two ways
     # instead of none.
-    fluidserve)  policy=fluidserve; export FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false FS_KV_SLOPE=false ;;
+    fluidserve)  policy=fluidserve; export FS_FORCE_MARGIN=false FS_CLASS_HARM=false ;;
     fsa)         policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false ;;
     fsac)        policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=true ;;
-    # EXP-49 candidate H2: project from the observed rate of change of KV
-    # occupancy instead of from the modelled inflow/outflow balance.
-    fskv)        policy=fluidserve; export FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false FS_KV_SLOPE=true ;;
     polyserve)   policy=polyserve ;;
     slo)         policy=slo ;;
     loadbalance) policy=load-balance ;;

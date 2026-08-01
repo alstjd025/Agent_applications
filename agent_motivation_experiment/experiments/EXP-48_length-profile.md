@@ -123,6 +123,34 @@ right is not the same as the running process having it. After the first
 condition's rollout, the mounted file inside the scheduler pod is checksummed
 against the repository file. A mismatch voids the run.
 
+## 4a. The projection is just as wrong at these static rates — added while part 1 ran
+
+§48.2's measurement was made on the `full` hour, and part 1 is static, so the
+same scoring was run on the two EXP-47 static conditions before their results
+exist. It reads old runs only and touches nothing on the measurement path
+(`analysis_scripts/request_level/exp48_projection_error.py`).
+
+| run | predictor | mean error | MAE | under |
+|---|---|---|---|---|
+| 45 req/s | occupancy only | −634 | 34,282 | 53.6% |
+| | **shipped** | **−84,826** | 91,809 | **84.3%** |
+| | observed slope (H2) | +2,800 | 36,779 | 52.2% |
+| 60 req/s | occupancy only | +1,730 | 35,841 | 49.7% |
+| | **shipped** | **−103,411** | 112,358 | **87.0%** |
+| | observed slope (H2) | +5,491 | 38,073 | 46.8% |
+
+and the bias grows with occupancy exactly as it does on the hour: at 60 req/s,
+−10.6% of the actual future value on the emptiest quarter of samples and −20.1%
+on the fullest tenth.
+
+**This is what makes part 1 a test rather than only a gate.** Static conditions
+have never preempted, and the reason is visible here — occupancy tops out near
+1,088k against the hour's 3,022k, so the engines never reach their memory bound.
+But the admission decisions at 45 and 60 req/s are being made against a number
+that is about 100,000 tokens too small in the same one-sided way, so correcting
+the release term should change what gets admitted at both rates even though no
+engine was in danger.
+
 ## 5. What is expected, and what would refute it
 
 **The correction ships whatever the score does.** The deployed value states 282

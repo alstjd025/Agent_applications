@@ -84,7 +84,7 @@ set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
     # ablation to its compiled default, which for class-harm is true, while every
     # FluidServe condition from EXP-27 pass 2 to EXP-46 ran with it false (§38).
     # EXP-47's first run went out with classharm=true for exactly this reason.
-    fluidserve)  policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_KV_SLOPE=false ;;
+    fluidserve)  policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false ;;
     # EXP-42. Both are the FluidServe policy from the SAME binary; they differ
     # only in whether the forced-placement test applies the allowance margin
     # that routing already applies. Set explicitly in both directions so the
@@ -108,12 +108,6 @@ set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
     # judges an arriving request's pace against its own class budget instead of
     # the tightest nominal budget on the instance.
     fsac)        policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=true ;;
-    # EXP-49 candidate H2. The projection of an instance's KV occupancy is built
-    # from the rate that occupancy is observed to be moving at, instead of from
-    # a modelled balance of the resident set's growth against what completions
-    # are expected to release. A and C are off in both arms so the flag is the
-    # only difference from the `fluidserve` arm.
-    fskv)        policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_KV_SLOPE=true ;;
     polyserve)   policy=polyserve ;;
     # Llumnix's own SLO-aware policy, as shipped apart from the neutral branch
     # that lets it run on a co-located fleet. It is NOT class-aware: --ttft-slo
