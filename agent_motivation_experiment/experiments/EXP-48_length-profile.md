@@ -299,3 +299,95 @@ and `set_scheduler_profiling.py`. Editing them while a sweep is in progress is
 the same class of mistake as editing a running shell script, and the snapshot
 pattern does not protect against it because the snapshot is taken once at the
 start of the chain and the arm definitions inside it are read per condition.
+
+### 6.4 Repeat 2 reproduces the static result to a tenth of a point
+
+| 60 req/s | offered | admitted | rej% | goodput | chat ITL | route% |
+|---|---|---|---|---|---|---|
+| rep 1 | 56.9 | 86.0 | 33.4 | 18,636 | 44.3 | 6.2 |
+| rep 2 | **56.8** | 87.4 | 34.5 | 18,752 | 44.1 | 5.8 |
+
+**Spread 0.1 points**, against the four old-profile measurements at 35.2, 36.1,
+38.3, 36.8. At 45 req/s the two repeats read 91.1 and 98.9, which is the same
+10-point spread that rate has always had and is why it was not gated. Both
+conditions pass `run_health` at 4/4 engines and 59.9 req/s delivered.
+
+### 6.5 The hour: +10.4 points offered, and the minutes-50-56 loss is gone
+
+| whole hour, `full` trace | offered | admitted | rej% | goodput | total tok/s | chat / dr / swe |
+|---|---|---|---|---|---|---|
+| EXP-41, old profile | 59.7 | 84.3 | 29.1 | 15,643 | 18,312 | 59.3 / 83.7 / 35.1 |
+| EXP-44, old profile | 59.2 | 83.7 | 29.3 | 15,472 | 18,305 | 58.7 / 83.3 / 34.3 |
+| EXP-45, old profile | 60.3 | 85.1 | 29.1 | 15,782 | 18,318 | 59.9 / 84.4 / 35.1 |
+| **EXP-48, corrected** | **70.2** | **95.7** | **26.6** | **17,998** | 18,909 | **73.3** / 81.9 / 32.3 |
+
+**+10.4 points offered against a repeat spread of 1.1 over three baseline runs.**
+Admitted attainment of 95.7 is the highest recorded on this trace by any arm, the
+rejection rate falls rather than rises, and token goodput is up 14.6%. Almost all
+of the gain is chat, +14.0; deep research gives up 1.9 and swe 2.5.
+
+By segment, and every one of the four improves:
+
+| segment | old (EXP-45) | corrected | Llumnix SLO |
+|---|---|---|---|
+| 0–15 (m1) | 70.7 | **73.5** | 43.0 |
+| 15–30 (m2) | 90.9 | **93.4** | 66.8 |
+| 30–45 (m3) | 54.6 | **67.8** | 30.0 |
+| 45–60 (m1) | 32.1 | **50.3** | 19.1 |
+
+**Minutes 50–56 — the stretch FluidServe had lost to Llumnix SLO since EXP-41 and
+which §44 spent a day decomposing — now reads 35.9 against Llumnix SLO's 17.3**,
+where the old profile read 16.5. Within that window chat goes from 3.8 to 36.1.
+The mechanism §44 identified was that deep research was being held and then shed
+while the fleet it could not enter was inside its budget; the corrected release
+term changes what the fleet looks like to the admission test, and the window
+reverses. Deep research inside that window falls from 79.4 to 49.7, so this is a
+trade rather than a free gain, but chat is 76.9% of the requests.
+
+Against EXP-45's three-arm session, FluidServe's margin over Llumnix SLO on this
+trace goes from **+21.2 to +31.9 points offered**.
+
+### 6.6 Preemptions rose. That is the pre-registered outcome that promotes H2
+
+| `full` hour | preemptions | where |
+|---|---|---|
+| EXP-41, old profile | 1,471 | engine 8003 |
+| EXP-44, old profile | 1,852 | engine 8002 |
+| EXP-45, old profile | 1,605 | engine 8002 |
+| **EXP-48, corrected** | **2,776** | 8002 (2,079) and 8000 (697) |
+
+Judgement rule 3 was written as: below 1,000 confirms §48.3 as the dominant
+cause of engines filling; **above 1,400 means it was not, and that §48.4's
+missing arrival term is what matters, which promotes H2.** The measurement is
+2,776, above the whole baseline range, so **the rule fires for H2.**
+
+The direction is consistent with everything else here rather than surprising.
+The corrected profile makes the policy admit more work — total output rises from
+18,312 to 18,909 tokens/s and the offered score by 10.4 points — so the fleet
+carries more, and two engines reach 100% KV occupancy instead of one. **Removing
+the over-predicted release term fixed how much the projection is wrong by;
+it did not give the projection the term that accounts for the requests the
+scheduler places during the horizon it is projecting over.**
+
+## 7. Verdict
+
+**Accepted, and it is the largest single improvement recorded on this workload.**
+It is also not a policy change: no decision rule was edited and no flag added.
+At a static 60 req/s the offered score goes from a four-run mean of 36.6 to 56.8
+and 56.9, and on the hour from a three-run mean of 59.7 to 70.2, in both cases
+with the rejection rate falling. For comparison, candidate A was worth +13.1
+statically and nothing on the hour, and candidate C +23.7 statically and was
+rejected on the hour.
+
+**What it does not fix is preemption**, and the pre-registered reading of that is
+recorded above: EXP-49 (candidate H2) is next, and its premise section is already
+restated on these numbers rather than on the old-profile ones.
+
+**One thing to carry forward.** Every FluidServe result from 2026-07-29 onward
+was measured with a length profile that was wrong about the class holding roughly
+77% of resident KV. Comparisons *within* each of those experiments stand, because
+every arm shared the profile. But the absolute numbers in EXP-42 through EXP-47
+describe a policy running on a false input, and candidate C in particular was
+rejected for a preemption count produced partly by that input. **C is worth
+re-testing on the corrected profile once H2 is settled.**
+
