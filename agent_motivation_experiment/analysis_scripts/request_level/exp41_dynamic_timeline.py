@@ -112,16 +112,34 @@ def main():
     # wrong when it did not, so the exclusion is stated instead of relied on.
     ap.add_argument("--exclude", nargs="*", default=[],
                     help="substrings; any run directory containing one is dropped")
+    # An explicit series list, for comparisons the arm name cannot express: two
+    # runs of the SAME arm that differ in something outside the policy, such as
+    # the length profile, or arms drawn from different experiments. Repeatable,
+    # as label|colour|linestyle|glob. When given it replaces the arm registry.
+    ap.add_argument("--series", nargs="*", default=[],
+                    help="label|colour|linestyle|glob, repeatable")
     ap.add_argument("--out-dir", required=True)
     a = ap.parse_args()
     os.makedirs(a.out_dir, exist_ok=True)
 
+    arms = dict(ARMS)
     runs = {}
-    for arm in ARMS:
-        hits = [h for h in glob.glob(a.pattern.format(arm=arm, variant=a.variant))
-                if not any(x in h for x in a.exclude)]
-        if hits:
-            runs[arm] = sorted(hits)[-1]
+    if a.series:
+        arms = {}
+        for spec in a.series:
+            lab, col, ls, pat = spec.split("|", 3)
+            hits = [h for h in glob.glob(pat)
+                    if not any(x in h for x in a.exclude)]
+            if not hits:
+                sys.exit(f"series {lab!r} matched nothing: {pat}")
+            arms[lab] = (lab, col, ls)
+            runs[lab] = sorted(hits)[-1]
+    else:
+        for arm in ARMS:
+            hits = [h for h in glob.glob(a.pattern.format(arm=arm, variant=a.variant))
+                    if not any(x in h for x in a.exclude)]
+            if hits:
+                runs[arm] = sorted(hits)[-1]
     if not runs:
         sys.exit(f"no runs for variant {a.variant}")
     print(f"variant {a.variant}: {list(runs)}")
@@ -134,7 +152,7 @@ def main():
         ax = ax.ravel()
 
         for arm, r in data.items():
-            lab, c, ls = ARMS[arm]
+            lab, c, ls = arms[arm]
             x, off, adm, gp, rej = [], [], [], [], []
             per_off = {cl: [] for cl in CLASSES}
             per_adm = {cl: [] for cl in CLASSES}
@@ -194,10 +212,10 @@ def main():
             ax[i].set_xlabel("time (minutes)")
         ax[2].legend(fontsize=7, loc="lower left")
         h = [plt.Line2D([], [], color=CLASS_COLORS[c], lw=1.1) for c in CLASSES]
-        h += [plt.Line2D([], [], color="#666666", ls=ARMS[k][2], lw=1.1) for k in data]
+        h += [plt.Line2D([], [], color="#666666", ls=arms[k][2], lw=1.1) for k in data]
         # Five entries over a panel whose lines cover the whole 0-100 range, so
         # this one legend gets a background rather than sitting on the data.
-        ax[4].legend(h, list(CLASSES) + [ARMS[k][0] for k in data],
+        ax[4].legend(h, list(CLASSES) + [arms[k][0] for k in data],
                      fontsize=6, ncol=3, loc="lower center", frameon=True,
                      framealpha=0.85, edgecolor="none")
         # The mix steps every 15 minutes on the compressed trace; the verbatim
@@ -210,11 +228,11 @@ def main():
                            ha="center", fontsize=6.5, color="#666666")
         # The arms present decide the title: this script now serves EXP-41
         # (two control planes) and EXP-44 (one control plane, one flag).
-        who = " vs ".join(ARMS[k][0] for k in data)
+        who = " vs ".join(arms[k][0] for k in data)
         # Name the session each arm came from. Arms in different sessions is
         # allowed (CLAUDE.md, 2026-08-01) but a reader has to be told, because
         # the spread to judge a difference against depends on it.
-        src = ", ".join(f"{ARMS[k][0]}: {os.path.basename(runs[k])}" for k in data)
+        src = ", ".join(f"{arms[k][0]}: {os.path.basename(runs[k])}" for k in data)
         fig.suptitle(f"{a.title} {a.variant} — one hour of moving load, {who}, "
                      f"stock FIFO (one run each)\n{src}", fontsize=8.5, y=1.02)
         fig.tight_layout()
