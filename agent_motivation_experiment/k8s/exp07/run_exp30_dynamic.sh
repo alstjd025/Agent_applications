@@ -100,6 +100,14 @@ set_arm() {
     # instance. The existing fsac arm carries candidate A as well; this one does
     # not, so the difference from `fluidserve` is one change.
     fsc)         policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=true ;;
+    # EXP-52. Two points on the gate-slack axis between the shipped policy
+    # (slack 1, the instance minimum binds as promised) and candidate C (slack
+    # at or above the largest class-budget ratio, which for this workload is
+    # 100/50 = 2, so the instance minimum never binds). At 1.111 the gate for a
+    # loose-budget request on a chat-carrying instance lands on exactly chat's
+    # 50 ms rather than the 45 ms margin below it; at 1.4 it lands on 63 ms.
+    fsg11)       policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_GATE_SLACK=1.111 ;;
+    fsg14)       policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_GATE_SLACK=1.4 ;;
     polyserve)   policy=polyserve ;;
     slo)         policy=slo ;;
     loadbalance) policy=load-balance ;;

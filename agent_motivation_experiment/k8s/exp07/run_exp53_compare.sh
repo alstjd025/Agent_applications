@@ -58,7 +58,12 @@ check_stack() {
     || { echo "[exp27] ABORT: gateway is not the host-built binary ($bin)"; exit 1; }
   mig=$(kubectl -n llumnix get lws neutral -o json \
         | python3 -c "import json,sys;c=[c for c in json.load(sys.stdin)['spec']['leaderWorkerTemplate']['workerTemplate']['spec']['containers'] if c['name']=='vllm'][0];print(next((e.get('value','') for e in c.get('env',[]) if e['name']=='LLUMNIX_ENABLE_MIGRATION'),'unset'))")
-  [ "$mig" = "0" ] || { echo "[exp27] ABORT: engine migration is '$mig', want 0"; exit 1; }
+  # Migration is per ARM in this experiment: the two Llumnix baselines get their
+  # own mechanism and the two policies under test do not use it. The check still
+  # exists -- it now catches an engine left in the wrong state for the arm about
+  # to run, which is the failure it was always for.
+  want_mig="${EXPECT_MIGRATION:-0}"
+  [ "$mig" = "$want_mig" ] || { echo "[exp53] ABORT: engine migration is '$mig', want $want_mig"; exit 1; }
   extra=$(kubectl -n llumnix get lws neutral -o json \
         | python3 -c "import json,sys;c=[c for c in json.load(sys.stdin)['spec']['leaderWorkerTemplate']['workerTemplate']['spec']['containers'] if c['name']=='vllm'][0];print(next((e.get('value','') for e in c.get('env',[]) if e['name']=='SCHED_EXTRA_ARGS'),'unset'))")
   # An engine-side scheduler confounds a control-plane comparison, so the
@@ -74,69 +79,43 @@ check_stack() {
   # against the long one would silently reproduce EXP-25 under a new name.
   [ -s "$SHORT_TRANSCRIPT" ] \
     || { echo "[exp27] ABORT: short transcript missing: $SHORT_TRANSCRIPT"; exit 1; }
-  echo "[exp27] stack ok: theta off, gateway=$bin, migration off, engine sched='${want_extra:-stock FIFO}'"
+  echo "[exp53] stack ok: theta off, gateway=$bin, migration=$mig, engine sched='${want_extra:-stock FIFO}'"
 }
 
+# Migration is switched by editing the engine's env, which restarts the pod, so
+# it is done once per arm rather than once per condition. ARM_MIG and ARM_WCFG
+# are read by run_cell.
 set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
   local policy
   case "$1" in
-    # Pinned, not left unset: set_scheduler_profiling.py now returns an unset
-    # ablation to its compiled default, which for class-harm is true, while every
-    # FluidServe condition from EXP-27 pass 2 to EXP-46 ran with it false (§38).
-    # EXP-47's first run went out with classharm=true for exactly this reason.
-    fluidserve)  policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false ;;
-    # EXP-42. Both are the FluidServe policy from the SAME binary; they differ
-    # only in whether the forced-placement test applies the allowance margin
-    # that routing already applies. Set explicitly in both directions so the
-    # scheduler's start-up line carries a positive confirmation either way,
-    # rather than the treatment arm being the only one that can be checked.
-    # FS_CLASS_HARM is pinned to false in BOTH arms, not because false is the
-    # intended setting but because every FluidServe condition from 2026-07-28
-    # 10:28 to EXP-41 ran that way (the flag stuck in the deployment), and a
-    # baseline that silently differs from EXP-38 would make this comparison
-    # incomparable with everything it is being read against. Turning it back on
-    # is its own experiment, EXP-43, run one change at a time.
-    fsa)         policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false ;;
-    fsbase)      policy=fluidserve; export FS_FORCE_MARGIN=false FS_CLASS_HARM=false ;;
-    # EXP-43. Candidate A is in the baseline now, so both arms carry it and the
-    # single difference is the class term in the damage estimate. Its compiled
-    # default is true; it has been false in every deployment since 2026-07-28
-    # through a flag that stuck in the spec, so this is the first measurement of
-    # the policy as designed.
-    fsah)        policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=true ;;
-    # EXP-46. Candidate A is in both arms; the single difference is C, which
-    # judges an arriving request's pace against its own class budget instead of
-    # the tightest nominal budget on the instance.
-    fsac)        policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=true ;;
-    # EXP-49 candidate H2. The projection of an instance's KV occupancy is built
-    # from the rate that occupancy is observed to be moving at, instead of from
-    # a modelled balance of the resident set's growth against what completions
-    # are expected to release. A and C are off in both arms so the flag is the
-    # only difference from the `fluidserve` arm.
-    fskv)        policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_KV_SLOPE=true ;;
-    # EXP-50. Candidate C on its own -- the arriving request is judged against
-    # its OWN class budget rather than against the tightest nominal budget on the
-    # instance. The existing fsac arm carries candidate A as well; this one does
-    # not, so the difference from `fluidserve` is one change.
-    fsc)         policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=true ;;
-    # EXP-52. Two points on the gate-slack axis between the shipped policy
-    # (slack 1, the instance minimum binds as promised) and candidate C (slack
-    # at or above the largest class-budget ratio, which for this workload is
-    # 100/50 = 2, so the instance minimum never binds). At 1.111 the gate for a
-    # loose-budget request on a chat-carrying instance lands on exactly chat's
-    # 50 ms rather than the 45 ms margin below it; at 1.4 it lands on 63 ms.
-    fsg11)       policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_GATE_SLACK=1.111 ;;
-    fsg14)       policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_GATE_SLACK=1.4 ;;
-    polyserve)   policy=polyserve ;;
-    # Llumnix's own SLO-aware policy, as shipped apart from the neutral branch
-    # that lets it run on a co-located fleet. It is NOT class-aware: --ttft-slo
-    # and --tpot-slo are single global values, so every request is judged against
-    # the same pair. That is the point of having it -- it separates what SLO
-    # awareness buys from what per-class differentiation buys.
-    slo)         policy=slo ;;
-    loadbalance) policy=load-balance ;;
-    *) echo "[exp27] unknown arm: $1" >&2; return 1 ;;
+    # The two policies under test. Neither uses migration, so neither gets it.
+    # FS_GATE_SLACK is set from the value EXP-52 selects; 1.0 is the shipped
+    # policy and is what this defaults to until that experiment says otherwise.
+    fluidserve)  policy=fluidserve; ARM_MIG=0; ARM_WCFG=m1
+                 export FS_CLASS_HARM=false FS_FORCE_MARGIN=false \
+                        FS_OWN_BUDGET_GATE=false FS_GATE_SLACK="${FS_SLACK:-1.0}" ;;
+    polyserve)   policy=polyserve;  ARM_MIG=0; ARM_WCFG=m1 ;;
+    # The two Llumnix baselines, each with its own migration mechanism ON. `slo`
+    # is SLO-aware but NOT class-aware -- --ttft-slo and --tpot-slo are single
+    # global values -- and it takes the m1f workload config for the reason
+    # EXP-28 recorded: the default decomposition hands it the agent class's
+    # 25 ms as a literal per-token target and it rejects 98% of that class.
+    # Scoring is unaffected; the analysis judges that class end to end whatever
+    # the config says. `loadbalance` is stock Llumnix with no SLO input at all.
+    slo)         policy=slo;          ARM_MIG=1; ARM_WCFG=m1f ;;
+    loadbalance) policy=load-balance; ARM_MIG=1; ARM_WCFG=m1 ;;
+    *) echo "[exp53] unknown arm: $1" >&2; return 1 ;;
   esac
+  local cur
+  cur=$(kubectl -n llumnix get lws neutral -o json \
+        | python3 -c "import json,sys;c=[c for c in json.load(sys.stdin)['spec']['leaderWorkerTemplate']['workerTemplate']['spec']['containers'] if c['name']=='vllm'][0];print(next((e.get('value','') for e in c.get('env',[]) if e['name']=='LLUMNIX_ENABLE_MIGRATION'),'0'))")
+  if [ "$cur" != "$ARM_MIG" ]; then
+    echo "[exp53] engine migration $cur -> $ARM_MIG (restarts the engine)"
+    python3 "$REPO/Agent_applications/agent_motivation_experiment/k8s/exp07/set_engine_sched.py" \
+      --migration "$([ "$ARM_MIG" = 1 ] && echo on || echo off)" | sed 's/^/[exp53]   /' \
+      || { echo "[exp53] ABORT: could not set migration"; return 1; }
+  fi
+  EXPECT_MIGRATION=$ARM_MIG check_stack || return 1
   echo "[exp27] switching scheduler -> $policy"
   python3 "$REPO/ms_dev/scripts/set_scheduler_profiling.py" --policy "$policy" \
     | sed 's/^/[exp27]   /'
@@ -179,14 +158,15 @@ wait_job() {  # $1 job name, $2 deadline in minutes
   return 1
 }
 
-run_cell() {  # $1 arm, $2 mix key, $3 rates, $4 durmin
+run_cell() {  # $1 arm, $2 mix key (overridden by the arm), $3 rates, $4 durmin
   local arm=$1 mix=$2 rates=$3 durmin=$4
+  set_arm "$arm" || return 1
+  mix=${ARM_WCFG:-$mix}
   local wcfg=${MIXCFG[$mix]:-}
   [ -n "$wcfg" ] || { echo "[exp27] unknown mix '$mix'"; return 1; }
   [ -s "${HOSTWORK}${wcfg#/work}" ] || { echo "[exp27] missing $wcfg"; return 1; }
-  local job="bench-runner-exp27-${arm}"
-  local session="${SESSION_PREFIX:-exp27}_${arm}${SESSION_SUFFIX:-}_${mix}"
-  set_arm "$arm" || return 1
+  local job="bench-runner-exp53-${arm}"
+  local session="${SESSION_PREFIX:-exp53}_${arm}${SESSION_SUFFIX:-}_${mix}"
   kubectl -n llumnix delete job "$job" --ignore-not-found >/dev/null
   sed -e "s/__JOBNAME__/$job/" -e "s/__SESSION__/$session/" \
       -e "s/__RATES__/$rates/" -e "s/__DURMIN__/$durmin/" -e "s/__ARM__/$arm/" \
@@ -208,44 +188,18 @@ run_cell() {  # $1 arm, $2 mix key, $3 rates, $4 durmin
   echo "[exp27] $arm/$mix DONE $(date -u +%H:%M:%S)"
 }
 
-case "${1:-}" in
-  calib)
-    # Where does this workload saturate? The shortened swe changes the fleet's
-    # capacity, so the EXP-25 rate list is no longer the right one and guessing
-    # it from the demand model is not good enough -- that model puts chat's
-    # capacity well below what the fleet actually delivers. One arm, short
-    # conditions, all three mixes.
-    check_stack
-    export SESSION_PREFIX=exp27cal
-    for mix in m1 m2 m3; do
-      run_cell polyserve "$mix" "${2:-600,1200,2400,3600}" "${3:-4}" || exit 1
-    done
-    echo "[exp27] CALIB DONE $(date -u +%H:%M)"
-    ;;
-  sweep)
-    check_stack
-    RATES=${2:-600,1200,2400}
-    DUR=${3:-8}
-    REPS=${4:-1}
-    for rep in $(seq 1 "$REPS"); do
-      # Repeat is the OUTER loop. Machine state drifts over hours, and with the
-      # arm outside, one arm would be measured entirely in a different stretch
-      # of that drift and the drift would read as an arm effect. EXP-24 measured
-      # 5 points of between-session movement against 0.2 within a session.
-      for mix in m1 m2 m3; do
-        for arm in polyserve fluidserve; do
-          SESSION_PREFIX="exp27r${rep}" run_cell "$arm" "$mix" "$RATES" "$DUR" \
-            || echo "[exp27] rep$rep $arm/$mix FAILED"
-        done
-      done
-      echo "[exp27] REPEAT $rep DONE $(date -u +%H:%M)"
-    done
-    echo "[exp27] SWEEP DONE $(date -u +%H:%M)"
-    ;;
-  arm)
-    check_stack
-    run_cell "${2:?arm}" "${3:?mix key m1|m2|m3}" "${4:-1200}" "${5:-4}"
-    ;;
-  *)
-    sed -n '2,30p' "$0"; exit 1 ;;
-esac
+# Arm is the INNER loop and repeat the outer, as always: machine state drifts
+# over hours and with the arm outside, one arm would be measured entirely in a
+# different stretch of that drift.
+RATES=${RATES:-900,1500,2100,2700,3000,3300,3600,4200}
+DUR=${DUR:-8}
+REPS=${REPS:-2}
+for rep in $(seq 1 "$REPS"); do
+  for arm in ${ARMS:-fluidserve polyserve slo loadbalance}; do
+    echo "[exp53] === rep $rep $arm $(date -u +%H:%M:%S)"
+    SESSION_PREFIX="exp53r${rep}" run_cell "$arm" m1 "$RATES" "$DUR" \
+      || echo "[exp53] rep$rep $arm FAILED"
+  done
+  echo "[exp53] REPEAT $rep DONE $(date -u +%H:%M)"
+done
+echo "[exp53] ALL DONE $(date -u +%F' '%H:%M)"

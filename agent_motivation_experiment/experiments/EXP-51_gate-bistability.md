@@ -155,6 +155,66 @@ exists — both recorded `fsc` runs happened to have a chat-free engine, so neit
 tests whether C survives without one. That is what the twelve new conditions are
 for.
 
-### 7.2 The twelve new conditions
+### 7.2 Result — C removes the collapse, and rule 1 could not be read because of HOW
 
-(to be filled in)
+Twelve new conditions, six rounds of (`fluidserve`, `fsc`). Pooled with what
+existed:
+
+| arm | n | collapsed | rate |
+|---|---|---|---|
+| baseline | **20** | **8** | 40% |
+| **`fsc`** | **8** | **0** | **0%** |
+
+**Rule 3 holds at 20 for 20.** Twelve baseline runs with a chat-free engine, all
+healthy; eight without, all collapsed. No exceptions in any run of any arm.
+
+**Rule 4 passes.** `fsc`'s runs read 98.4 – 99.9 offered against the baseline's
+healthy range of 98.7 – 99.6. C costs nothing at this rate when the fleet has
+separated, and it is at the top of the range rather than the bottom.
+
+**Rule 1 cannot be read, and the reason is the finding.** The rule asked what
+happens to `fsc` runs in which all four instances read 50.0 — and there were
+none. **All eight `fsc` runs ended with a chat-free engine, against 12 of 20 for
+the baseline.** Under the null that C has the baseline's 40% collapse rate,
+0 of 8 has probability 0.6^8 = 0.017.
+
+### 7.3 §3's prediction was wrong, and the correction is the mechanism
+
+§3 predicted that C "does not change which engine holds which class, so the
+all-four-at-50 configuration should still occur at the same rate; what should
+change is that it stops mattering." **The configuration did not occur at all.**
+
+The reason is a path §3 did not consider. Class affinity — `sortCandidates`
+ordering candidates by how much of the arriving class each already holds — is
+applied **only within the feasible set**, which is deliberate and is what keeps
+the preference from overriding capacity. When every gate closes, the feasible set
+is empty on every instance, so **affinity stops operating entirely** and
+placements go through FORCE, which orders by harm and spreads work rather than
+concentrating it. FORCE is also what puts chat back on every engine.
+
+So the two states are not "separated" and "mixed" arrived at by chance. They are:
+
+- **ROUTE alive** → affinity operates → deep research concentrates on whichever
+  engine already holds the most of it → that engine loses its chat → its gate
+  opens to 90 ms → ROUTE stays alive.
+- **ROUTE dead** → affinity never runs → FORCE spreads every class over every
+  engine → every gate is 45 ms → ROUTE stays dead.
+
+**Both are self-sustaining, which is why nothing in between was ever observed and
+why no collapsed run recovers.** C removes the gate term that can kill ROUTE, so
+the fleet stays in the first state.
+
+### 7.4 What this changes
+
+C's standing was "rejected: 4.4 points worse over the hour" (EXP-50). It now also
+**removes a failure that costs about ten points of offered attainment in 40% of
+runs at 45 req/s**, and it does so by keeping the mechanism that separates
+classes alive rather than by overriding it.
+
+That does not overturn EXP-50 — the hour is still 65.3 against 69.7, and chat
+still loses 14.4 points there. What it establishes is that the gate's instance
+minimum has a cost that the hour-long score did not show, and that the two ends
+of that choice are both wrong. **EXP-52 measures the axis between them**, and the
+prediction to carry into it is now sharper: the slack that matters is the
+smallest one that keeps ROUTE alive at 45 req/s, because everything else follows
+from that.
