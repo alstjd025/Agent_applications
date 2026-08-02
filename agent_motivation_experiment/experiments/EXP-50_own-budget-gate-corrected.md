@@ -105,4 +105,111 @@ refusing it, which is what produced 6,583 on the old profile.
 
 ## 6. Result
 
-(to be filled in)
+### 6.1 Static: +10.6 points, and the mechanism fired exactly as described
+
+| 60 req/s | offered | admitted | rej% | goodput | chat ITL | route% | chat / dr / swe |
+|---|---|---|---|---|---|---|---|
+| `fluidserve` rep1/rep2 | 60.3 / 56.8 | 92.5 / 85.1 | 34.3 / 32.8 | 19,345 / 18,346 | 43.6 / 44.3 | 7.9 / 6.3 | 57.3 / 84.7 / 22.0 |
+| **`fsc`** rep1/rep2 | **69.2 / 69.1** | **97.1 / 97.4** | **28.2 / 28.4** | **21,687 / 21,613** | 42.0 / 41.4 | 17.7 / 18.3 | **62.2 / 100.0 / 82.9** |
+
+**Rule 1 passes: +10.6 points against a threshold of +4.2**, with a repeat spread
+of 0.1 on the treatment arm. The rejection rate falls rather than rises and token
+goodput is 15% higher, so this is not §33.3's failure mode. At 45 req/s both arms
+are at the ceiling (98.5–99.6).
+
+**Rule 5 passes**: deep research 84.7 → 100.0. And swe, which was not the target,
+goes 22.0 → 82.9 — that class is judged end to end, so the time it spends held at
+the gateway comes straight out of its budget, and the held share falls (pend
+83.2/84.5% → 74.3/73.8%).
+
+**Rule 4 as written was wrong and is corrected here.** It asked for the gate's
+*share* of refusals to fall; the share rose, 97.3/96.1% → 99.1/99.3%, because the
+other terms fell faster. Read as counts, which is what the rule should have said:
+gate refusals 571,970 / 621,316 → **353,105 / 345,479** (−42%) and incumbents
+refusals 15,961 / 25,326 → **3,308 / 2,305** (−86%). The mechanism fired.
+
+### 6.2 The hour: preemptions are fixed, and the score is lost to chat
+
+| whole hour | offered | admitted | rej% | goodput | chat / dr / swe | preemptions |
+|---|---|---|---|---|---|---|
+| `fluidserve` | **69.7** | **95.5** | **27.0** | **17,972** | **72.7** / 83.0 / 31.2 | 2,794 |
+| **`fsc`** | 65.3 | 94.2 | 30.7 | 17,473 | 58.3 / **99.9** / **79.2** | **1,873** |
+| Llumnix SLO (EXP-45) | 38.3 | 66.3 | 42.1 | 11,353 | 26.4 / 100.0 / 59.4 | 0 |
+
+**Rule 2 passes, and by a wide margin.** Preemptions 2,794 → 1,873, a fall of
+33%, against a threshold of "no worse than about 3,000". EXP-46's rejection of C
+was 6,583 preemptions on the old profile; **on the corrected profile C does not
+break engines, it repairs them.** That question is settled.
+
+**Rule 3 fails.** The rejection rate rises 27.0 → 30.7 while offered attainment
+falls 69.7 → 65.3, which is exactly the failure §33.3 defines. Token goodput
+falls 2.8%.
+
+Where it goes is entirely one class:
+
+| class | share of requests | baseline | C | change |
+|---|---|---|---|---|
+| chat | 76.9% | 72.7 | 58.3 | **−14.4** |
+| deepresearch | 15.4% | 83.0 | 99.9 | +16.9 |
+| swe | 7.7% | 31.2 | 79.2 | +48.0 |
+
+By segment: 74.7 → 71.0, 92.5 → **95.9**, 68.1 → 60.5, 48.4 → 39.5. And minutes
+50–56, the window the corrected profile had just won for the first time, goes
+back: 35.2 → 21.0, with chat inside it collapsing from 34.3 to 1.9.
+
+### 6.3 The two scoring rules disagree, and both are reported
+
+| aggregation | baseline | C |
+|---|---|---|
+| **per request** (the headline) | **69.7** | 65.3 |
+| equal weight across classes | 62.3 | **79.1** |
+
+**C wins the class-equal average by 16.8 points and loses the per-request one by
+4.4**, because chat is 76.9% of the requests and is the class it takes from. This
+is the same disagreement EXP-27 recorded from the other side, where PolyServe
+held two small classes at 100 while collapsing the one carrying 93% of the
+traffic. The pre-registered rule is per request, so C is judged on that; the
+class-equal figure is reported beside it rather than used to overturn it.
+
+### 6.4 What made the difference from the static conditions
+
+Decision shares over the hour: route 19.2% → 21.7%, **shed 7.9% → 10.0%**, force
+2.1% → 0.6%, pend 70.8% → 67.7%. Refusal counts: gate 2,113,842 → 1,865,341
+(−12%), memory 169,864 → 105,359 (−38%), incumbents 45,337 → 17,513 (−61%).
+
+The gate does open, as it did statically. What differs is what fills the space.
+At a fixed 60 req/s the freed capacity went to all three classes and chat rose
+too (57.3 → 62.2). Over the hour the rate reaches 77 req/s and holds above 65 for
+six minutes, and in those stretches the requests that can now pass the gate are
+the ones with loose budgets — deep research at 100 ms and swe judged end to end —
+so they take the capacity and chat, whose 50 ms budget is the tightest, is shed
+instead. **The gate was doing two jobs at once: refusing deep research that could
+have been served, and reserving capacity for chat. C removes both.**
+
+## 7. Verdict
+
+**Rejected on the pre-registered rule, and the rejection is worth more than the
+previous one because it is a different failure.**
+
+EXP-46 rejected C for 6,583 preemptions. That is now answered: on a correct deep
+research length model C *reduces* preemptions by a third, from 2,794 to 1,873.
+**The engine-overload objection to C is withdrawn.**
+
+What rejects it now is that the pace gate, besides refusing work that could have
+been served, was also the only thing reserving capacity for the tightest-budget
+class. Removing it entirely gives that capacity to the two loose-budget classes.
+Deep research reaches 99.9 and swe 79.2 while chat falls 14.4 points, and chat is
+77% of the traffic.
+
+**That is a statement about what to build next rather than a dead end.** What is
+wanted is a gate that judges an arriving request against its own budget — C's
+correct half — while still holding some capacity for the class that cannot
+absorb any delay. Two shapes are available and neither has been measured:
+
+- **Candidate B** (the user's proposal): put the request's KV footprint into the
+  SHED decision, so the classes that would crowd chat are the ones shed first.
+  Its premise needs re-measuring on the corrected profile before it is built.
+- **A per-class floor on the gate**: apply C, but keep an instance from taking so
+  much loose-budget work that its delivered pace passes chat's budget. This is
+  close to what `f.gateAllowance` was doing by accident, stated deliberately and
+  as a reservation rather than as a refusal.
