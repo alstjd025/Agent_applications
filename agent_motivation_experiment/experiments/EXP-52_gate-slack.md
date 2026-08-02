@@ -42,6 +42,72 @@ research reaches 99.9 and swe 79.2. **The parameter selects a point on that
 frontier, and the default is a statement about which objective the fleet is
 scored on** — which is exactly the open item v0.1.1 §6.7 records as unstated.
 
+## 2a. Is this the same knob as the 0.90 utilisation factor? Partly, and the part that is not is the point
+
+Raised by the user, 2026-08-02 21:00 KST, and it changes what this experiment has
+to measure.
+
+`c.gateAfter = min(gateAllowance * slack, nominalMs) * 0.90`. Where the instance
+minimum wins, `slack` and `0.90` multiply and are one coefficient — which is why
+`slack = 1/0.90 = 1.111` lands the gate on exactly chat's 50 ms. So in that
+regime the two are inverses of each other.
+
+**They are not the same knob because they act on different populations.** 0.90
+applies to every request against whatever gate it faces. `slack` only moves the
+gate for a request being judged against SOMEONE ELSE's budget: for chat arriving
+at a chat-carrying instance `gateAllowance == nominalMs`, so `min(50*slack, 50)`
+is 50 for every slack ≥ 1 and **slack does nothing for chat at all.** Lowering
+0.90 tightens everyone including chat; raising slack loosens only the classes
+whose own budget is looser than the instance minimum.
+
+### What the sweep is actually finding
+
+`feasible` also contains `meanAfter <= f.tightestAllowance`, the least REMAINING
+budget among incumbents that can still meet theirs. Measured over the steady
+window of EXP-52's own conditions:
+
+| condition | nominal gate | **tightestAllowance** | delivered |
+|---|---|---|---|
+| slack 1.0, healthy | 62.5 | **63.8** | 50.2 |
+| slack 1.0, **collapsed** | **50.0** | **50.2** | 44.8 |
+| slack 1.4 | 62.5 | **65.8** | 48.4 |
+| candidate C | 62.5 | **66.5** | 46.1 |
+
+Chat requests running below their budget bank slack, so the remaining-budget
+check sits at 61–66 ms. **The gate that slack 1.4 produces, 63 ms, is
+approximately where that check already is.** So the axis is not "how much may
+chat be hurt" but **"at what slack does the nominal gate stop being the tighter
+of the two conditions"**, and candidate C is the end where it is removed rather
+than merely made loose.
+
+### Why static and dynamic should differ, and what slack is FOR
+
+`tightestAllowance` excludes incumbents that are already past their budgets —
+deliberately, since refusing work does not rescue them, and recorded as a risk in
+`evaluate`'s comment since EXP-46.
+
+- **Static 45 and 60 req/s**: chat rarely goes past budget, the remaining-budget
+  check does its job, and **slack 1.4 and candidate C should be
+  indistinguishable.**
+- **The hour, in the stretches above 65 req/s**: chat does go past budget, those
+  requests drop out of `tightestAllowance`, and **the only floor left is the
+  nominal gate**, which is built from budgets that never move.
+
+**So `slack` is the floor that survives when the remaining-budget check stops
+protecting anything**, and candidate C removes that floor. This is the
+"reservation for the tightest-budget class" named as future work in v0.1.1 §6.2 —
+it is not something to build, it is the term already there, exposed as a
+parameter.
+
+**This experiment as designed cannot see any of it**, because both its rates are
+static. An hour-long part is added: slack 1.0, 1.4 and C on `dyn60_short_m123`.
+
+**Prediction, written before that part runs**: slack 1.4's chat attainment over
+the hour lands **between** C's 58.3 and slack 1.0's 72.7, and its offered
+attainment is **above** C's 65.3. If 1.4 and C are indistinguishable there, the
+mechanism above is wrong — the hole in `tightestAllowance` does not open in
+practice — and there is no reason to keep an intermediate value at all.
+
 ## 3. Design
 
 | | |

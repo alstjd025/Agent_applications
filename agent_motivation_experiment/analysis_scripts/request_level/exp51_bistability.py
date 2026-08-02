@@ -96,7 +96,7 @@ def summarise(run):
     )
 
 
-ARM_RE = re.compile(r"_(fsbase|fluidserve|fsa|fsc|fskv|fsac|fsah|polyserve|slo)_m1_rpm_")
+ARM_RE = re.compile(r"_(fsbase|fluidserve|fsa|fsc|fskv|fsac|fsah|fsg\d+|polyserve|slo|loadbalance)_m1_rpm_")
 
 
 def main():
