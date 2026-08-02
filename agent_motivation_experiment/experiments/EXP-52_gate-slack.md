@@ -144,4 +144,68 @@ something it was not supposed to and nothing else may be read.
 
 ## 5. Result
 
-(to be filled in)
+### 5.1 Rule 0 passes — the parameterisation did not change the shipped policy
+
+Slack 1.0 at 60 req/s reads 58.9 and 59.8 offered, against 56.8–61.1 across the
+last three sessions on the previous binary. At 45 req/s it collapsed 2 of 4,
+consistent with 10 of 24 recorded. Nothing else here rests on a changed baseline.
+
+### 5.2 45 req/s — the collapse disappears at 1.4 and not before
+
+| slack | n (pooled with all history) | collapsed | probability if it were no better than 1.0 |
+|---|---|---|---|
+| 1.0 | 24 | 10 (42%) | — |
+| 1.111 | 3 | 1 | — |
+| **1.4** | **8** | **0** | **1.3%** |
+| ∞ (C) | 12 | 0 | 0.14% |
+
+Four extra conditions of 1.4 were run for exactly this reason: 0 of 4 has an 11%
+chance of happening to a value that is no better, and 0 of 8 has 1.3%.
+
+### 5.3 60 req/s — the axis is not monotone, and 1.111 is the worst point on it
+
+| slack | offered | admitted | rej% | goodput | chat | dr | swe | route% |
+|---|---|---|---|---|---|---|---|---|
+| 1.0 | 59.4 | 91.1 | 34.2 | 19,147 | 57.8 | 89.3 | 19.2 | 7.4 |
+| **1.111** | **49.7** | 86.7 | **42.4** | 17,197 | **38.8** | 98.9 | 67.1 | 9.4 |
+| 1.4 | 63.2 | 95.6 | 33.3 | 20,414 | 54.7 | 100.0 | 82.1 | 16.4 |
+| **∞ (C)** | **69.9** | **96.9** | **27.3** | **21,792** | **63.4** | 100.0 | 80.9 | 18.5 |
+
+**1.111 is worse than both ends and it is unstable**: its two repeats read 41.7
+and 57.6, a spread of 15.9 points where every other value sits at 0.3–1.2. At
+that slack the gate lands on exactly 50.0 ms and the engine delivers close to it,
+so the test oscillates around its own threshold. **That `1/0.90 = 1.111` is the
+principled point of the axis is not a reason to choose it**, and it is dropped.
+
+**Candidate C wins on everything at this rate, chat included** (57.8 → 63.4).
+Deep research gets somewhere to go, the gateway's held requests clear, and chat
+shares the room that frees. **Both aggregations therefore pick C here** — per
+request 69.9 and class-equal 81.4 are both the maximum. The disagreement that
+rejected C in EXP-50 exists only on the hour.
+
+### 5.4 The gap between the two denominators is the rejection rate
+
+Gaps of 31.7 / 37.0 / 32.4 / 27.0 against rejection rates of 34.2 / 42.4 / 33.3 /
+27.3%. **Larger slack narrows the gap**, because an open gate means fewer requests
+run out of time while held. C is not scoring by refusing more; it refuses less.
+
+### 5.5 Against rules 1–4
+
+1. **Answered**: the bistability stops at 1.4. The prediction that 1.111 would
+   already be enough was wrong, and §5.3 says why.
+2. **Answered and it is not what was expected**: chat is not monotone decreasing
+   in slack. It falls to 38.8 at 1.111, recovers to 54.7 at 1.4, and is *highest*
+   at C with 63.4 — above the shipped policy's 57.8.
+3. **Both aggregations reported** in §5.3.
+4. **The rule selects candidate C, not 1.4.** The smallest slack with zero
+   collapses is 1.4, but the rule's escape clause — chat more than 4.2 points
+   below slack 1.0 — does not fire for C either, and C is better than 1.4 on every
+   static measure. **The rule as written did not anticipate that the largest slack
+   would also be the best static point.** What still separates them is the hour,
+   which the rule did not cover and which §2a added a part for.
+
+### 5.6 Part 4, the hour, is running
+
+Three arms, slack 1.0 / 1.4 / ∞, on `dyn60_short_m123`. Started 2026-08-02 23:53
+KST, about 3.9 hours. The prediction is in §2a and it is the only thing that can
+still separate 1.4 from C.
