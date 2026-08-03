@@ -84,11 +84,13 @@ import sys
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib.ticker import FuncFormatter  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "analysis_scripts", "request_level"))
+
+from paper_style import COL_W, STYLE, GRID, kfmt, save  # noqa: E402
 
 from exp27_figures import collect, rps, ARM_C, ARM_L  # noqa: E402
 
@@ -128,8 +130,6 @@ from exp27_figures import collect, rps, ARM_C, ARM_L  # noqa: E402
 # is why that point carries a visible bar and no claim should rest on it.
 RUNS = ["results/*exp27p3*", "results/*exp27p5*"]
 
-COL_W = 3.335   # USENIX single column, inches. See the sizing note above.
-KTOK = 1000.0   # goodput tick labels are written in thousands (6k, 12k, ...)
 # One marker per arm, kept identical in both panels and reused (dotted, faded)
 # for that arm's offered curve, so the two denominators of one policy are
 # visibly the same policy and no marker has to be spent on the distinction.
@@ -141,24 +141,6 @@ MARK = {"polyserve": "o", "slo": "^", "fluidserve": "s", "fluidserveflat": "D"}
 # to say which Llumnix policy it is.
 LABEL = dict(ARM_L, slo="Llumnix")
 
-# Same rcParams as the project-wide PAPER_STYLE, with the two sizes that it
-# raises to 9 pt (axes labels and titles) pulled back to 8 pt, and markers and
-# line widths trimmed for the smaller drawing area.
-STYLE = {
-    "font.family": "serif",
-    "font.serif": ["DejaVu Serif", "Times New Roman", "Liberation Serif"],
-    "font.size": 8, "axes.labelsize": 8, "axes.titlesize": 8,
-    "axes.linewidth": 0.7, "legend.fontsize": 8, "legend.frameon": False,
-    "xtick.labelsize": 8, "ytick.labelsize": 8,
-    "xtick.direction": "in", "ytick.direction": "in",
-    "xtick.major.size": 2.5, "ytick.major.size": 2.5,
-    "xtick.major.width": 0.6, "ytick.major.width": 0.6,
-    "lines.linewidth": 1.2, "lines.markersize": 3.5,
-    # Type 42 (TrueType) rather than the default Type 3, which several
-    # camera-ready checkers reject.
-    "pdf.fonttype": 42, "ps.fonttype": 42,
-}
-GRID = dict(ls=":", lw=0.5, alpha=0.6)
 XLABEL = "Offered rate (request/s)"
 
 
@@ -178,14 +160,6 @@ def agg(df, arm):
         rej=("rejected", "mean"),
     ).reset_index().sort_values("rpm")
 
-
-def ktick(v, _pos):
-    """Thousands with a k suffix, so the axis label can stay 'Goodput token'.
-
-    Zero is written plain: '0k' is not a quantity anyone writes, and the tick
-    is the axis origin rather than a value being compared.
-    """
-    return "0" if v == 0 else f"{v / KTOK:g}k"
 
 
 def build(df, out, show_offered):
@@ -251,7 +225,7 @@ def build(df, out, show_offered):
         # 20k". Five ticks here also match the five on the left panel.
         ax_g.set_ylim(0, 23000)
         ax_g.set_yticks([0, 5000, 10000, 15000, 20000])
-        ax_g.yaxis.set_major_formatter(FuncFormatter(ktick))
+        ax_g.yaxis.set_major_formatter(kfmt())
 
         for ax in (ax_a, ax_g):
             ax.set_xticks(xticks)
@@ -271,22 +245,11 @@ def build(df, out, show_offered):
             key = plt.Line2D([], [], color="#555555", ls=":", lw=1.2, alpha=0.8)
             fig.legend([key], ["dotted: offered denominator, rejected = violation"],
                        ncol=1, bbox_to_anchor=(0.5, key_y), **legend_kw)
-        # No bbox_inches="tight" on the save: it crops the canvas to the ink,
-        # which makes the PDF narrower than COL_W, and \includegraphics then
-        # scales it back UP to \columnwidth and multiplies every font size by
-        # the same factor. The canvas has to stay exactly COL_W wide, so the
-        # layout is fitted inside it with rect instead.
         fig.tight_layout(rect=(0, 0.10, 1, rect_top), w_pad=0.8, pad=0.35)
         # One x label centred under both panels: repeating it costs a line of
         # figure height and reads as two different quantities.
         fig.text(0.5, 0.005, XLABEL, ha="center", va="bottom", fontsize=8)
-
-        fig.savefig(out)
-        w, h = fig.get_size_inches()
-        plt.close(fig)
-
-    print(f"wrote {out}  ({w:.3f} x {h:.2f} in; include with "
-          f"width=\\columnwidth, no scaling)")
+        save(fig, out)
 
 
 def main():

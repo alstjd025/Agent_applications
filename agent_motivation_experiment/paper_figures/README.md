@@ -10,6 +10,15 @@ same factor.
 |---|---|---|---|
 | `fig_exp27_pass3.py` | `exp27_pass3_attainment_goodput_offered.pdf` | 3.335 × 2.22 in | `figure`, `width=\columnwidth` |
 | | `exp27_pass3_attainment_goodput_admitted.pdf` | 3.335 × 1.95 in | `figure`, `width=\columnwidth` |
+| `fig_exp53_policies.py` | `exp53_attainment_goodput_offered.pdf` | 3.335 × 2.22 in | `figure`, `width=\columnwidth` |
+| | `exp53_attainment_goodput_admitted.pdf` | 3.335 × 1.95 in | `figure`, `width=\columnwidth` |
+| `fig_exp50_hour.py` | `exp50_hour_attainment_goodput.pdf` | 7.000 × 1.80 in | **`figure*`**, `width=\textwidth` |
+| `fig_workload_lengths.py` | `workload_lengths.pdf` | 3.335 × 2.60 in | `figure`, `width=\columnwidth` |
+
+`paper_style.py` holds the width, the rcParams, the arm colours and markers, the
+`k`-suffix tick formatter, and `save()`. Import from it rather than copying the
+constants; `save()` in particular exists so that no figure here reintroduces
+`bbox_inches="tight"`.
 
 3.335 in is the USENIX single column: `usenix2019_v3.sty` sets `\textwidth=7in`
 and `\columnsep=0.33in`. All type is 8 pt except the panel-internal annotations.
@@ -213,3 +222,310 @@ consistent with EXP-42 having moved its sweep down to 15–60 req/s.
 
 Putting a series from each into one figure would place three arms on three
 different workloads. An EXP-42 figure has to be built from EXP-42 arms only.
+
+---
+
+## `fig_exp53_policies.py` — four control planes on one static rate sweep
+
+Same two panels and same geometry as the EXP-27 figure, four arms instead of
+three.
+
+### Runs
+
+Thirty-two conditions, `results/*exp53r*`, m1 balanced mix, 8 minutes each,
+`--restart-per-condition`. Rates 900–4200 rpm = **15, 25, 35, 45, 50, 55, 60,
+70 req/s**. Run selection and the per-condition aggregation come from
+`analysis_scripts/request_level/exp53_compare.py`, which this script imports.
+
+| Arm | Legend | Colour / marker |
+|---|---|---|
+| `fluidserve` | FluidServe | `#1f77b4` □ |
+| `polyserve` | PolyServe | `#d62728` ○ |
+| `slo` | Llumnix SLO | `#2ca02c` △ |
+| `loadbalance` | Llumnix | `#9467bd` ▽ |
+
+**Every cell is n=1.** All 32 conditions are single runs, so no point on this
+figure carries an error bar and none of the spread numbers that exist for
+EXP-27 apply here. This is the single most important thing the caption has to
+say, because the reader's default reading of an unbarred point is that it is
+precise.
+
+### Values drawn
+
+`off` = offered denominator, `adm` = admitted, `gp` = goodput in output tokens/s.
+
+| req/s | FluidServe off / adm / rej / gp | PolyServe off=adm / gp | Llumnix SLO off / adm / rej / gp | Llumnix off=adm / gp |
+|---|---|---|---|---|
+| 15 | 100.0 / 100.0 / 0% / 8,049 | 100.0 / 7,883 | 100.0 / 100.0 / 0% / 7,846 | 100.0 / 8,023 |
+| 25 | 100.0 / 100.0 / 0% / 13,419 | 99.7 / 13,214 | 99.9 / 99.9 / 0% / 13,387 | 100.0 / 13,357 |
+| 35 | 100.0 / 100.0 / 0% / 17,879 | 40.5 / 8,379 | 99.9 / 99.9 / 0% / 18,163 | 99.7 / 18,093 |
+| 45 | 90.0 / 97.6 / 7.6% / 20,426 | 27.6 / 5,519 | 51.9 / 56.7 / 8.4% / 12,390 | 32.2 / 9,098 |
+| 50 | 77.9 / 93.0 / 16.1% / 20,072 | 26.8 / 5,571 | 34.7 / 44.0 / 20.7% / 10,760 | 14.3 / 3,727 |
+| 55 | 66.3 / 88.4 / 24.3% / 19,019 | 18.1 / 4,123 | 30.7 / 48.6 / 36.1% / 11,072 | 9.8 / 2,438 |
+| 60 | 66.7 / 97.7 / 31.0% / 20,775 | 17.0 / 4,122 | 26.4 / 54.0 / 50.3% / 11,099 | 7.3 / 1,749 |
+| 70 | 51.5 / 94.0 / 44.3% / 19,454 | 13.7 / 3,937 | 21.1 / 69.8 / 68.9% / 11,659 | 4.0 / 842 |
+
+### Why the offered version is the one to use
+
+This sweep is the clearest case in the project of the admitted denominator
+misleading. **Llumnix SLO's admitted attainment RISES from 44.0% at 50 req/s to
+69.8% at 70 req/s while its rejection rate goes 20.7% → 68.9%.** It is not
+recovering; it is refusing more than two thirds of arrivals and scoring itself
+on the third it kept. On the offered denominator the same arm falls 34.7 → 21.1.
+FluidServe's admitted curve has the same shape for the same reason, though less
+extremely (31.0% → 44.3% rejected).
+
+The admitted-only PDF is for the case where the surrounding text already gives
+the rejection rates. If it does not, use the offered one.
+
+### Open discrepancy — migration on PolyServe
+
+`exp53_compare.py` prints a standing note on every figure: *"Llumnix arms run
+with migration enabled; FluidServe and PolyServe do not use it and run
+without."* Its own counter, reading `server_metrics/migration_events.log`,
+disagrees for PolyServe:
+
+| Arm | non-zero rescheduling pairs, summed over its conditions |
+|---|---|
+| FluidServe | 0 |
+| **PolyServe** | **225** (8 at 45 req/s, 27 at 50, 40 at 55, 60 at 60, 90 at 70) |
+| Llumnix SLO | 0 |
+| Llumnix | 13 |
+
+So the arm the note says ran without migration is the one with by far the most
+rescheduling pairs, and one of the two arms the note says had it enabled
+produced none. **This is unresolved and the note is not reproduced on the paper
+figure until it is.** Either the note is wrong about how PolyServe was
+configured, or `rescheduling_pairs` counts something other than what the note
+means by migration. Whichever it is, the asymmetry between the arms is not
+currently established in the direction the note claims.
+
+### Regenerating
+
+```bash
+cd agent_motivation_experiment
+python3 paper_figures/fig_exp53_policies.py
+```
+
+---
+
+## `fig_exp50_hour.py` — the hour, FluidServe against Llumnix SLO
+
+Two side-by-side panels against time: (left) SLO attainment on the **admitted**
+denominator, (right) output token goodput. **This is the only figure here drawn
+at the full text width (7.0 in), so it goes in a `figure*` at
+`width=\textwidth`** — an hour at 30 s steps is ~119 points per line, which is
+unreadable in a 1.3 in panel.
+
+It is panels D and G of `results/aggregate_analysis/exp50/hour_timeline.png`,
+reduced from four arms to the two being compared and redrawn at paper size.
+
+### Runs
+
+One hour of moving load, the same trace for both arms, **one run each, from
+different experiments a day apart**.
+
+| Arm | Legend | Colour / style | Run |
+|---|---|---|---|
+| FluidServe, corrected length profile | FluidServe | `#1f77b4` solid | `results/260801_1808_exp50p2r1_fluidserve_full` |
+| Llumnix SLO | Llumnix SLO | `#2ca02c` dashed | `results/260731_2203_exp45r1_slo_full` |
+
+The trace steps its class mix every 15 minutes — **m1, m2, m3, m1, fifteen
+minutes each** — marked with grey vertical guides at 15, 30 and 45 min. The
+segment tags are no longer drawn on the figure, so **the caption has to name
+them**, otherwise the three guides are unexplained lines. Both curves move at
+those instants, which is what makes the shape attributable to the workload
+rather than to the policy. That the two arms saw the same trace is verified by
+panel A of the source figure, which draws the offered rate per arm and gets one
+curve.
+
+### Metrics
+
+Imported from `exp41_dynamic_timeline.py` and `exp22_fluidserve.py`, not
+reimplemented.
+
+- **Window** — 90 s wide, stepped every 30 s, anchored on **arrival**. A point
+  at minute *t* is "of the requests that arrived around *t*, this is what
+  happened to them"; a request arriving at *t* and finishing at *t*+30 s is
+  scored at *t*. Windows holding fewer than 30 requests are dropped.
+- **SLO attainment, admitted** — rejections leave the denominator entirely. This
+  is the quality of the work the policy chose to do, not the fraction of offered
+  load that was served.
+- **Goodput token (t/s)** — output tokens/s from requests that met their rule,
+  judged whole-request. A rejected request produced no tokens and contributes
+  none; that is a fact about tokens, not a choice of denominator, so this panel
+  is the same under either.
+
+### Whole-hour figures
+
+| Arm | Attainment, admitted | Attainment, offered | Rejected |
+|---|---|---|---|
+| FluidServe | **95.5%** | 69.7% | 27.0% |
+| Llumnix SLO | 66.3% | 38.3% | 42.1% |
+
+### What the caption has to carry
+
+1. **The rejection rates above.** The admitted denominator is the flattering one
+   for both arms and neither rejection rate appears anywhere on this figure.
+   FluidServe's 95.5% admitted is 69.7% offered; Llumnix SLO's 66.3% is 38.3%.
+   Without those numbers the left panel overstates both arms, and it overstates
+   the baseline more, because the baseline rejects more.
+2. **One run per arm.** No point on either line is an average and no wiggle is
+   noise-bounded. Every feature is one realisation.
+3. **The two runs are from different experiments a day apart** — EXP-45 for the
+   baseline, EXP-50 part 2 for FluidServe. Same trace, different session.
+4. **What the three vertical guides mark**: the class mix steps m1 → m2 → m3 →
+   m1 at 15, 30 and 45 minutes. Nothing on the figure says so any more.
+
+### Regenerating
+
+```bash
+cd agent_motivation_experiment
+python3 paper_figures/fig_exp50_hour.py
+```
+
+It prints the window count and the whole-hour figures for each arm; check them
+against the table above.
+
+---
+
+## The workload, for the paper's setup section
+
+Three request classes drawn from three sources, arriving as one request-level
+Poisson stream with classes drawn in shuffled fixed-composition blocks. Model:
+`meta-llama/Meta-Llama-3.1-70B-Instruct`, four engines, `max_tokens` 4096.
+
+| Class | Source | Dataset |
+|---|---|---|
+| chat | `sharegpt_request_level_poisson` | ShareGPT — HF `anon8231489123/ShareGPT_Vicuna_unfiltered`, `ShareGPT_V3_unfiltered_cleaned_split.json`, rev `192ab218`, 1,000 conversations → 3,354 requests, seed 42. Multi-turn chat turns sent as independent requests |
+| deep research | `searcharena_request_level_poisson` | Search Arena — HF `lmarena-ai/search-arena-24k`, `data/search-arena-chat-24k.parquet`, rev `fac8dcf8`, English, 12,603 questions and 33,152 notes → 60,000 requests, K notes per request with K ∈ [2, 12], seed 42. Each request is a synthesis over search-grounded notes |
+| agent (swe) | `codingagent_request_level_poisson` | SWE-bench Lite — literal replay of a recorded concurrency-1 transcript, `transcript_swe_short7k_mix1500.jsonl`. Prompts are replayed verbatim, so the input distribution is fixed by the recording |
+
+Mix on `m1`: request counts chat 10 : deep research 2 : agent 1, i.e. **76.9 /
+15.4 / 7.7 %** of requests.
+
+### Length distributions
+
+Tokens, measured at the gateway. Output is over **completed requests only** (not
+rejected, errored, or cut off at run end), pooled over the four arms of EXP-53
+at **15 req/s** — the lowest rate in that sweep, where all four arms hold 100%
+attainment and reject nothing, so the lengths are set by the workload and not
+truncated by saturation. The four arms agree to within 2% on every class median,
+which is the check that this is a workload property rather than a policy one.
+
+| Class | n | Input median | Input p90 | Input std | Output median | Output p90 | Output std |
+|---|---|---|---|---|---|---|---|
+| chat | 21,178 | 556 | 1,580 | 589 | 384 | 775 | 395 |
+| deep research | 4,225 | 3,993 | 7,519 | 2,411 | 971 | 1,233 | 274 |
+| agent (swe) | 2,157 | 5,725 | 7,787 | 1,416 | 517 | 648 | 119 |
+
+Means, where they are wanted alongside: input 677 / 4,328 / 5,788, output 445 /
+973 / 531.
+
+The three classes are deliberately spread on both axes: chat is short in and
+short out with a long tail (input std larger than its median), deep research is
+long in and long out with the tightest output distribution, and the agent class
+is the longest input with a short, tight output. That spread is what makes the
+per-class SLO budgets bind at different rates.
+
+### SLO rules
+
+There are two SLO specifications and they are not the same object. Do not quote
+one for the other.
+
+**1. What attainment is scored against** — `SLO_RULES` in
+`analysis_scripts/request_level/exp22_fluidserve.py`. A request is a violation
+if it breaks its class rule, or if it produced no first token at all.
+
+| Class | Rule |
+|---|---|
+| chat | TTFT ≤ 5 s **and** inter-token ≤ 50 ms |
+| deep research | TTFT ≤ 10 s **and** inter-token ≤ 100 ms |
+| agent (swe) | end-to-end ≤ 30 s |
+
+These are **absolute thresholds**, not multiples of a solo baseline; `--tau` is
+unused on these workloads. Inter-token latency is the corrected quantity,
+`(e2e − ttft) / (output_tokens − 1)`.
+
+**2. What is sent to the engine** — the `slo` block of the run config, packed
+into the OpenAI `priority` field as `ttft_ms * 1000 + tbt_ms`, where the `tbt`
+half doubles as PolyServe's tier key.
+
+| Class | `ttft_ms` | `tbt_ms` | `out_len` |
+|---|---|---|---|
+| chat | 5,000 | 50 | 386 |
+| deep research | 10,000 | 100 | 275 |
+| agent (swe) | 11,800 | 25 | 728 |
+
+The two agree for chat and deep research. For the agent class they are the same
+budget written two ways: the class is scored end to end at 30 s, and the engine
+needs a first-token deadline, so the 30 s is decomposed as
+`ttft = 30,000 − out_len × tbt = 30,000 − 728 × 25 = 11,800 ms`. That is the
+TTLT-to-first-token conversion in `workloads/swe_bench_coding/agent.py`.
+
+Two stale numbers in that block, neither of which invalidates a measurement:
+
+- **deep research `out_len` 275** against a measured median of 971. It is
+  **inert**: `agent.py` only reads `out_len` on the e2e-only branch of the
+  deadline calculation, and all three classes set `ttft_ms`, so that branch
+  never runs.
+- **agent `out_len` 728** against a measured median of 517. This one *was* used,
+  once, to compute the 11,800 ms above. At 517 tokens the decomposition would
+  give `30,000 − 517 × 25 = 17,075 ms`, so the engine is handed a first-token
+  deadline about 5.3 s tighter than the 30 s end-to-end budget requires. That is
+  conservative rather than wrong — the class is scored on the 30 s, which is
+  unaffected — but it means the agent class is prioritised slightly harder than
+  its own SLO demands.
+
+### Note on output-length reproducibility
+
+The same input does not always produce the same output length. Matched on
+`(task_id, iteration)` over 9,660 requests, inputs were 100% identical while
+outputs matched on only 65.7% (chat 72.4, deep research 44.2, agent 40.9%).
+Continuous batching puts a request in a different batch each run, which changes
+the floating-point reduction order and flips the choice at near-tied tokens.
+Differences are usually small (|Δ| p50 = 0–4 tokens) but the tail is long
+(p90 28–122, max 2,904). This is a property of batched serving, not a
+misconfiguration, and it is one reason a single run per condition is not enough.
+
+---
+
+## `fig_workload_lengths.py` — length distributions of the three classes
+
+`workload_lengths.pdf`, 3.335 × 1.95 in, `figure`, `width=\columnwidth`. Two
+panels — (left) input tokens, (right) output tokens — each carrying one
+probability density per class. This is the distribution behind the median / p90 /
+std table above: the table gives three numbers per class, the density shows the
+shape those numbers summarise.
+
+Same population as the table — the four arms of EXP-53 at 15 req/s, pooled,
+completed requests only, 27,560 requests.
+
+**Reading it.**
+
+- **chat** is the only broad distribution on either axis: input spans three
+  decades with a secondary mode near 20 tokens (very short turns) and a main
+  mode near 1k; output is a single wide mode near 400. Its input std (589)
+  exceeding its median (556) is this shape.
+- **deep research** is narrow on both axes and is the only class whose output
+  mode sits above 1k tokens.
+- **agent** has the highest input mode and a narrow output near 500. Its input
+  is a small number of recurring prompt shapes — the transcript is replayed
+  verbatim — which is why its curve is the spikiest.
+- The two panels share one x range, so the horizontal distance between a class's
+  input mode and its output mode is its expansion ratio and can be compared
+  across classes by eye.
+
+**How the density is computed.** Gaussian KDE over `log10(tokens)`, drawn
+against a log x axis, because the data spans 2 to 15,334 tokens: a kernel wide
+enough to smooth the high end erases the low end, and one narrow enough for the
+low end leaves the high end a comb of spikes. Consequences:
+
+- The curve is a density **per decade**, not per token. Area between two x values
+  is the share of that class's requests in that range; height is not comparable
+  to a linear-axis density. The y axis carries no numbers for that reason.
+- **Each class integrates to 1 over its own requests**, not over the traffic. The
+  curves answer "given a request of this class, how long is it". They do *not*
+  show that chat is 77% of requests — the shares are in the legend.
+- Heights are comparable between curves within a panel, not across the two
+  panels.

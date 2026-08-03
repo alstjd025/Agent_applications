@@ -204,8 +204,55 @@ run out of time while held. C is not scoring by refusing more; it refuses less.
    would also be the best static point.** What still separates them is the hour,
    which the rule did not cover and which §2a added a part for.
 
-### 5.6 Part 4, the hour, is running
+### 5.6 Part 4, the hour — the prediction failed and the intermediate value is dominated
 
-Three arms, slack 1.0 / 1.4 / ∞, on `dyn60_short_m123`. Started 2026-08-02 23:53
-KST, about 3.9 hours. The prediction is in §2a and it is the only thing that can
-still separate 1.4 from C.
+| arm | offered | admitted | rej% | goodput | chat | dr | swe | class-equal | preemptions |
+|---|---|---|---|---|---|---|---|---|---|
+| **slack 1.0** | **68.3** | **94.6** | **27.7** | **17,650** | **71.3** | 80.8 | 30.8 | 61.0 | 2,609 |
+| slack 1.4 | 63.0 | 93.0 | 32.2 | 16,978 | **55.7** | 100.0 | 76.7 | 77.4 | 1,357 |
+| ∞ (C) | 64.8 | 94.1 | 31.1 | 17,377 | 57.8 | 99.9 | 78.4 | **78.7** | 1,591 |
+
+§2a predicted slack 1.4's chat would land **between** C's 58.3 and slack 1.0's
+72.7, and its offered **above** C's 65.3. **Both are wrong in the same
+direction**: 1.4's chat is 55.7, *below* C's 57.8, and its offered is 63.0,
+*below* C's 64.8. The intermediate value is not a compromise between the two
+ends; it is worse than one of them on every column except preemptions.
+
+**So §2a's mechanism is refuted.** It argued that `gateAllowance` is the floor
+that survives when `tightestAllowance` empties out at high load, so an
+intermediate slack should retain protection that C gives up. If that were the
+mechanism, 1.4 would hold more chat than C. It holds less.
+
+The pre-registered clause was: "if 1.4 and C cannot be told apart there, the
+mechanism is wrong and no intermediate value is worth keeping." They can be told
+apart, in the wrong direction, which reaches the same conclusion more firmly.
+**The axis collapses back to its two ends.**
+
+Preemptions reproduce across sessions where the score does: slack 1.0 reads 2,609
+against 2,776 / 2,724 / 2,794 in EXP-48/49/50, and C reads 1,591 against EXP-50's
+1,873, inside the 26% spread this quantity is known to have.
+
+## 6. Verdict
+
+**No intermediate value is kept, and no default is changed.**
+
+What the axis actually looks like, over everything measured:
+
+| | slack 1.0 (shipped) | slack 1.4 | ∞ = candidate C |
+|---|---|---|---|
+| 45 req/s, collapse rate | **42%** (10 of 24) | 0% (0 of 8) | 0% (0 of 12) |
+| 60 req/s, offered | 59.4 | 63.2 | **69.9** |
+| 60 req/s, chat | 57.8 | 54.7 | **63.4** |
+| hour, offered | **68.3** | 63.0 | 64.8 |
+| hour, chat | **71.3** | 55.7 | 57.8 |
+| hour, class-equal | 61.0 | 77.4 | **78.7** |
+| hour, preemptions | 2,609 | **1,357** | 1,591 |
+
+1.4 is not best at anything except the preemption count. **The choice is between
+1.0 and C, and it is a genuine trade rather than a measurement gap**: C wins both
+static rates and the class-equal aggregation, 1.0 wins the hour on the
+per-request aggregation and on chat, which is 76.9% of arrivals.
+
+**EXP-53 runs with slack 1.0**, the configuration tagged as v0.1.1. Changing a
+default on a result this mixed is a decision about which aggregation the system
+is scored on, and that is stated as open in v0.1.1 §6.7 rather than settled here.
