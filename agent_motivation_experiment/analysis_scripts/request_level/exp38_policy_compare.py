@@ -115,18 +115,22 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", nargs="+", default=["results/*exp38r1*"])
     ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--title", default="EXP-38")
     a = ap.parse_args()
     os.makedirs(a.out_dir, exist_ok=True)
 
     cells = {}
     for pat in a.runs:
         for d in sorted(glob.glob(pat)):
+            # A rate sweep names the rate in the directory; a dynamic trace has
+            # no single rate, so all its arms go into one cell keyed by the
+            # variant. Without this branch every hour-long run was skipped and
+            # the side-by-side figure existed only for sweeps.
             m = re.search(r"_rpm_(\d+)", os.path.basename(d))
-            if not m:
-                continue
-            cells.setdefault(int(m.group(1)), {})[arm_of(d)] = d
+            key = int(m.group(1)) if m else os.path.basename(d).rsplit("_", 1)[-1]
+            cells.setdefault(key, {})[arm_of(d)] = d
 
-    for rpm in sorted(cells):
+    for rpm in sorted(cells, key=str):
         arms = [x for x in ARM_ORDER if x in cells[rpm]]
         if not arms:
             continue
@@ -169,9 +173,10 @@ def main():
                                      "fleet decode\n(tokens/s)"]):
                 ax[i][0].set_ylabel(lab)
             ax[0][0].legend(fontsize=6, loc="upper left")
-            fig.suptitle(f"EXP-38 engine layer at {rpm/60:.0f} req/s — "
-                         f"same four engines, three policies\n"
-                         f"rep1, m1 (m1f for the SLO arm), 8 min, "
+            where = (f"at {rpm/60:.0f} req/s" if isinstance(rpm, int)
+                     else f"on the hour-long dynamic trace ({rpm})")
+            fig.suptitle(f"{a.title} engine layer {where} — "
+                         f"same four engines, {len(arms)} policies\n"
                          f"rows share a y axis across columns", fontsize=9)
             fig.tight_layout(rect=(0, 0, 1, 0.96))
             p = os.path.join(a.out_dir, f"compare_rpm_{rpm}.png")

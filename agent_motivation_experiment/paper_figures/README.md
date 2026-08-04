@@ -13,7 +13,8 @@ same factor.
 | `fig_exp53_policies.py` | `exp53_attainment_goodput_offered.pdf` | 3.335 × 2.22 in | `figure`, `width=\columnwidth` |
 | | `exp53_attainment_goodput_admitted.pdf` | 3.335 × 1.95 in | `figure`, `width=\columnwidth` |
 | `fig_exp50_hour.py` | `exp50_hour_attainment_goodput.pdf` | 7.000 × 1.60 in | **`figure*`**, `width=\textwidth` |
-| `fig_workload_lengths.py` | `workload_lengths.pdf` | 3.335 × 2.60 in | `figure`, `width=\columnwidth` |
+| `fig_workload_lengths.py` | `workload_lengths.pdf` | 3.335 × 1.95 in | `figure`, `width=\columnwidth` |
+| `fig_azure_trace_shape.py` | `azure_trace_shape.pdf` | 3.335 × 1.60 in | `figure`, `width=\columnwidth` |
 
 `paper_style.py` holds the width, the rcParams, the arm colours and markers, the
 `k`-suffix tick formatter, and `save()`. Import from it rather than copying the
@@ -529,3 +530,60 @@ low end leaves the high end a comb of spikes. Consequences:
   show that chat is 77% of requests — the shares are in the legend.
 - Heights are comparable between curves within a panel, not across the two
   panels.
+
+---
+
+## `fig_azure_trace_shape.py` — how much the source load varies
+
+`azure_trace_shape.pdf`, 3.335 × 1.60 in, `figure`, `width=\columnwidth`.
+Arrival rate over the four-day Azure window our dynamic trace is built from,
+normalised to its own peak. The claim is the vertical extent.
+
+### Why the SOURCE and not our replayed trace
+
+Our trace is **not** a linearly rescaled Azure trace, and the difference decides
+what this figure is allowed to say. `traces/dynamic/build_dynamic_mix_trace.py`
+applies a **quantile (rank) transform** onto a chosen band — 10 to 50 req/s —
+which keeps the temporal order and autocorrelation of the source (when Azure is
+busy, we are busy) but replaces the distribution of rates with a uniform one
+over the band. Its own docstring says to describe the result as "Azure-shaped,
+rescaled to our cluster", not "an Azure trace".
+
+So **the replayed trace's peak-to-trough ratio is 50/10 = 5.0× by
+construction** — a parameter chosen so the run sweeps the band the fleet
+resolves. Drawing that as evidence that real serving load varies would be
+circular. The variation claim has to come from the source series, which is what
+this figure draws.
+
+A second consequence: time spent at each rate is uniform in the replay and is
+not uniform in the source. Horizontal extents on this figure are not the
+replay's.
+
+### Window and numbers
+
+`traces/azure/plots/_minute_{conv,code}2024.csv` — per-minute request counts of
+the Azure LLM Inference 2024 conversation and code traces, summed index-wise —
+restricted to `day_window=[0,4]` from `start_hour=6`, i.e. minutes 360–6120,
+5,760 minutes, four days. The script reads those parameters from
+`traces/dynamic/canonical/dyn60_azure4d.plan.json` rather than hardcoding them,
+so regenerating the trace with a different window cannot leave this figure
+describing the old one.
+
+| | requests/min | fraction of peak |
+|---|---|---|
+| max | 9,049 | 1.000 |
+| p95 | 7,351 | 0.812 |
+| median | 3,887 | 0.430 |
+| p5 | 2,181 | 0.241 |
+| min | 1,568 | 0.173 |
+
+**max / min = 5.77×**, **p95 / p5 = 3.37×**. Quote whichever matches the claim
+being made and say which it is — the first is the extreme-to-extreme range and
+is sensitive to single minutes, the second is the robust one. The generator's
+docstring quotes ~3.6× for p95/p5, computed over a different window than the
+four days used here.
+
+The conv and code traces cover **different calendar weeks** and are summed by
+index, which aligns hour-of-day phase but not calendar date. That is the
+generator's documented caveat, carried here for completeness; it does not affect
+the diurnal shape.

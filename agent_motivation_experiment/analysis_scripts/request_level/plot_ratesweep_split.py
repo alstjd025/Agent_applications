@@ -317,14 +317,31 @@ def main():
                     help="dirname token preceding the rate value (e.g. 'lambda_')")
     ap.add_argument("--rate-div", type=float, default=60.0,
                     help="divide the parsed value by this to get req/s")
+    ap.add_argument("--rate", type=float, default=None,
+                    help="offered rate to put in the titles when the directory "
+                         "name carries no rate, as for a dynamic trace whose "
+                         "rate varies. The tag then comes from the dirname.")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
+
+    # A dynamic-trace run has no rate in its name, so the sweep parse is tried
+    # and the directory name is used as the tag when it does not apply. Without
+    # this the script raised ValueError on any run that was not a rate sweep,
+    # which is why the hour-long traces went without engine-layer figures.
+    def parsed(x):
+        try:
+            return float(x.split(args.rate_key)[1])
+        except (IndexError, ValueError):
+            return None
+
     dirs = sorted(glob.glob(args.glob),
-                  key=lambda x: float(x.split(args.rate_key)[1]))
+                  key=lambda x: (parsed(x) is None, parsed(x) or 0.0, x))
     written = []
     for run in dirs:
-        rpm = float(run.split(args.rate_key)[1])
-        tag = f"{args.rate_key}{rpm:g}"
+        p = parsed(run)
+        rpm = p if p is not None else (args.rate or 0.0) * args.rate_div
+        tag = f"{args.rate_key}{rpm:g}" if p is not None \
+            else os.path.basename(run).split("_", 2)[-1]
         written.append(plot_llumnix(run, rpm, args.out_dir, tag, args.rate_div))
         written.append(plot_engine(run, rpm, args.out_dir, tag, args.rate_div))
         written.append(plot_tokens(run, rpm, args.out_dir, tag, args.rate_div))

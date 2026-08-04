@@ -53,7 +53,8 @@ from exp22_fluidserve import (  # noqa: E402
 
 # Same dict for EXP-41 and EXP-44; an arm whose glob matches nothing is skipped.
 ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe",
-        "fsa": "FluidServe + margin"}
+        "fsa": "FluidServe + margin", "polyserve": "PolyServe",
+        "loadbalance": "Llumnix"}
 # One colour per engine, held across every panel and both figures.
 ENG_C = {8000: "#1f77b4", 8001: "#ff7f0e", 8002: "#2ca02c", 8003: "#d62728"}
 WIN = 60.0  # seconds per point on the engine series

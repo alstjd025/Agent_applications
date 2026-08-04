@@ -173,19 +173,24 @@ def main():
             # A: the load. Drawn once per arm; they see the same trace, so the
             # two lines lying on top of each other is the check that they did.
             b = (r["rel"] // STEP).astype(int)
+            # Panels where the arm is already carried by colour are drawn
+            # SOLID. The registered line style is used only in E and F, where
+            # colour encodes the class and the style is the only thing left to
+            # separate the policies. Mixing the two conventions made a reader
+            # ask whether a dashed attainment line meant a different quantity.
             ax[0].plot(np.array(sorted(b.unique())) * STEP / 60.0,
                        b.value_counts().sort_index().values / STEP,
-                       color=c, ls=ls, lw=0.7, alpha=0.8, label=lab)
-            ax[1].plot(x, rej, color=c, ls=ls, label=lab)
-            ax[2].plot(x, off, color=c, ls=ls, label=lab)
-            ax[3].plot(x, adm, color=c, ls=ls, label=lab)
+                       color=c, lw=0.7, alpha=0.8, label=lab)
+            ax[1].plot(x, rej, color=c, label=lab)
+            ax[2].plot(x, off, color=c, label=lab)
+            ax[3].plot(x, adm, color=c, label=lab)
             for cl in CLASSES:
                 ax[4].plot(x, per_off[cl], color=CLASS_COLORS[cl], ls=ls, lw=1.1)
                 ax[5].plot(x, per_adm[cl], color=CLASS_COLORS[cl], ls=ls, lw=1.1)
-            ax[6].plot(x, gp, color=c, ls=ls, label=lab)
+            ax[6].plot(x, gp, color=c, label=lab)
             eng = engine_total(runs[arm])
             if eng:
-                ax[7].plot(eng[0], eng[1], color=c, ls=ls, label=f"{lab} batch")
+                ax[7].plot(eng[0], eng[1], color=c, label=f"{lab} batch")
                 ax[7].plot(eng[0], eng[2] * 20, color=c, ls=":", lw=0.8, alpha=0.6)
 
         titles = [f"A. offered rate (30 s bins) — all {len(data)} arms see the same trace",

@@ -55,8 +55,9 @@ def sweep(out):
     return df
 
 
-def hour(out, series):
+def hour(out, series, name="class_goodput_hour.png"):
     WIN, STEP = 90.0, 30.0
+    totals = {}
     with plt.rc_context(PAPER_STYLE):
         fig, ax = plt.subplots(1, 3, figsize=(7.4, 2.5), sharex=True, sharey=True)
         for lab, col, path in series:
@@ -74,6 +75,12 @@ def hour(out, series):
                 t += STEP
             for a_, c in zip(ax, CLASSES):
                 a_.plot(xs, ys[c], color=col, lw=1.1, label=lab)
+            # The time series answers "when", the totals answer "how much", and
+            # the second question is the one the fairness argument turns on: a
+            # policy can hold a class steady all hour at a level that adds up to
+            # nothing. Both are printed so neither is read alone.
+            totals[lab] = {c: pd.to_numeric(ok[ok["class"] == c].get("output_tokens"),
+                           errors="coerce").fillna(0).sum() / dur for c in CLASSES}
         for a_, c in zip(ax, CLASSES):
             a_.set_title(c, fontsize=8)
             a_.set_xlabel("time (minutes)")
@@ -81,15 +88,32 @@ def hour(out, series):
         ax[0].set_ylabel("goodput (output tokens/s)")
         ax[1].legend(loc="lower center", bbox_to_anchor=(0.5, 1.14), ncol=3,
                      fontsize=7, columnspacing=1.2)
-        fig.savefig(os.path.join(out, "class_goodput_hour.png"), dpi=300,
-                    bbox_inches="tight")
+        fig.savefig(os.path.join(out, name), dpi=300, bbox_inches="tight")
+    print(f"\nhour-trace goodput, output tokens/s, whole run ({name})")
+    print(f"{'arm':<16}" + "".join(f"{c:>16}" for c in CLASSES) + f"{'total':>10}")
+    for lab, v in totals.items():
+        print(f"{lab:<16}" + "".join(f"{v[c]:>16,.0f}" for c in CLASSES)
+              + f"{sum(v.values()):>10,.0f}")
+    return totals
 
+
+EXP53_HOUR = [("FluidServe", "#1f77b4", "results/260802_0754_exp52p4r1_fluidserve_full"),
+              ("+ candidate C", "#d62728", "results/260802_1008_exp52p4r1_fsc_full"),
+              ("Llumnix SLO", "#2ca02c", "results/260731_2203_exp45r1_slo_full")]
 
 if __name__ == "__main__":
-    out = "results/aggregate_analysis/exp53"
-    os.makedirs(out, exist_ok=True)
-    sweep(out)
-    hour(out, [("FluidServe", "#1f77b4", "results/260802_0754_exp52p4r1_fluidserve_full"),
-               ("+ candidate C", "#d62728", "results/260802_1008_exp52p4r1_fsc_full"),
-               ("Llumnix SLO", "#2ca02c", "results/260731_2203_exp45r1_slo_full")])
-    print("wrote class_goodput_sweep.png and class_goodput_hour.png to", out)
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out", default="results/aggregate_analysis/exp53")
+    ap.add_argument("--sweep", action="store_true",
+                    help="also draw the rate-sweep panel (EXP-53 runs, hardcoded glob)")
+    ap.add_argument("--hour", nargs="*", default=None,
+                    help="label|colour|run-dir, repeatable; defaults to EXP-52's three")
+    ap.add_argument("--hour-name", default="class_goodput_hour.png")
+    a = ap.parse_args()
+    os.makedirs(a.out, exist_ok=True)
+    if a.sweep or a.hour is None:
+        sweep(a.out)
+    series = EXP53_HOUR if not a.hour else [tuple(s.split("|", 2)) for s in a.hour]
+    hour(a.out, series, a.hour_name)
+    print("wrote to", a.out)
