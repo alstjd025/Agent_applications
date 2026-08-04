@@ -2,69 +2,56 @@
 """Paper figure: EXP-55 — each class saturates at a different rate, in a
 different engine state.
 
-  exp55_class_knees.pdf     7.0 x 1.90 in, `figure*`, width=\\textwidth
+  exp55_class_knees.pdf     3.335 x 3.20 in, `figure`, width=\\columnwidth
 
-Four panels, one curve per class, from the single-class sweep: only one class is
-offered at a time, so no routing decision can differentiate anything and the
-four engines are four replicas of the same experiment.
+A 3x3 grid. **Columns are the three classes, rows are three quantities**: SLO
+attainment, KV occupancy, engine queue depth. Every panel is drawn against
+ABSOLUTE offered rate over that class's own measured range, so nothing is
+normalised and nothing is squeezed: chat spans 40-90 req/s, the agent class
+12-48, deep research 8-30, and each column gets an axis that fits its own class.
+The dotted vertical rule in every panel is that class's knee, so a column reads
+straight down -- at the rate where attainment falls, this is what the engine
+looked like.
 
-THE X AXIS IS OFFERED RATE DIVIDED BY THAT CLASS'S OWN KNEE. Drawn against
-absolute rate the three classes occupy three disjoint stretches — chat 40-90,
-agent 12-48, deep research 8-30 req/s — so no two curves share an x value and
-each hangs in its own third of the panel with nothing to compare against.
-Normalised, all three span roughly 0.4 to 1.7 and lie on top of one another,
-which is what turns the figure from three separate sweeps into one comparison.
+That is the whole figure: **the three knees are 70, 28 and 18 req/s, and the
+engine state at those three moments is nothing alike.**
 
-The absolute knees are the fact that normalising would otherwise throw away, so
-they are printed in the legend. 1.0 is marked in every panel.
+              knee      KV p90   queue p90
+  chat        70 req/s    27%        2
+  agent       28 req/s    65%        2
+  deep res.   18 req/s   100%      144
 
-  (a) SLO attainment      the outcome. Normalised, the three nearly overlay:
-                          every class collapses the same way across its own knee
-  (b) distance to rule    each class against ITS OWN rule, 1.0 = the rule
-  (c) KV occupancy        the engine state at that moment -- and here the three
-                          do NOT overlay, which is the point of the figure
-  (d) engine queue        the other engine state, on a symlog axis
-
-(a) and (b) collapsing onto one curve while (c) and (d) stay three curves apart
-IS the result: the classes fail identically relative to their own limit, and the
-engine is in a completely different state each time they do.
-
-The claim the figure exists for is the pair (c) and (d) read at the rate where
-(b) crosses 1.0. All three classes fail when they reach their own rule, and the
-engine looks completely different at each of those moments:
-
-              knee     KV at knee   queue at knee
-  chat        70 req/s     27%           2
-  agent       28 req/s     64%           1
-  deep res.   18 req/s    100%         140
-
-**Chat's collapse is invisible in both (c) and (d).** At the rate where its
-attainment falls from 94.9% to 53.3%, the KV pool is 27% used and two requests
-are queued. A policy watching memory, or queue depth, sees nothing wrong at the
-moment chat is already missing its rule. That is the argument for modelling
+**Chat's collapse is invisible in both lower rows.** At the rate where its
+attainment falls from 94.9% to 53.3%, the KV pool is 27% used at its 90th
+percentile -- and never exceeds 35.4% at any sample in the run -- with two
+requests queued. A policy watching memory, or queue depth, sees nothing wrong at
+the moment chat is already missing its rule. That is the argument for modelling
 per-token pace per class rather than governing by a single occupancy threshold.
 
-PANEL (b) IS NORMALISED PER CLASS BECAUSE THE THREE ARE NOT SCORED ON THE SAME
-AXIS. chat and deep research are scored on time-to-first-token AND inter-token
-latency; the agent class is scored end to end at 30 s and has no rule on either
-of the other two. Plotting raw inter-token latency for all three would compare
-a quantity that is the rule for two classes against one that is not the rule for
-the third. The panel therefore plots, per request, how close it came to its own
-rule — `max(ITL/budget, TTFT/budget)` for chat and deep research, `e2e/30 s` for
-the agent class — and draws the median per condition. 1.0 is the rule for every
-class, so the three curves cross it at their own knees.
+Deep research is the opposite: it reaches the knee with the pool full and 144
+requests queued, and it is the only class where queueing enters the rule at all
+(at the knee 22.1% of its requests miss both halves of the rule and 3.0% miss
+time-to-first-token alone; one rate higher its TTFT median jumps from 0.69 s to
+11.21 s as the queue goes from 140 to 338). The agent class sits between the
+two, and is scored end to end rather than on either of those axes.
 
-WHICH HALF OF THE RULE ACTUALLY BREAKS, MEASURED, IS NOT THE SAME FOR ALL THREE:
+WHY THE MEAN FOR THE TWO ENGINE ROWS. The queue is zero for most of the run at
+every rate below saturation, so its MEDIAN is exactly 0 across the whole of
+chat's sweep bar one point and the curve disappears; and its p90 never falls
+below 1 for chat, because chat's sweep starts at 40 req/s where the ninetieth
+percentile always finds someone waiting, so that curve cannot start where the
+other two do. The mean is the only one of the three that is both continuous and
+zero at low load, which is what lets the three classes share a baseline. Chat's
+mean queue at its knee is 0.6 against deep research's 45.0 -- a factor of 75 in
+one number. Same statistic for the KV row, so the two are read the same way.
 
-  chat          inter-token only. TTFT violations are 0.0% at every rate and
-                TTFT p95 is 1.12 s against a 5 s budget.
-  agent         end-to-end. TTFT p50 is 0.49 s, so of the 32.8 s median at the
-                knee essentially all is decode; the budget is a total but the
-                quantity that fills it is per-token time.
-  deep research BOTH, and this is the only class where queueing enters the rule.
-                At the knee 22.1% of requests miss both halves and 3.0% miss
-                TTFT alone; one rate higher TTFT p50 jumps from 0.69 s to
-                11.21 s as the queue goes from 140 to 338.
+The ordering does not depend on the choice: at their knees the three classes sit
+at KV mean 20.8 / 43.0 / 77.1, median 21.6 / 39.8 / 98.7 and p90 27.0 / 64.7 /
+99.9. Both gauges are trimmed to the same analysis window `load_run` scores
+attainment on.
+
+The queue row is symlog: the values run from 0, which chat holds most of the
+run, to 2,666, and a plain log axis would drop the zeros.
 
 ONE RUN PER CONDITION, 24 conditions, no repeats. And the experiment's own
 caveat: bursts are spread over four engines, so each knee sits very slightly
@@ -89,8 +76,10 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "analysis_scripts", "request_level"))
 
-from paper_style import TEXT_W, STYLE, GRID, save  # noqa: E402
-from exp22_fluidserve import load_run, per_request, CLASS_COLORS  # noqa: E402
+from paper_style import COL_W, STYLE, GRID, save  # noqa: E402
+from exp22_fluidserve import (  # noqa: E402
+    load_run, per_request, CLASS_COLORS, WARMUP_S, DRAIN_S,
+)
 
 RUNS = "results/*exp55r1_loadbalance_*"
 TAG_RE = re.compile(r"_loadbalance_(schat|sdr|sswe)_rpm_(\d+)$")
@@ -102,19 +91,43 @@ CLS = {
     "sswe": ("agent", CLASS_COLORS["swe"], "-.", dict(e2e=30.0)),
 }
 ORDER = ["schat", "sswe", "sdr"]
-FIG_H = 1.90
+# Panel letters as the user specified them.
+# One line each. "Deep research" written out does not fit a 0.9 in column at
+# 8 pt, so the third is abbreviated rather than wrapped -- the caption gives the
+# class its full name.
+PANEL = {"schat": "(a) Chat", "sswe": "(b) Agent",
+         "sdr": "(c) Deep res."}
+FIG_H = 3.20
 
 
 def engine_series(run, prefix):
-    """Every sample of one engine gauge, pooled over the four engines."""
+    """One engine gauge, pooled over the four engines, over the SAME window
+    `load_run` scores attainment on.
+
+    Without the trim the gauge covers the whole file including the arrival ramp
+    while the attainment covers minute one onward, so the two panels would be
+    measuring different stretches of the same run. The trim turns out to move
+    the numbers very little here -- KV median 20.8 -> 21.6, 38.6 -> 39.8,
+    97.2 -> 98.7 -- because the runs are eight minutes and the warmup is one.
+    It is done anyway so that the panels are comparable by construction rather
+    than by luck.
+    """
     out = []
     for f in glob.glob(os.path.join(run, "server_metrics", "engine_*.jsonl")):
+        rec = []
         for line in open(f):
             try:
                 o = json.loads(line)
             except ValueError:
                 continue
-            if not o.get("ok"):
+            if o.get("ok"):
+                rec.append(o)
+        if not rec:
+            continue
+        t0, t1 = rec[0]["t"], rec[-1]["t"]
+        for o in rec:
+            rel = o["t"] - t0
+            if not (WARMUP_S <= rel < (t1 - t0) - DRAIN_S):
                 continue
             for k, v in o.items():
                 if k.startswith(prefix) and isinstance(v, (int, float)):
@@ -154,8 +167,8 @@ def collect():
             tag=tag, rate=rpm / 60.0,
             attain=per_request(r, "violate_offered"),
             dist=float(rule_distance(served, CLS[tag][3]).median()),
-            kv=float(np.percentile(kv, 90) * 100) if len(kv) else np.nan,
-            q=float(np.percentile(q, 90)) if len(q) else np.nan,
+            kv=float(kv.mean() * 100) if len(kv) else np.nan,
+            q=float(q.mean()) if len(q) else np.nan,
         ))
     return pd.DataFrame(rows).sort_values(["tag", "rate"])
 
@@ -169,14 +182,21 @@ def main():
     knees = {}
     for tag in ORDER:
         d = df[df.tag == tag]
-        # The knee: the first rate at which offered attainment falls below 60%.
-        # This is the definition EXP-55 uses, and it is not the same as "the
-        # median request crosses its rule" -- that one lands a step later for
-        # chat and deep research, because the median crossing 1.0 IS the 50%
-        # attainment point. Reporting both would invite quoting whichever is
-        # convenient, so one is chosen and named.
-        under = d[d.attain < 60.0]
-        knee = under.rate.min() if len(under) else np.nan
+        # The knee: the LAST rate at which attainment is still >= 85%, i.e.
+        # the measured condition at which the curve begins to turn down.
+        #
+        # EXP-55 writes each knee as an interval -- 65 -> 70, 24 -> 28,
+        # 16 -> 18 -- because it is a transition between two measured rates and
+        # not a point. Either end can be drawn, and the choice changes what the
+        # lower two rows read at the line: at the onset chat is at 22.7% KV and
+        # deep research at 82.0%, while one rate later they are 27.0% and 99.9%
+        # and deep research's queue has gone from 1 to 144. The onset is used
+        # because it is where the eye puts the bend, and because taking the
+        # later end would let the figure quote the most dramatic engine state
+        # available rather than the state at the moment the class starts to
+        # fail. The queue blow-up past the line is visible in the panel itself.
+        healthy = d[d.attain >= 85.0]
+        knee = healthy.rate.max() if len(healthy) else np.nan
         knees[tag] = knee
         at = d[d.rate == knee]
         if len(at):
@@ -185,60 +205,67 @@ def main():
                   f"attainment {a.attain:5.1f}%  KV p90 {a.kv:5.1f}%  "
                   f"queue p90 {a.q:7.1f}")
 
-    # Normalise the x axis per class now that the knees are known.
-    df["x"] = df.apply(lambda r: r.rate / knees[r.tag], axis=1)
-
-    panels = [("attain", "SLO attainment (%)", None),
-              ("dist", "Distance to rule\n(1.0 = the rule)", 1.0),
-              ("kv", "KV occupancy p90 (%)", None),
-              ("q", "Engine queue p90", None)]
+    # Short labels: the row is one metric for all three columns, and the
+    # statistic (p90) belongs in the caption rather than repeated on the axis
+    # where it crowds the tick numbers.
+    # Short labels because every panel carries both axes and a column is only
+    # about 0.8 in of drawing area wide: "SLO attainment (%)" is taller rotated
+    # than a row is, and "Offered rate (request/s)" is wider than a column.
+    # The statistic (p90) and the full names go in the caption.
+    rows = [("attain", "SLO attain. (%)"),
+            ("kv", "KV used (%)"),
+            ("q", "Queue length")]
 
     with plt.rc_context(STYLE):
-        fig, axes = plt.subplots(1, 4, figsize=(TEXT_W, FIG_H))
-        handles, labels = [], []
+        fig, axes = plt.subplots(len(rows), len(ORDER),
+                                 figsize=(COL_W, FIG_H), sharex="col")
 
-        for ax, (col, ylab, hline) in zip(axes, panels):
-            for tag in ORDER:
-                d = df[df.tag == tag]
-                lab, c, ls, _ = CLS[tag]
-                # Lines only. Eight points per class and three classes now
-                # overlapping in x, so markers add clutter without adding a
-                # reading: the curves are dense enough to follow unaided.
-                h, = ax.plot(d.x, d[col], color=c, ls=ls, lw=1.2)
-                if col == "attain":
-                    handles.append(h)
-                    labels.append(f"{lab} ({knees[tag]:.0f} req/s)")
-            if hline is not None:
-                ax.axhline(hline, color="#555555", lw=0.7, ls=":", zorder=0)
-            ax.set_xlim(0.4, 1.75)
-            ax.set_xticks([0.5, 1.0, 1.5])
-            ax.axvline(1.0, color="#555555", lw=0.7, ls=":", zorder=0)
-            ax.set_xlabel("Offered rate / knee")
-            ax.set_ylabel(ylab)
-            ax.grid(axis="both", **GRID)
-            ax.set_axisbelow(True)
+        for col, tag in enumerate(ORDER):
+            d = df[df.tag == tag].sort_values("rate")
+            lab, c, _, _ = CLS[tag]
+            # A little air either side of the measured range so the first and
+            # last point are not on the frame.
+            span = d.rate.max() - d.rate.min()
+            lo, hi = d.rate.min() - 0.06 * span, d.rate.max() + 0.06 * span
+            for row, (field, ylab) in enumerate(rows):
+                ax = axes[row][col]
+                ax.plot(d.rate, d[field], color=c, lw=1.3)
+                # The knee, in every panel of the column, so the column reads
+                # straight down from "attainment falls here" to "and the engine
+                # looked like this".
+                ax.axvline(knees[tag], color="#d62728", lw=0.8, ls=":", zorder=0)
+                ax.set_xlim(lo, hi)
+                ax.grid(axis="both", **GRID)
+                ax.set_axisbelow(True)
+                # NUMBERS on every panel, NAMES only on the outer edge. Each
+                # column has its own rate range and each row its own scale, so
+                # a reader needs the tick values in every cell; the axis name
+                # is the same down a column and across a row, and repeating it
+                # nine times costs the drawing area the curves need.
+                ax.tick_params(labelbottom=True, labelleft=True)
+                if col == 0:
+                    ax.set_ylabel(ylab, labelpad=1.5)
+                if row == len(rows) - 1:
+                    ax.set_xlabel("Rate (req/s)", labelpad=1.5)
+            # Black, not the class colour: the curve already carries the
+            # colour, and a coloured heading reads as decoration.
+            # Panel letters, black. The knee rate is no longer written here;
+            # the dotted rule still marks it in all three panels of the column,
+            # so THE CAPTION HAS TO SAY WHAT THAT RULE IS -- nothing on the
+            # figure names it any more.
+            axes[0][col].set_title(PANEL[tag], fontsize=8, color="black", pad=2)
 
-        axes[0].set_ylim(0, 105)
-        axes[0].set_yticks([0, 50, 100])
-        # Log, because the quantity is a ratio and everything the panel is for
-        # happens between 0.3 and 1.5; on a linear axis the deep research tail
-        # at 6.8 compresses all three crossings into the bottom fifth.
-        axes[1].set_yscale("log")
-        axes[1].set_ylim(0.2, 10)
-        axes[1].set_yticks([0.25, 0.5, 1, 2, 4, 8])
-        axes[1].set_yticklabels(["0.25", "0.5", "1", "2", "4", "8"])
-        axes[2].set_ylim(0, 105)
-        axes[2].set_yticks([0, 50, 100])
-        # Queue spans 0 to 2,666, and zero is a value the chat class holds all
-        # the way through, so a plain log axis would drop it. symlog keeps 0.
-        axes[3].set_yscale("symlog", linthresh=1.0)
-        axes[3].set_ylim(0, 4000)
+        for col in range(len(ORDER)):
+            axes[0][col].set_ylim(0, 105)
+            axes[0][col].set_yticks([0, 50, 100])
+            axes[1][col].set_ylim(0, 105)
+            axes[1][col].set_yticks([0, 50, 100])
+            # symlog keeps the zeros that chat holds for most of its sweep.
+            axes[2][col].set_yscale("symlog", linthresh=1.0)
+            axes[2][col].set_ylim(0, 4000)
 
-        fig.legend(handles, labels, loc="lower center", ncol=len(labels),
-                   bbox_to_anchor=(0.5, 0.905), frameon=False,
-                   columnspacing=1.4, handlelength=2.0, handletextpad=0.5,
-                   borderaxespad=0.0)
-        fig.tight_layout(rect=(0, 0, 1, 0.895), w_pad=0.9, pad=0.35)
+
+        fig.tight_layout(w_pad=0.3, h_pad=0.4, pad=0.3)
         save(fig, os.path.join(HERE, "exp55_class_knees.pdf"))
     return 0
 
