@@ -50,6 +50,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from exp22_fluidserve import load_run, attain  # noqa: E402
+from exp41_engine_view import attribute_engines  # noqa: E402
 
 ARMS = {"fluidserve": "FluidServe", "fsnoaff": "class preference off"}
 GATE = "scheduler_fluidserve_gate_allowance_ms"
@@ -96,6 +97,46 @@ def scheduler_series(run):
     return dict(gate=gate, dec=dec, inf=inf)
 
 
+def separation(run, r):
+    """How concentrated each class was, per window, and on which instance.
+
+    This is the quantity the preference is supposed to produce, so it is the
+    direct test of whether the mechanism engaged at all rather than of what it
+    was worth. It is computed per window and not pooled over the run, because a
+    concentration whose location moves reads as no concentration at all when
+    summed over the whole run -- that error was made once and is recorded in
+    section 59.3.
+
+    A class spread evenly over four instances reads 25%.
+    """
+    f = os.path.join(run, "analysis", "request_engine.csv")
+    if not os.path.exists(f):
+        return {}
+    try:
+        j, _ = attribute_engines(run, r)
+    except Exception:
+        return {}
+    if j.empty:
+        return {}
+    WIN, STEP = 60.0, 30.0
+    out = {}
+    for cls in ("chat", "deepresearch", "swe"):
+        vals, movers = [], []
+        t, tmax = 0.0, j["rel"].max()
+        while t + WIN <= tmax:
+            w = j[(j["rel"] >= t) & (j["rel"] < t + WIN) & (j["class"] == cls)]
+            if len(w) >= 40:
+                c = w["engine_port"].value_counts()
+                vals.append(100.0 * c.iloc[0] / c.sum())
+                movers.append(int(c.index[0]))
+            t += STEP
+        if vals:
+            out[cls] = float(np.median(vals))
+            # How many distinct instances held the largest share at some point.
+            out[cls + "_n_eng"] = len(set(movers))
+    return out
+
+
 def summarise(run):
     r = load_run(run)
     if r is None or r.empty:
@@ -129,6 +170,7 @@ def summarise(run):
         for d in ("gate", "memory", "incumbents", "unpredictable"):
             row["inf_" + d] = (100.0 * s["inf"].get(d, 0.0) / itot
                                if itot else np.nan)
+    row.update(separation(run, r))
     return row
 
 
@@ -211,16 +253,20 @@ def main(pattern, out):
     print("                          token rises, route share does not collapse")
     print("=" * 78)
     keys = ["no_chat_pct", "gate_mean", "route", "pend", "shed", "force",
-            "chat_itl", "inf_gate", "inf_memory", "inf_incumbents"]
+            "chat_itl", "inf_gate", "inf_incumbents",
+            "chat", "deepresearch", "swe"]
     keys = [k for k in keys if k in df.columns]
     for rate in sorted(st["rate"].dropna().unique()):
         print(f"\n  {rate:.0f} req/s")
-        print(f"    {'':<22}" + "".join(f"{k[:11]:>13}" for k in keys))
+        print(f"    {'':<22}{'n':>4}" + "".join(f"{k[:11]:>13}" for k in keys))
         for arm in ARMS:
             g = st[(st.rate == rate) & (st.arm == arm)]
             if g.empty:
                 continue
-            print(f"    {ARMS[arm]:<22}"
+            # The repeat count is printed per row because the two arms can be
+            # unequal while the sweep is still running, and a mean over three
+            # runs beside a mean over two is not a paired comparison.
+            print(f"    {ARMS[arm]:<22}{len(g):>4}"
                   + "".join(f"{g[k].mean():>13.1f}" for k in keys))
 
     if out:
