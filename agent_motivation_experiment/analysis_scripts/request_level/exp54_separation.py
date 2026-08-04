@@ -147,6 +147,45 @@ def main():
             print(f"  {rep}: " + " ".join("." if w != w else f"{int(w) % 10}"
                                           for w in who))
 
+    # Does the separation form when there is room and dissolve when there is
+    # not? The concentration is already windowed above; this pairs each window
+    # with the offered rate over the same window. The claim that the separation
+    # comes and goes with load is stated in motivation.md and in
+    # how-it-works section 6, and until this block existed it was a number
+    # computed in a session and never written down anywhere reproducible.
+    print("\ndeep-research concentration against the offered rate, "
+          f"per {WIN:.0f} s window")
+    pooled = []
+    for rep in ("r1", "r2"):
+        k = ("fluidserve", rep)
+        if k not in sep or k not in runs:
+            continue
+        r = load_run(runs[k])
+        xs2, ys2 = sep[k]
+        rate, conc = [], []
+        for x, c in zip(xs2, ys2["deepresearch"][0]):
+            if c != c:
+                continue
+            t = x * 60.0
+            w = r[(r["rel"] >= t - WIN / 2) & (r["rel"] < t + WIN / 2)]
+            rate.append(len(w) / WIN)
+            conc.append(c)
+        if len(rate) < 3:
+            continue
+        pooled += list(zip(rate, conc))
+        print(f"  {rep}: r = {np.corrcoef(rate, conc)[0, 1]:+.3f}  n={len(rate)}")
+    if pooled:
+        ra = np.array([p[0] for p in pooled])
+        co = np.array([p[1] for p in pooled])
+        print(f"  pooled: r = {np.corrcoef(ra, co)[0, 1]:+.3f}  n={len(ra)}")
+        lo, hi = co[ra < 45], co[ra > 55]
+        if len(lo) and len(hi):
+            print(f"  mean concentration below 45 req/s: {lo.mean():.1f}% "
+                  f"(n={len(lo)})")
+            print(f"  mean concentration above 55 req/s: {hi.mean():.1f}% "
+                  f"(n={len(hi)})")
+            print(f"  an even spread over four engines would be 25.0%")
+
     with plt.rc_context(PAPER_STYLE):
         fig, ax = plt.subplots(1, 3, figsize=(10.4, 3.4))
         for (arm, rep), (xs, ys) in sorted(att.items()):
