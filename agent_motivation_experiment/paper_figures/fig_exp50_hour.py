@@ -63,7 +63,7 @@ SERIES = [
 ]
 MIN_IN_WINDOW = 30      # same floor as the source figure
 MIX_BOUNDARIES = [15, 30, 45]   # the trace steps mix every 15 minutes
-FIG_H = 1.80
+FIG_H = 1.60
 
 
 def series(run):

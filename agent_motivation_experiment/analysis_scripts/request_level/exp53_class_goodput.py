@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Per-class goodput tokens, which is a different question from per-class attainment.
+
+Attainment asks what fraction of a class met its rule; it says nothing about how
+much work that class actually got. At overload every policy sacrifices something
+-- that is conservation, not a design flaw -- so the question worth asking is
+WHICH class is given up and how much of the total survives. Measured in tokens,
+a policy that looks even-handed on attainment can turn out to be even-handed
+only because it destroyed the large classes.
+"""
+import glob, os, re, sys
+import matplotlib; matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import pandas as pd
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from exp22_fluidserve import PAPER_STYLE, CLASSES, load_run
+
+ARMS = {"fluidserve": ("FluidServe", "#1f77b4"), "polyserve": ("PolyServe", "#d62728"),
+        "slo": ("Llumnix SLO", "#2ca02c"), "loadbalance": ("Llumnix", "#9467bd")}
+R = re.compile(r"_(fluidserve|polyserve|slo|loadbalance)_m1f?_rpm_(\d+)$")
+
+
+def sweep(out):
+    rows = []
+    for pat in ("results/*exp53r*", "results/*exp53p2*"):
+        for d in sorted(glob.glob(pat)):
+            m = R.search(os.path.basename(d))
+            if not m:
+                continue
+            r = load_run(d)
+            if r is None or r.empty:
+                continue
+            span = r["rel"].max() - r["rel"].min()
+            ok = r[(~r["violate_offered"]) & (~r["cutoff"])]
+            rec = dict(arm=m.group(1), rate=int(m.group(2)) / 60)
+            for c in CLASSES:
+                rec[c] = pd.to_numeric(ok[ok["class"] == c].get("output_tokens"),
+                                       errors="coerce").fillna(0).sum() / span
+            rows.append(rec)
+    df = pd.DataFrame(rows).groupby(["arm", "rate"]).mean().reset_index()
+    with plt.rc_context(PAPER_STYLE):
+        fig, ax = plt.subplots(1, 3, figsize=(7.4, 2.5), sharex=True)
+        for a_, c in zip(ax, CLASSES):
+            for k, (lab, col) in ARMS.items():
+                g = df[df.arm == k].sort_values("rate")
+                a_.plot(g.rate, g[c], color=col, marker="o", ms=3, label=lab)
+            a_.set_title(c, fontsize=8)
+            a_.set_xlabel("request rate (req/s)")
+            a_.grid(axis="y", ls=":", lw=0.7, alpha=0.6)
+        ax[0].set_ylabel("goodput (output tokens/s)")
+        ax[1].legend(loc="lower center", bbox_to_anchor=(0.5, 1.14), ncol=4,
+                     fontsize=7, columnspacing=1.2)
+        fig.savefig(os.path.join(out, "class_goodput_sweep.png"), dpi=300,
+                    bbox_inches="tight")
+    return df
+
+
+def hour(out, series):
+    WIN, STEP = 90.0, 30.0
+    with plt.rc_context(PAPER_STYLE):
+        fig, ax = plt.subplots(1, 3, figsize=(7.4, 2.5), sharex=True, sharey=True)
+        for lab, col, path in series:
+            r = load_run(path)
+            ok = r[(~r["violate_offered"]) & (~r["cutoff"])]
+            dur = r["rel"].max()
+            xs, ys = [], {c: [] for c in CLASSES}
+            t = WIN / 2
+            while t + WIN / 2 <= dur:
+                w = ok[(ok["rel"] >= t - WIN / 2) & (ok["rel"] < t + WIN / 2)]
+                xs.append(t / 60)
+                for c in CLASSES:
+                    ys[c].append(pd.to_numeric(w[w["class"] == c].get("output_tokens"),
+                                 errors="coerce").fillna(0).sum() / WIN)
+                t += STEP
+            for a_, c in zip(ax, CLASSES):
+                a_.plot(xs, ys[c], color=col, lw=1.1, label=lab)
+        for a_, c in zip(ax, CLASSES):
+            a_.set_title(c, fontsize=8)
+            a_.set_xlabel("time (minutes)")
+            a_.grid(axis="y", ls=":", lw=0.7, alpha=0.6)
+        ax[0].set_ylabel("goodput (output tokens/s)")
+        ax[1].legend(loc="lower center", bbox_to_anchor=(0.5, 1.14), ncol=3,
+                     fontsize=7, columnspacing=1.2)
+        fig.savefig(os.path.join(out, "class_goodput_hour.png"), dpi=300,
+                    bbox_inches="tight")
+
+
+if __name__ == "__main__":
+    out = "results/aggregate_analysis/exp53"
+    os.makedirs(out, exist_ok=True)
+    sweep(out)
+    hour(out, [("FluidServe", "#1f77b4", "results/260802_0754_exp52p4r1_fluidserve_full"),
+               ("+ candidate C", "#d62728", "results/260802_1008_exp52p4r1_fsc_full"),
+               ("Llumnix SLO", "#2ca02c", "results/260731_2203_exp45r1_slo_full")])
+    print("wrote class_goodput_sweep.png and class_goodput_hour.png to", out)

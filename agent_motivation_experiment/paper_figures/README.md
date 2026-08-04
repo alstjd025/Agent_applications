@@ -12,7 +12,7 @@ same factor.
 | | `exp27_pass3_attainment_goodput_admitted.pdf` | 3.335 × 1.95 in | `figure`, `width=\columnwidth` |
 | `fig_exp53_policies.py` | `exp53_attainment_goodput_offered.pdf` | 3.335 × 2.22 in | `figure`, `width=\columnwidth` |
 | | `exp53_attainment_goodput_admitted.pdf` | 3.335 × 1.95 in | `figure`, `width=\columnwidth` |
-| `fig_exp50_hour.py` | `exp50_hour_attainment_goodput.pdf` | 7.000 × 1.80 in | **`figure*`**, `width=\textwidth` |
+| `fig_exp50_hour.py` | `exp50_hour_attainment_goodput.pdf` | 7.000 × 1.60 in | **`figure*`**, `width=\textwidth` |
 | `fig_workload_lengths.py` | `workload_lengths.pdf` | 3.335 × 2.60 in | `figure`, `width=\columnwidth` |
 
 `paper_style.py` holds the width, the rcParams, the arm colours and markers, the
