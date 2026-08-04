@@ -71,7 +71,7 @@ check_stack() {
     || { echo "[exp30] ABORT: gateway is not the host-built binary ($bin)"; exit 1; }
   mig=$(kubectl -n llumnix get lws neutral -o json \
         | python3 -c "import json,sys;c=[c for c in json.load(sys.stdin)['spec']['leaderWorkerTemplate']['workerTemplate']['spec']['containers'] if c['name']=='vllm'][0];print(next((e.get('value','') for e in c.get('env',[]) if e['name']=='LLUMNIX_ENABLE_MIGRATION'),'unset'))")
-  [ "$mig" = "0" ] || { echo "[exp30] ABORT: engine migration is '$mig', want 0"; exit 1; }
+  [ "$mig" = "1" ] || { echo "[exp30] ABORT: engine migration is '$mig', want 1"; exit 1; }
   extra=$(kubectl -n llumnix get lws neutral -o json \
         | python3 -c "import json,sys;c=[c for c in json.load(sys.stdin)['spec']['leaderWorkerTemplate']['workerTemplate']['spec']['containers'] if c['name']=='vllm'][0];print(next((e.get('value','') for e in c.get('env',[]) if e['name']=='SCHED_EXTRA_ARGS'),'unset'))")
   [ -z "$extra" ] || { echo "[exp30] ABORT: engine has SCHED_EXTRA_ARGS='$extra'"; exit 1; }

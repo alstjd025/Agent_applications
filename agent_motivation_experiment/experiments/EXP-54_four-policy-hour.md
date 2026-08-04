@@ -105,6 +105,12 @@ and Llumnix SLO and 90.9% for PolyServe.
 | | 8002 | 374 | 23.2 | **1,120.8** | 599 | 98.4% | 2.2 | **101.0** |
 | | 8003 | 248 | 46.3 | **1,056.6** | **19,594** | 0% (all dr) | 10.0 | — |
 
+> ⚠ **Read section 7.2 and 7.3 before using this table.** The separation is real
+> and repeat 1 held it on the same engine for the whole hour, so these numbers
+> stand. The *causal* sentence below — that the separation is what keeps chat
+> inside budget — is neither confirmed nor refuted, because both repeats
+> separate and there is no unseparated run to compare against.
+
 **This is the clearest direct evidence of class packing recorded so far.**
 FluidServe puts deep research on engine 8001 — 67.5% of that engine's requests
 are deep research against 3–11% on the other three — and the three engines left
@@ -211,3 +217,98 @@ measured the same FluidServe configuration a day apart at offered 59.7 and 59.2
 — so the 31.2-point gap between FluidServe and Llumnix SLO is far outside it.
 **Preemption is not**: the same two runs moved 1,471 to 1,852, 26%. The
 per-engine preemption counts in §3 should not be quoted until repeat 2 is in.
+
+---
+
+## 7. Repeat 2, and a correction to section 3
+
+Repeat 2 ran three arms on 2026-08-04 16:31 → 21:03 KST, all healthy, 4/4
+engines, 50.1 req/s delivered. Directories `260804_0031_exp54r2_fluidserve_full`,
+`260804_0140_exp54r2_polyserve_full`, `260804_0352_exp54r2_slo_full`.
+
+### 7.1 The score reproduces closely
+
+Mean over two repeats, with (max − min)/2 beside it.
+
+| | rejection | offered | admitted | throughput tok/s | goodput tok/s |
+|---|---|---|---|---|---|
+| **FluidServe** | 27.1 ±0.1 | **69.6 ±0.3** | **95.5 ±0.4** | 18,911 ±33 | **17,967 ±106** |
+| Llumnix SLO | 42.1 ±0.0 | 39.0 ±0.2 | 67.2 ±0.3 | 16,176 ±13 | 11,545 ±55 |
+| PolyServe | 0.0 ±0.0 | 17.1 ±0.5 | 17.1 ±0.5 | 18,212 ±62 | 3,192 ±7 |
+
+Per-class goodput, output tokens/s: FluidServe **12,437 ±87 / 4,717 ±20 /
+713 ±1**, Llumnix SLO 4,552 ±48 / **5,762 ±1** / **1,231 ±6**, PolyServe
+578 ±3 / 371 ±2 / 2,243 ±8.
+
+Every spread is under 0.5 points and the FluidServe–Llumnix SLO gap is 30.6, so
+the comparison is settled. The section 2 observation reproduces: total
+production differs by 3.8% and goodput by 5.6x.
+
+### 7.2 The separation reproduces; which engine holds it does not
+
+**This section was first written with the opposite conclusion and the conclusion
+was wrong.** The statistic used was the share of each class held by the engine
+holding the most of it, computed over the whole hour. It read 58.7% for deep
+research in repeat 1 and 32.6% in repeat 2 against 25% for an even spread, and
+that was recorded as "the separation does not reproduce".
+
+Windowed at three minutes, both repeats are concentrated at 99–100% for the
+first third of the hour. What differs is which engine, and whether it lasts:
+
+```
+repeat 1:  8001 for all 58 windows
+repeat 2:  8002 (0–21 min) → 8003 (21–33 min) → 8001 (33–60 min)
+```
+
+**Pooling an hour over a target whose identity moves spreads the distribution
+and reads as no concentration.** The median over windows is 53.5% (repeat 1) and
+51.5% (repeat 2) — the same number.
+
+Both repeats also lose concentration after minute 33, falling to 41–56%. That is
+the highest-load stretch of the trace, and it matches section 37.3: at
+saturation nothing is feasible, the affinity ordering runs only within the
+feasible set, and a separation cannot be rebuilt.
+
+The figure `separation_vs_score.png` carries three panels for this reason —
+score, windowed share, and which engine — because any two of them mislead. It is
+also what caught the error: the windowed panel showed the two repeats tracking
+each other while the table said they diverged, and the table was believed first.
+
+### 7.3 What this leaves of section 3's causal claim
+
+Section 3 said the separation is the mechanism that keeps chat's per-token time
+inside budget. **That claim is neither confirmed nor refuted here.** Both repeats
+separate, so there is no unseparated run to compare against.
+
+Measuring it needs the ablation that already exists,
+`--fluidserve-enable-affinity=false`, with the judgement rule written first.
+
+One observation survives unchanged: FluidServe runs chat at 38–45 ms per token
+in both repeats while Llumnix SLO runs it at 44–48 ms in both, against a 50 ms
+budget. Those are pooled per-engine figures and carry the same caveat as above.
+
+### 7.4 Preemption reproduces in the fleet total and not per engine
+
+| arm | repeat | 8000 | 8001 | 8002 | 8003 | total |
+|---|---|---|---|---|---|---|
+| FluidServe | 1 | 0 | 2,965 | 0 | 0 | **2,965** |
+| | 2 | 0 | 2,064 | 858 | 0 | **2,922** |
+| PolyServe | 1 | 0 | 4,883 | 599 | 19,594 | **25,076** |
+| | 2 | 0 | 20,058 | 5,510 | 0 | **25,568** |
+| Llumnix SLO | 1, 2 | 0 | 0 | 0 | 0 | **0** |
+
+Totals reproduce within 1.5% and 2.0%; which engine pays does not. Section 6's
+instruction not to quote the preemption numbers before repeat 2 was right about
+the per-engine figures and unnecessary for the totals.
+
+### 7.5 Still unexplained
+
+**`classharm=false`.** The scheduler's start-up line reports it for all 50
+FluidServe conditions across EXP-51, 52, 53 and 54. The source default is `true`,
+the deployed binary's own `--help` says `(default true)`, the deploy script
+reports leaving the flag unset, and the running pod's args do not contain it.
+Four sources say true and the start-up line says false. The decisive test is to
+pass `FS_CLASS_HARM=true` explicitly and see whether the line changes.
+
+**Migration.** `build_request_engine_map.py` reports `migration-flagged uuids: 0`
+for all six conditions including the two Llumnix SLO arms that ran with it on.

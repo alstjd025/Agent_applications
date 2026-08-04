@@ -27,6 +27,12 @@ admitted-only version of this figure shows a rising curve for a collapsing
 policy, so the admitted-only PDF should only be used where the surrounding text
 gives the rejection rates.
 
+TWO REPEATS, AND ONE POINT WHERE THAT MATTERS. The two agree within about a
+point at every condition except FluidServe at 60 req/s, where admitted reads
+97.7 and 81.8 and offered 66.7 and 55.0. That is the bistability recorded in
+`fluidserve-implementation.md` §52, and it is the reason that point carries a
+bar four times taller than any other on the figure. No claim should rest on it.
+
 X AXIS. The eight measured rates (15, 25, 35, 45, 50, 55, 60, 70) cannot all
 carry a label in 1.3 in of axis width without colliding. Five of them are
 labelled and all eight get a tick, so every label still sits on a rate that was
@@ -54,7 +60,12 @@ from paper_style import (  # noqa: E402
 )
 from exp53_compare import collect, ARMS  # noqa: E402
 
-RUNS = ["results/*exp53r*"]
+# BOTH repeats. Repeat 2 was relaunched under the prefix `exp53p2` rather than
+# reusing `exp53r2` (EXP-53 §5), so the obvious glob `results/*exp53r*` matches
+# repeat 1 only and silently drops 32 of the 64 conditions. It did exactly that
+# here until 2026-08-04. `exp53r1r1` is the top-up that refilled four repeat-1
+# cells lost to an engine that did not come up.
+RUNS = ["results/*exp53r1*", "results/*exp53p2*"]
 ORDER = ["fluidserve", "polyserve", "slo", "loadbalance"]
 LABEL = {"fluidserve": "FluidServe", "polyserve": "PolyServe",
          "slo": "Llumnix SLO", "loadbalance": "Llumnix"}

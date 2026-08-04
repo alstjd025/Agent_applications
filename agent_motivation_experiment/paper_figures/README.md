@@ -15,6 +15,8 @@ same factor.
 | `fig_exp50_hour.py` | `exp50_hour_attainment_goodput.pdf` | 7.000 × 1.60 in | **`figure*`**, `width=\textwidth` |
 | `fig_workload_lengths.py` | `workload_lengths.pdf` | 3.335 × 1.95 in | `figure`, `width=\columnwidth` |
 | `fig_azure_trace_shape.py` | `azure_trace_shape.pdf` | 3.335 × 1.60 in | `figure`, `width=\columnwidth` |
+| `fig_exp54_hour.py` | `exp54_hour_offered.pdf` | 7.000 × 1.60 in | **`figure*`**, `width=\textwidth` |
+| | `exp54_hour_admitted.pdf` | 7.000 × 1.60 in | **`figure*`**, `width=\textwidth` |
 
 `paper_style.py` holds the width, the rcParams, the arm colours and markers, the
 `k`-suffix tick formatter, and `save()`. Import from it rather than copying the
@@ -587,3 +589,96 @@ The conv and code traces cover **different calendar weeks** and are summed by
 index, which aligns hour-of-day phase but not calendar date. That is the
 generator's documented caveat, carried here for completeness; it does not affect
 the diurnal shape.
+
+---
+
+## `fig_exp54_hour.py` — three control planes on the hour-long dynamic trace
+
+Two side-by-side panels against time: (left) SLO attainment, (right) output
+token goodput. Full text width, `figure*`. Two versions differing only in the
+attainment denominator. The dynamic counterpart of the EXP-53 static sweep, and
+the four-policy counterpart of the EXP-50 hour figure.
+
+### Runs
+
+`dyn60_short_m123`, mean offered 50.1 req/s, about 179,000 requests. Arrival
+rate follows an Azure production trace; the class mix steps m1 → m2 → m3 → m1 at
+15-minute boundaries, marked with grey guides. **The guides are not labelled on
+the figure, so the caption has to name them.** Repeat 1, 2026-08-03.
+
+| Arm | Legend | Colour / style | Run |
+|---|---|---|---|
+| FluidServe | FluidServe | `#1f77b4` solid | `results/260803_1751_exp54r1_fluidserve_full` |
+| PolyServe | PolyServe | `#d62728` dash-dot | `results/260803_1905_exp54r1_polyserve_full` |
+| Llumnix SLO | Llumnix SLO | `#2ca02c` dashed | `results/260803_2117_exp54r1_slo_full` |
+
+**One run per arm.** Repeat 2 was still running when this was drawn and covers
+only FluidServe. Do not add that one arm's repeat by itself: an arm carrying a
+band beside two arms without one reads as the better-measured arm rather than
+the only repeated one.
+
+### The load-balance arm is excluded, and not because it lost
+
+`260803_2229_exp54r1_loadbalance_full` was stopped at 87% of its tasks and its
+`metrics.csv` holds one row. It rejects nothing, so from minute 40 all four
+engines saturated, long-queued requests had their streams cut, and the client
+began failing to obtain source ports: **62,114 `[Errno 99] Cannot assign
+requested address`, against zero in every other arm.** Its last twenty minutes
+measure the load generator, not the policy. Drawing it as a fourth curve would
+report a client defect as a policy result. State the exclusion and the reason.
+
+### Which version to use
+
+**The offered one, unless the surrounding text already gives the rejection
+rates.** The three arms reject at completely different rates, so the admitted
+denominator flatters them by completely different amounts:
+
+| | rejected | offered | admitted | goodput tok/s | throughput tok/s |
+|---|---|---|---|---|---|
+| FluidServe | 27.0% | **70.0** | **95.9** | **18,014** | 18,944 |
+| Llumnix SLO | 42.1% | 38.7 | 67.0 | 11,451 | 16,163 |
+| PolyServe | 0.0% | 13.9 | 13.9 | 3,198 | 18,150 |
+
+PolyServe's two attainment numbers are identical because it never rejects; the
+other two gain 26 and 28 points from having refused work. The headline of this
+figure is the last two columns together: **PolyServe produces 18,150 output
+tokens/s against FluidServe's 18,944, a 4% difference, and 3,198 of them versus
+18,014 land inside a latency rule.** Same fleet, same token production, 5.6× the
+useful output.
+
+### One value disagrees with the experiment write-up
+
+`experiments/EXP-54_four-policy-hour.md` §2 gives PolyServe **17.6** on both
+denominators. The runs give **13.9**, and that write-up's own per-class table
+implies 13.9: 3.7 / 8.8 / 95.3 on chat / deep research / agent over 140,304 /
+21,161 / 17,978 requests weights out to 13.9, not 17.6. Every other cell of that
+table reproduces here exactly, including PolyServe's goodput (3,198) and
+throughput (18,150), so this is one value in that document rather than a
+difference of window or scoring. **Resolve it there before quoting either
+number.** The figures here use 13.9.
+
+### The x axis stops at 57.8 minutes, not 60
+
+A request still in flight when the run ends has an unknown outcome, so it leaves
+both denominators instead of counting as a violation. At the end of a backlogged
+run that removes precisely the slow requests. **PolyServe's final window holds
+3,678 arrivals of which 3,396 — 92.3% — never finished**; the 282 that did were
+the fast ones, and attainment reads 99.6% against 9.1% two minutes earlier.
+Drawn untrimmed, the figure shows the static partition recovering at the end,
+which is the opposite of what happened.
+
+Windows above 20% in-flight-at-end are dropped and **all arms are cut at the
+same time**, which lands at 57.8 min. Maximum in-flight-at-end share per arm:
+FluidServe 4.5%, Llumnix SLO 5.8%, PolyServe 92.3% — the artifact exists only on
+the arm with a backlog, and it flatters that arm. The script prints the trim and
+the per-arm maxima when it runs.
+
+The EXP-50 hour figure was checked against the same threshold and needs no trim:
+its two arms peak at 4.4% and 6.3%.
+
+### Regenerating
+
+```bash
+cd agent_motivation_experiment
+python3 paper_figures/fig_exp54_hour.py
+```
