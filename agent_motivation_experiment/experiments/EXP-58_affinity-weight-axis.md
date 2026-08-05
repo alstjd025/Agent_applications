@@ -168,16 +168,28 @@ to chat's value regardless of who is resident.
 | 0.40 | 89.15 | 3.44 | 4.38 | 8.20 | 43.54 |
 | 1.00 | 90.21 | 3.19 | 9.28 | 7.28 | 42.77 |
 
-**H1 holds on all six checks.** `w=0` lands inside `fsnoaff`'s three ranges
-(86.33 against 86.5-87.0, 3.95 against 3.91-3.94, 1.03 against 1.0) and `w=1`
-inside `fluidserve`'s (90.21 against 90.4-98.9, 3.19 against 1.63-3.01, 9.28
-against 4.4-30.9). So the weighted sum is the rule the switch was, and the values
-between the endpoints can be read.
+**H1 holds, and the exact distances are worth stating rather than a verdict.**
+The reference ranges are the minimum and maximum of three draws, so a fourth
+draw landing just outside one is expected and says nothing; what would matter is
+landing far outside.
 
-**This repeat sits at the low-separation end of what `w=1` produces** -- 3.19
-effective instances and 90.21 points, against a range of 1.63-3.01 and 90.4-98.9
-across EXP-56's three repeats. The axis is monotone anyway, which is the useful
-part: it does not depend on catching the high-separation state.
+| | measured | EXP-56 range | distance outside | range width |
+|---|---|---|---|---|
+| `w=0` offered | 86.33 | 86.5 – 87.0 | 0.17 | 0.50 |
+| `w=0` effective instances | 3.95 | 3.91 – 3.94 | 0.01 | 0.03 |
+| `w=0` chat-free % | 1.03 | 1.0 – 1.0 | 0.03 | 0.00 |
+| `w=1` offered | 90.21 | 90.4 – 98.9 | 0.19 | 8.50 |
+| `w=1` effective instances | 3.19 | 1.63 – 3.01 | 0.18 | 1.38 |
+| `w=1` chat-free % | 9.28 | 4.4 – 30.9 | inside | 26.5 |
+
+Every distance is smaller than, or of the order of, the width of the range it
+misses. **And the two `w=1` misses are consistent with each other**: 3.19 is less
+separated than any of the three EXP-56 draws and 90.21 is lower than any of their
+scores, which is the same direction. So this repeat is a fourth draw at the
+low-separation end of the same distribution, not a different rule.
+
+**The axis is monotone anyway**, which is the useful part: reading it does not
+depend on catching the high-separation state, and this repeat did not catch it.
 
 ### 7.2 An observation the design did not anticipate, to be checked against repeat 2
 

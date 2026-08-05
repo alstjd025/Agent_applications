@@ -141,10 +141,18 @@ def judge(df, out):
                     continue
                 lo, hi = ref[key]
                 vals = sub[col].dropna().tolist()
-                inside = all(lo - 0.5 <= v <= hi + 0.5 for v in vals)
+                # Report the distance rather than a verdict. The reference range
+                # is the min and max of three draws, so a fourth landing just
+                # outside it is expected and says nothing; a fourth landing far
+                # outside says the weighted sum is not the rule the switch was.
+                # Which of those it is depends on how far, so print how far.
+                out = [v for v in vals if v < lo or v > hi]
+                dist = max((min(abs(v - lo), abs(v - hi)) for v in out), default=0.0)
+                width = hi - lo
+                verdict = ("inside" if not out else
+                           f"outside by {dist:.2f} on a range {width:.2f} wide")
                 print(f"  w={w} {col:9s} {['%.2f' % v for v in vals]} against "
-                      f"{ref['name']} {lo}-{hi}: "
-                      f"{'inside' if inside else 'OUTSIDE -- the axis is not the switch'}")
+                      f"{ref['name']} {lo}-{hi}: {verdict}")
 
         print("\n--- H2: does the score turn at the top of the reachable range?")
         if len(agg) >= 2:
