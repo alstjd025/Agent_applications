@@ -113,11 +113,42 @@ ARMS = [("loadbalance", "Llumnix (load balance)", "#9467bd"),
         ("polyserve", "PolyServe", "#d62728")]
 
 
-def collect(pattern="results/*exp53*_rpm_*"):
+def _supersede(df):
+    """Drop the EXP-53 PolyServe rows once EXP-57 has re-measured that arm.
+
+    Averaging the two would mix a stale tier length table with a corrected one.
+    Prints what it dropped, because a silent supersede is how a figure ends up
+    describing runs nobody chose.
+    """
+    if df.empty or "src" not in df:
+        return df
+    have_new = ((df["arm"] == "polyserve") & (df["src"] == "exp57")).any()
+    if not have_new:
+        print("  PolyServe: EXP-53 runs only (stale tier table -- see EXP-57)")
+        return df
+    old = (df["arm"] == "polyserve") & (df["src"] == "exp53")
+    print(f"  PolyServe: using {int((~old & (df.arm=='polyserve')).sum())} EXP-57 "
+          f"conditions, superseding {int(old.sum())} from EXP-53")
+    return df[~old]
+
+
+# PolyServe's tier length table was corrected on 2026-08-05 and its arm
+# re-measured as EXP-57; its EXP-53 runs used the stale table, which understated
+# deep research by 3.58x and fed the repartitioner, so they are SUPERSEDED rather
+# than averaged in. The other arms never read that flag and stay on EXP-53.
+#
+# Joining the two sessions was checked rather than assumed: Llumnix SLO, whose
+# code and configuration did not change, was re-run in the EXP-57 session at 45
+# and 70 req/s and read 52.3 and 21.7 against EXP-53's 52.4 and 21.4, inside
+# EXP-53's own repeat spread. Those two conditions are excluded from the sweep
+# below so the repeat count stays even across rates.
+def collect(pattern="results/*exp5[37]*_rpm_*"):
     rows = []
     for d in sorted(glob.glob(pattern)):
-        m = re.search(r"_(polyserve|slo|loadbalance)_m1f?_rpm_(\d+)$",
-                      os.path.basename(d))
+        base = os.path.basename(d)
+        if "unchanged" in base:
+            continue
+        m = re.search(r"_(polyserve|slo|loadbalance)_m1f?_rpm_(\d+)$", base)
         if not m:
             continue
         r = load_run(d)
@@ -139,6 +170,7 @@ def collect(pattern="results/*exp53*_rpm_*"):
         k_srv = k[~k_rej & ~k["errored"]]
         k_met = k_srv[~k_srv["violate_served"]]
         rows.append(dict(arm=m.group(1), rate=int(m.group(2)) / 60.0,
+                         src="exp57" if "exp57" in base else "exp53",
                          thru=served["output_tokens"].sum() / dur,
                          good=met["output_tokens"].sum() / dur,
                          att_off=attain(r, "violate_offered"),
@@ -148,7 +180,7 @@ def collect(pattern="results/*exp53*_rpm_*"):
                          o_late=100.0 * (len(k_srv) - len(k_met)) / nk,
                          o_rej=100.0 * k_rej.sum() / nk,
                          o_err=100.0 * k_err.sum() / nk))
-    return pd.DataFrame(rows)
+    return _supersede(pd.DataFrame(rows))
 
 
 def main(out):
@@ -200,6 +232,8 @@ def main(out):
         print(f"    {rate:>5.0f}  " + "  ".join(cells))
 
     print("\nrepeats per cell: " + str(sorted(agg["n"].unique())))
+
+    HL_CAP = 70.0   # the rate the caption quotes
 
     os.makedirs(out, exist_ok=True)
     with plt.rc_context(PAPER_STYLE):
@@ -293,17 +327,30 @@ def main(out):
                      loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=2,
                      fontsize=6.3, columnspacing=1.0, handlelength=2.0)
 
+        # Every number in the caption is read from the data. Hard-coding them
+        # went stale the first time an arm was re-measured: the caption still
+        # said the best policy returned 21% after EXP-57 moved that to 24% and
+        # changed which policy it was.
+        hi = agg[agg.rate == HL_CAP]
+        thr_r = hi["thru"].max() / hi["thru"].min()
+        good_r = hi["good"].max() / hi["good"].min()
+        best = hi.loc[hi["att_off"].idxmax()]
+        best_name = next(l for k, l, _ in ARMS if k == best["arm"])
+        slo = agg[(agg.arm == "slo") & (agg.rate == HL_CAP)]
         fig.suptitle(
-            "Three existing policies, the same four engines, the same load. They "
-            "produce within 1.5x of each other, differ by 15x in how much of that "
-            "production a client could use,\nand the best of them returns 21% of "
-            "the requests sent to it inside the latency it promised. In C the "
-            "solid lines count every request that arrived and the\ndotted ones "
-            "only the accepted set: Llumnix SLO's dotted line rises to 71% "
-            "because the set it covers shrinks to 30%, and a policy refusing "
-            "everything\nwould read 100% there, which is why the dotted number "
-            "is never quoted on its own. Shaded band in A and B is the spread "
-            "over repeats.",
+            f"Three existing policies, the same four engines, the same load. At "
+            f"{HL_CAP:.0f} req/s they produce within {thr_r:.1f}x of each other "
+            f"and differ by {good_r:.1f}x in how much of that production a "
+            f"client could use,\nand the best of them ({best_name}) returns "
+            f"{best['att_off']:.0f}% of the requests sent to it inside the "
+            f"latency it promised. In C the solid lines count every request "
+            f"that arrived and the dotted\nones only the accepted set: Llumnix "
+            f"SLO's dotted line rises to {float(slo['att_adm'].iloc[0]):.0f}% "
+            f"because the set it covers shrinks to "
+            f"{100 - float(slo['o_rej'].iloc[0]):.0f}%, and a policy refusing "
+            f"everything would read 100% there,\nwhich is why the dotted number "
+            f"is never quoted on its own. Shaded band in A and B is the spread "
+            f"over repeats.",
             fontsize=8, y=1.16)
         p = os.path.join(out, "motivation_throughput_vs_goodput.png")
         fig.savefig(p, dpi=300, bbox_inches="tight")

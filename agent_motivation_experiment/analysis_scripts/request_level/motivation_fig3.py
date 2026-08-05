@@ -125,20 +125,52 @@ def single_class(pattern="results/*exp55r1*"):
     return pd.DataFrame(rows)
 
 
-def mixed(pattern="results/*exp53*_rpm_*"):
+def _supersede(df):
+    """Drop the EXP-53 PolyServe rows once EXP-57 has re-measured that arm.
+
+    Averaging the two would mix a stale tier length table with a corrected one.
+    Prints what it dropped, because a silent supersede is how a figure ends up
+    describing runs nobody chose.
+    """
+    if df.empty or "src" not in df:
+        return df
+    have_new = ((df["arm"] == "polyserve") & (df["src"] == "exp57")).any()
+    if not have_new:
+        print("  PolyServe: EXP-53 runs only (stale tier table -- see EXP-57)")
+        return df
+    old = (df["arm"] == "polyserve") & (df["src"] == "exp53")
+    print(f"  PolyServe: using {int((~old & (df.arm=='polyserve')).sum())} EXP-57 "
+          f"conditions, superseding {int(old.sum())} from EXP-53")
+    return df[~old]
+
+
+# PolyServe's tier length table was corrected on 2026-08-05 and its arm
+# re-measured as EXP-57; its EXP-53 runs used the stale table, which understated
+# deep research by 3.58x and fed the repartitioner, so they are SUPERSEDED rather
+# than averaged in. The other arms never read that flag and stay on EXP-53.
+#
+# Joining the two sessions was checked rather than assumed: Llumnix SLO, whose
+# code and configuration did not change, was re-run in the EXP-57 session at 45
+# and 70 req/s and read 52.3 and 21.7 against EXP-53's 52.4 and 21.4, inside
+# EXP-53's own repeat spread. Those two conditions are excluded from the sweep
+# below so the repeat count stays even across rates.
+def mixed(pattern="results/*exp5[37]*_rpm_*"):
     """EXP-53: the mix, four policies. Repeats averaged before interpolating."""
     rows = []
     for d in sorted(glob.glob(pattern)):
-        m = re.search(r"_(polyserve|slo|loadbalance|fluidserve)_m1f?_rpm_(\d+)$",
-                      os.path.basename(d))
+        base = os.path.basename(d)
+        if "unchanged" in base:
+            continue
+        m = re.search(r"_(polyserve|slo|loadbalance|fluidserve)_m1f?_rpm_(\d+)$", base)
         if not m:
             continue
         r = load_run(d)
         if r is None or r.empty:
             continue
         rows.append(dict(arm=m.group(1), rate=int(m.group(2)) / 60.0,
+                         src="exp57" if "exp57" in base else "exp53",
                          off=attain(r, "violate_offered")))
-    df = pd.DataFrame(rows)
+    df = _supersede(pd.DataFrame(rows))
     return df.groupby(["arm", "rate"], as_index=False).agg(
         off=("off", "mean"), n=("off", "size"))
 
