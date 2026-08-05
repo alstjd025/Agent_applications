@@ -197,7 +197,11 @@ def main(pattern, out):
     # of them is summarised.
     hours = {}
     for d in sorted(glob.glob(pattern)):
-        m = re.search(r"_exp56r?\d?_(fluidserve|fsnoaff)_full$",
+        # exp56h is the re-run: the first attempt's fsnoaff arm was cut short
+        # at 51.3 minutes by DiskPressure and its data survived only because the
+        # shards were recovered. Both arms ran again in one session for a full
+        # 61.0 minutes, so the truncated pair is superseded rather than pooled.
+        m = re.search(r"_exp56hr?\d?_(fluidserve|fsnoaff)_full$",
                       os.path.basename(d))
         if m:
             rr = load_run(d)
