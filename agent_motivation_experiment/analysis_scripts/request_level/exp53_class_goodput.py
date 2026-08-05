@@ -20,9 +20,16 @@ ARMS = {"fluidserve": ("FluidServe", "#1f77b4"), "polyserve": ("PolyServe", "#d6
 R = re.compile(r"_(fluidserve|polyserve|slo|loadbalance)_m1f?_rpm_(\d+)$")
 
 
-def sweep(out):
+# The default is EXP-53's own sessions. It is a DEFAULT and not a fact about
+# the sweep: when an arm is re-measured in a later session, globbing the old one
+# averages the superseded runs into the new ones without saying so. PolyServe was
+# re-measured as EXP-57 on 2026-08-05, so the caller passes per-arm patterns.
+DEFAULT_RUNS = ("results/*exp53r*", "results/*exp53p2*")
+
+
+def sweep(out, runs=DEFAULT_RUNS):
     rows = []
-    for pat in ("results/*exp53r*", "results/*exp53p2*"):
+    for pat in runs:
         for d in sorted(glob.glob(pat)):
             m = R.search(os.path.basename(d))
             if not m:
@@ -106,14 +113,18 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="results/aggregate_analysis/exp53")
     ap.add_argument("--sweep", action="store_true",
-                    help="also draw the rate-sweep panel (EXP-53 runs, hardcoded glob)")
+                    help="also draw the rate-sweep panel")
+    ap.add_argument("--runs", nargs="+", default=list(DEFAULT_RUNS),
+                    help="run globs for the sweep panel. Pass per-arm patterns "
+                         "when an arm has been re-measured, or the superseded "
+                         "runs are averaged in silently")
     ap.add_argument("--hour", nargs="*", default=None,
                     help="label|colour|run-dir, repeatable; defaults to EXP-52's three")
     ap.add_argument("--hour-name", default="class_goodput_hour.png")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     if a.sweep or a.hour is None:
-        sweep(a.out)
+        sweep(a.out, tuple(a.runs))
     series = EXP53_HOUR if not a.hour else [tuple(s.split("|", 2)) for s in a.hour]
     hour(a.out, series, a.hour_name)
     print("wrote to", a.out)
