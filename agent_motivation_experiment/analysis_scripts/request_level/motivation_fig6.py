@@ -78,6 +78,9 @@ def main():
     ap.add_argument("--out", default="results/aggregate_analysis/motivation")
     ap.add_argument("--rate", default="45 req/s",
                     help="printed in the title; the CSV is not filtered by it")
+    # A fixed output name overwrote the static figure with the hour one the
+    # first time this was run on a second CSV. Two inputs, two names.
+    ap.add_argument("--name", default="motivation_two_conditions.png")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
 
@@ -163,7 +166,7 @@ def main():
             f"Above: the tightest class must leave some instance free.",
             fontsize=8, y=1.06)
         fig.tight_layout()
-        p = os.path.join(a.out, "motivation_two_conditions.png")
+        p = os.path.join(a.out, a.name)
         fig.savefig(p, dpi=300, bbox_inches="tight")
         plt.close(fig)
         print(f"wrote {p}")
