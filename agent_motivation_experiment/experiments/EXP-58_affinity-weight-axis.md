@@ -158,4 +158,48 @@ to chat's value regardless of who is resident.
 
 ## 7. Result
 
-*(to be filled in after the run)*
+### 7.1 Repeat 1 at 45 req/s — the axis is monotone in four quantities at once
+
+| w | offered | effective instances | chat-free instance-time % | rejection % | chat ms/token |
+|---|---|---|---|---|---|
+| 0.00 | 86.33 | 3.95 | 1.03 | 9.76 | 44.15 |
+| 0.05 | 86.68 | 3.84 | 1.03 | 9.87 | 44.34 |
+| 0.15 | 87.42 | 3.74 | 1.03 | 9.92 | 43.89 |
+| 0.40 | 89.15 | 3.44 | 4.38 | 8.20 | 43.54 |
+| 1.00 | 90.21 | 3.19 | 9.28 | 7.28 | 42.77 |
+
+**H1 holds on all six checks.** `w=0` lands inside `fsnoaff`'s three ranges
+(86.33 against 86.5-87.0, 3.95 against 3.91-3.94, 1.03 against 1.0) and `w=1`
+inside `fluidserve`'s (90.21 against 90.4-98.9, 3.19 against 1.63-3.01, 9.28
+against 4.4-30.9). So the weighted sum is the rule the switch was, and the values
+between the endpoints can be read.
+
+**This repeat sits at the low-separation end of what `w=1` produces** -- 3.19
+effective instances and 90.21 points, against a range of 1.63-3.01 and 90.4-98.9
+across EXP-56's three repeats. The axis is monotone anyway, which is the useful
+part: it does not depend on catching the high-separation state.
+
+### 7.2 An observation the design did not anticipate, to be checked against repeat 2
+
+**The two paths EXP-56 could not separate come apart here.** Section 6.4 of that
+experiment registered the gate reading and the batch-homogeneity reading as
+mutually exclusive, found both, and concluded that they are two faces of one
+cause and cannot be decomposed with that design. On this axis they switch on at
+different weights.
+
+- **At w = 0.05 and 0.15 the gate path is inert**: the fraction of instance-time
+  with no resident chat request is 1.03, exactly what it is at w = 0. No
+  instance is free of chat, so no instance can admit a looser class on its own
+  terms.
+- **The homogeneity path is already acting there**: chat's time per token falls
+  44.15 -> 43.89 and the score rises 86.33 -> 87.42.
+- **At w = 0.4 the gate path switches on** -- chat-free instance-time goes 1.03
+  -> 4.38 -> 9.28 -- and the score rises a further 2.8 points.
+
+If this survives repeat 2, it is a decomposition: **about 1.1 of the 3.9 points
+between w=0 and w=1 arrive before any instance is free of chat.** Two cautions
+before believing it. The 1.1 points is close to the repeat spread of the `w=0`
+arm measured three times in EXP-56 (0.5 points), so one repeat is not enough.
+And this reading depends on the chat-free fraction being a step rather than a
+gradual rise; with points only at 0.05, 0.15 and 0.4 the location of that step is
+known to within a factor of three.
