@@ -10,9 +10,10 @@ same hour-long trace, from the engines' own reports.
       much of each class there will be. Where the estimate is wrong, or where
       the mix later moves, the assignment is wrong AND STAYS WRONG: there is no
       quantity in the system that reacts to a request being on the wrong engine.
-      Read column PolyServe: one engine carries a queue in the thousands while
-      another sits with almost none, and the class it assigned to the loaded
-      engines is served at roughly twice the time per token its rule allows.
+      Read column PolyServe: chat, which is 76.9% of the requests, is given one
+      instance outright and a share of two more, and that instance holds a mean
+      queue of 1,180 while the two it shares sit at 25.6% KV occupancy. Chat is
+      served at 195 to 203% of the time per token its rule allows on all three.
 
   load balancing spreads requests to equalise load, which is the same thing as
       MAXIMISING the mixing: if every engine carries the same load it also
@@ -40,11 +41,16 @@ it as the 62 ms per token that its mean output length makes equivalent, which is
 the same conversion EXP-55 used. It is an approximation for display only and the
 scoring everywhere else uses the end-to-end form.
 
-CAVEAT, until EXP-57 finishes: the PolyServe column was measured with a tier
-length table that understates deep research by a factor of 3.58, which feeds its
-repartitioner and therefore the assignment this figure is about. Regenerate this
-figure from the EXP-57 runs before using the PolyServe column for anything. The
-Llumnix SLO column does not read that flag and is unaffected.
+The PolyServe column comes from EXP-57 and the Llumnix SLO column from EXP-54,
+because only PolyServe reads --polyserve-tier-decode-tokens and only that arm
+was re-measured when the value was corrected on 2026-08-05. Correcting it moved
+the partition from two instances for swe and one for deep research to one and
+two, and it changed which engine ends up overloaded -- under the stale table the
+loaded engines were the ones holding chat and deep research together; under the
+corrected one chat has an instance to itself and still cannot keep up. What did
+not change is the shape of the failure: an assignment fixed once, one instance
+saturated while others are a quarter full, and the largest class served at twice
+its allowed time per token.
 
   python3 motivation_fig4.py <out-dir> [glob]
 """
@@ -68,18 +74,27 @@ from exp41_engine_view import attribute_engines, engine_series, ENG_C  # noqa: E
 # here on purpose: it is Llumnix SLO without the latency awareness rather than a
 # third way of deciding the assignment, and its EXP-54 run stopped measuring the
 # policy at minute 40 when the load generator exhausted its ephemeral ports.
-COLS = [("polyserve", "PolyServe — assign classes to engines once"),
-        ("slo", "Llumnix SLO — equalise load across engines")]
+# Each column carries its own run glob. PolyServe's tier length table was
+# corrected on 2026-08-05 and that arm alone re-measured as EXP-57, so its
+# EXP-54 runs are superseded; Llumnix SLO never reads that flag and keeps its
+# EXP-54 runs. Globbing one session for both would have averaged the stale
+# PolyServe into the corrected one without saying so.
+COLS = [("polyserve", "PolyServe — assign classes to engines once",
+         "results/*exp57r*_polyserve_full"),
+        ("slo", "Llumnix SLO — equalise load across engines",
+         "results/*exp54r[12]_slo_full")]
 
 CLS = [("chat", "#1f77b4", 50.0, "chat  (50 ms/token)"),
        ("deepresearch", "#ff7f0e", 100.0, "deep research  (100 ms/token)"),
        ("swe", "#d62728", 62.0, "swe  (30 s end to end = 62 ms/token)")]
 
 
-def collect(pattern):
+def collect(pattern, only=None):
     """{arm: [(run_dir, joined_requests, engine_series), ...]} over repeats."""
     out = {}
-    for arm, _ in COLS:
+    for arm, _, _ in COLS:
+        if only and arm != only:
+            continue
         for d in sorted(glob.glob(pattern)):
             if not re.search(rf"_{arm}_full$", os.path.basename(d)):
                 continue
@@ -132,13 +147,13 @@ def per_engine(runs):
     return comp, pace, wait, kv
 
 
-def main(out, pattern="results/*exp54r[12]_{arm}_full"):
+def main(out, pattern=None):
     data = {}
-    for arm, _ in COLS:
-        got = collect(pattern.format(arm=arm))
+    for arm, _, pat in COLS:
+        got = collect(pattern.format(arm=arm) if pattern else pat, only=arm)
         if arm in got:
             data[arm] = got[arm]
-    cols = [(a, t) for a, t in COLS if a in data]
+    cols = [(a, t) for a, t, _ in COLS if a in data]
     if not cols:
         sys.exit(f"no runs matched {pattern}")
 
@@ -174,9 +189,12 @@ def main(out, pattern="results/*exp54r[12]_{arm}_full"):
 
     os.makedirs(out, exist_ok=True)
     with plt.rc_context(PAPER_STYLE):
-        fig, ax = plt.subplots(3, len(cols), figsize=(4.9 * len(cols), 6.4),
+        fig, ax = plt.subplots(3, len(cols), figsize=(4.9 * len(cols), 6.9),
                                squeeze=False)
-        fig.subplots_adjust(left=0.115, right=0.985, top=0.865, bottom=0.115,
+        # The caption is five lines and is generated, so its height is not
+        # known when the layout is set; top leaves room for the longest it
+        # produces rather than for the one it produced today.
+        fig.subplots_adjust(left=0.115, right=0.985, top=0.815, bottom=0.105,
                             hspace=0.42, wspace=0.16)
         xs = np.arange(len(ports))
         for j, (a, title) in enumerate(cols):
@@ -256,15 +274,40 @@ def main(out, pattern="results/*exp54r[12]_{arm}_full"):
         fig.legend(h, l, loc="lower center", ncol=3, fontsize=7,
                    columnspacing=1.6, bbox_to_anchor=(0.5, 0.005))
 
-        fig.suptitle(
-            "The two established ways of deciding where a request goes.\n"
-            "Left: one engine sits at 14% occupancy while three hold queues in "
-            "the hundreds and serve chat at twice its allowed time per token.\n"
-            "Right: all four engines get the same mix, so all four are held to "
-            "chat's budget while deep research gets 56% of a budget it could "
-            "spend in full.\n"
-            "Both leave most of the fleet unused, for opposite reasons.",
-            fontsize=8.5, y=0.995)
+        # Computed, not written by hand. The hand-written version described the
+        # PolyServe column measured before its tier table was corrected and was
+        # still on the figure after that column was redrawn from EXP-57.
+        def col(a):
+            comp, pace, wait, kv = stats[a]
+            ps = [p for p in ports if p in comp]
+            chat = [pace[p]["chat"] for p in ps if pace[p]["chat"] == pace[p]["chat"]]
+            dr = [pace[p]["deepresearch"] for p in ps
+                  if pace[p]["deepresearch"] == pace[p]["deepresearch"]]
+            return dict(kv_lo=min(kv[p] for p in ps), kv_hi=max(kv[p] for p in ps),
+                        q_hi=max(wait[p] for p in ps),
+                        q_lo=min(wait[p] for p in ps),
+                        chat_lo=min(chat) if chat else float("nan"),
+                        chat_hi=max(chat) if chat else float("nan"),
+                        dr_lo=min(dr) if dr else float("nan"))
+        lines = ["The two established ways of deciding where a request goes."]
+        if "polyserve" in stats:
+            c = col("polyserve")
+            lines.append(
+                f"Left: the assignment is fixed once, so one instance carries a "
+                f"mean queue of {c['q_hi']:,.0f} while another sits at "
+                f"{c['kv_lo']:.0f}% occupancy,\nand chat is served at "
+                f"{c['chat_lo']:.0f}-{c['chat_hi']:.0f}% of the time per token "
+                f"its rule allows.")
+        if "slo" in stats:
+            c = col("slo")
+            lines.append(
+                f"Right: all four instances get the same mix, so all four are "
+                f"held to chat's budget at {c['chat_lo']:.0f}-{c['chat_hi']:.0f}% "
+                f"of it,\nwhile deep research gets {c['dr_lo']:.0f}% of a budget "
+                f"it could spend in full and every instance sits at "
+                f"{c['kv_lo']:.0f}% occupancy.")
+        lines.append("Both leave most of the fleet unused, for opposite reasons.")
+        fig.suptitle("\n".join(lines), fontsize=8.5, y=0.995)
         p = os.path.join(out, "motivation_two_failures.png")
         fig.savefig(p, dpi=300)
         print(f"\nwrote {p}")
@@ -273,4 +316,4 @@ def main(out, pattern="results/*exp54r[12]_{arm}_full"):
 if __name__ == "__main__":
     main(sys.argv[1] if len(sys.argv) > 1
          else "results/aggregate_analysis/motivation",
-         sys.argv[2] if len(sys.argv) > 2 else "results/*exp54r[12]_{arm}_full")
+         sys.argv[2] if len(sys.argv) > 2 else None)
