@@ -137,10 +137,18 @@ def separation(run, r):
     return out
 
 
-def summarise(run):
+def summarise(run, cut=None):
     r = load_run(run)
     if r is None or r.empty:
         return None
+    if cut is not None:
+        # The two hour arms do not cover the same span -- one was cut short --
+        # and the trace's rate and mix both move, so a whole-run mean of 51.6
+        # minutes beside one of 61.0 mixes an arm difference with a segment
+        # difference. Both are cut to the window both actually cover.
+        r = r[r["rel"] < cut]
+        if r.empty:
+            return None
     rej = r["rejected"] if "rejected" in r else pd.Series(False, index=r.index)
     served = r[~rej]
     dur = r["rel"].max()
@@ -185,13 +193,24 @@ def main(pattern, out):
                 rows.append(dict(rep=int(m.group(1)), arm=m.group(2),
                                  rate=int(m.group(3)) / 60.0, kind="static", **v))
             continue
+    # The hour runs are gathered first so the common window is known before any
+    # of them is summarised.
+    hours = {}
+    for d in sorted(glob.glob(pattern)):
         m = re.search(r"_exp56r?\d?_(fluidserve|fsnoaff)_full$",
                       os.path.basename(d))
         if m:
-            v = summarise(d)
+            rr = load_run(d)
+            if rr is not None and not rr.empty:
+                hours[m.group(1)] = (d, float(rr["rel"].max()))
+    if hours:
+        cut = min(v[1] for v in hours.values())
+        spans = ", ".join(f"{a} {v[1]/60:.1f} min" for a, v in sorted(hours.items()))
+        print(f"hour runs: {spans}  -> both cut to {cut/60:.1f} min\n")
+        for arm, (d, _) in sorted(hours.items()):
+            v = summarise(d, cut=cut)
             if v:
-                rows.append(dict(rep=1, arm=m.group(1), rate=np.nan,
-                                 kind="hour", **v))
+                rows.append(dict(rep=1, arm=arm, rate=np.nan, kind="hour", **v))
     if not rows:
         sys.exit(f"no EXP-56 runs matched {pattern}")
     df = pd.DataFrame(rows)

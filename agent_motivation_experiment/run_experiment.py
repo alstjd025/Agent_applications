@@ -141,9 +141,70 @@ def _mp_load_worker(cfg: dict) -> Optional[dict]:
     return None
 
 
+# Set once from --keep-shards in main(). A module global rather than another
+# constructor parameter because eight call sites build the runner and none of
+# them has anything else to say about shard retention.
+KEEP_SHARDS = False
+
+
+def _verify_merged_shards(shard_dir: str, n: int, csv_out: str,
+                          tbt_out: str) -> str:
+    """Return "" if the merge reproduced every shard byte, else why not.
+
+    Checked before the shards are removed. tbt and request_ids carry no header
+    so a correct merge is byte-exact against the shard sum; metrics.csv drops
+    every shard's header but the first, so it is checked on the row count.
+    """
+    def size(p):
+        return os.path.getsize(p) if os.path.isfile(p) else 0
+
+    for name, out in (("tbt.p{}.jsonl", tbt_out),
+                      ("request_ids.p{}.jsonl",
+                       os.path.join(os.path.dirname(csv_out) or ".",
+                                    "request_ids.jsonl"))):
+        want = sum(size(os.path.join(shard_dir, name.format(k)))
+                   for k in range(n))
+        if want == 0:
+            continue
+        got = size(out)
+        if got != want:
+            return (f"{os.path.basename(out)}: merged {got:,} bytes against "
+                    f"{want:,} in shards")
+
+    def rows(p):
+        if not os.path.isfile(p):
+            return 0
+        with open(p, encoding="utf-8", errors="replace") as f:
+            return max(sum(1 for _ in f) - 1, 0)
+
+    want = sum(rows(os.path.join(shard_dir, f"metrics.p{k}.csv"))
+               for k in range(n))
+    got = rows(csv_out)
+    if got != want:
+        return f"metrics.csv: merged {got:,} rows against {want:,} in shards"
+    return ""
+
+
 def _merge_load_shards(shard_dir: str, n: int, csv_out: str, tbt_out: str,
-                       agent_dir: str, err_out: str) -> None:
-    """Merge per-worker metric shards into the standard run-dir files."""
+                       agent_dir: str, err_out: str,
+                       keep_shards: bool = False) -> None:
+    """Merge per-worker metric shards into the standard run-dir files.
+
+    The shards are removed afterwards unless `keep_shards`, and only once
+    `_verify_merged_shards` confirms the merged files account for every shard
+    byte. Keeping them was the original behaviour and it stored every run's
+    per-token timing twice: by 2026-08-05 the results tree held 718 GB of
+    shards beside 702 GB of merged tbt_events.jsonl, byte-for-byte the same
+    data, which took the node into DiskPressure and killed a running
+    experiment. metrics.csv, which nearly every analysis reads, is 8.8 GB
+    across all 832 runs by comparison.
+
+    If verification fails the shards stay and the reason is printed, because
+    the shards are then the only copy. That case is real: a run whose merge
+    never ran at all leaves a header-only metrics.csv and reads as having
+    produced nothing, which happened twice before anyone opened the shard
+    directory. analysis_scripts/recover_unmerged_shards.py repairs those.
+    """
     # metrics.csv: header from the first shard, then all data rows.
     shard_csvs = [os.path.join(shard_dir, f"metrics.p{k}.csv") for k in range(n)]
     shard_csvs = [p for p in shard_csvs if os.path.isfile(p)]
@@ -189,6 +250,18 @@ def _merge_load_shards(shard_dir: str, n: int, csv_out: str, tbt_out: str,
                     shutil.move(os.path.join(d, fn), os.path.join(agent_dir, fn))
                 except Exception:
                     pass
+
+    if keep_shards:
+        return
+    why = _verify_merged_shards(shard_dir, n, csv_out, tbt_out)
+    if why:
+        print(f"[MP] keeping {shard_dir}: the merge did not account for every "
+              f"shard byte -- {why}")
+        return
+    try:
+        shutil.rmtree(shard_dir)
+    except Exception as exc:
+        print(f"[MP] merged, but could not remove {shard_dir}: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -1146,7 +1219,8 @@ class MotivationExperimentRunner:
             results = pool.map(_mp_load_worker, cfgs)
 
         _merge_load_shards(shard_dir, n, self.csv_path, self.tbt_jsonl_path,
-                           self.agent_log_dir, self.error_log_path)
+                           self.agent_log_dir, self.error_log_path,
+                           keep_shards=KEEP_SHARDS)
 
         agg = {"submitted": 0, "completed": 0, "success": 0, "failed": 0,
                "error": 0, "job_timeout": 0, "server_terminated": 0}
@@ -1510,6 +1584,16 @@ def main():
     # high request rates. The parent stays the single coordinator (restart /
     # collector), so the "restart per condition" independence rule is unaffected.
     parser.add_argument(
+        "--keep-shards", action="store_true",
+        help="Keep results/<run>/shards/ after merging. Off by default: the "
+             "shards are byte-for-byte the same data as the merged files, and "
+             "keeping them stored every run's per-token timing twice, which "
+             "reached 718 GB beside 702 GB of merged tbt_events.jsonl and took "
+             "the node into DiskPressure on 2026-08-05. Turn it on only to "
+             "debug the merge itself; the shards are kept automatically "
+             "whenever verification fails.",
+    )
+    parser.add_argument(
         "--load-procs", type=int, default=1,
         help="Number of load-generator worker processes (default 1 = single "
              "process, legacy behavior). >1 fans the open-loop rate/poisson/trace "
@@ -1861,6 +1945,9 @@ def main():
                         default="none")
 
     args = parser.parse_args()
+
+    global KEEP_SHARDS
+    KEEP_SHARDS = bool(args.keep_shards)
 
     # Multiprocess load: default to 256 threads per worker (not 1024) so N workers
     # don't spawn N*1024 threads. Explicit --load-threads always wins (default is
