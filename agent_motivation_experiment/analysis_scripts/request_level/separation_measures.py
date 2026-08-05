@@ -68,7 +68,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from exp22_fluidserve import CLASSES, load_run  # noqa: E402
+from exp22_fluidserve import CLASSES, attain, load_run  # noqa: E402
 from exp41_engine_view import attribute_engines  # noqa: E402
 
 TIGHT = "chat"          # the class with the smallest per-token budget
@@ -312,12 +312,29 @@ def gate_nochat(run):
 
 
 def label_of(d):
+    """Turn a result directory name into "arm [session] rate".
+
+    The session tag is not always `expNNrN`: passes are named `exp53p2r1`, hour
+    runs `exp56hr1`, and one-off arms `exp57unchanged`. The mix variant is not
+    always `_m1` either -- the Llumnix SLO arm runs `_m1f`, the same mixture with
+    the agent class's end-to-end budget restated for a policy that cannot express
+    one. A regex that assumed either form fell through to the raw directory name
+    for six of twelve runs and the figure then drew each of them as its own arm.
+    """
     b = os.path.basename(d)
-    m = re.search(r"_(exp\d+r?\d*)_(.+?)(?:_m1)?(?:_rpm_(\d+))?$", b)
+    m = re.match(r"^\d{6}_\d{4}_([a-z0-9]+)_(.+)$", b)
     if not m:
         return b
-    rate = f" {int(m.group(3)) / 60:.0f}rps" if m.group(3) else " hour"
-    return f"{m.group(2)} [{m.group(1)}]{rate}"
+    session, rest = m.group(1), m.group(2)
+    rate = ""
+    rm = re.search(r"_rpm_(\d+)$", rest)
+    if rm:
+        rate = f" {int(rm.group(1)) / 60:.0f}rps"
+        rest = rest[: rm.start()]
+    else:
+        rate = " hour"
+    rest = re.sub(r"_(m\d+f?|full|verbatim)$", "", rest)
+    return f"{rest} [{session}]{rate}"
 
 
 def main():
@@ -358,9 +375,25 @@ def main():
         # cannot fill a third of an instance, so the maximum an evenly mixed
         # fleet could reach is the effective number of classes in the arrivals.
         mix_ceiling = effective_count(e["class"].value_counts().values)
+        # The score belongs in the same row: every figure that reads this file
+        # plots a separation measure against it, and joining two files on a run
+        # name is one more place for an arm to be dropped in silence.
+        served = r[~r["rejected"]]
+        met = served[~served["violate_served"]]
+        # The same divisor exp56_affinity.py uses, so that the goodput printed
+        # here is the same number as the one in the experiment files. Using the
+        # trimmed span instead gave 22,711 against that file's 20,099 for the
+        # same run, which is exactly the "two quantities with one name" failure
+        # this repository keeps hitting.
+        dur = max(r["rel"].max(), 1.0)
         rows.append(dict(
             run=os.path.basename(d), label=label_of(d), attributed=frac,
             windows=nw,
+            offered=attain(r, "violate_offered"),
+            admitted=attain(served, "violate_served"),
+            reject=100.0 * float(r["rejected"].mean()),
+            goodput=float(pd.to_numeric(met["output_tokens"], errors="coerce")
+                          .fillna(0).sum()) / dur,
             **{f"top1_{c}": top1[c] for c in CLASSES},
             top1_mean=float(np.nanmean([top1[c] for c in CLASSES])),
             drift=drift1, drift_lag8=drift8,
@@ -379,6 +412,10 @@ def main():
         sys.exit("nothing measured")
     df = pd.DataFrame(rows)
     pd.set_option("display.width", 200)
+
+    print("\n=== the score, for reading the measures below against")
+    print(df[["label", "offered", "admitted", "reject", "goodput"]].to_string(
+        index=False, float_format="%.1f"))
 
     print("\n=== how spread is each class: largest instance's share of it (%), "
           "median over windows")
