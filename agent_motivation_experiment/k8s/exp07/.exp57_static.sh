@@ -119,31 +119,6 @@ set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
     # FS_CLASS_HARM stays pinned false for the same reason every other arm pins
     # it: the baseline it is read against ran that way. Turning it on is EXP-43.
     fsnoaff)     policy=fluidserve; export FS_AFFINITY=false FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false ;;
-    # EXP-58. The same preference as a DEGREE instead of a switch. The feasible
-    # set is ordered by w*share + (1-w)*room, so w=1 is the `fluidserve` arm
-    # above (share decides, free space only breaks ties) and w=0 is the
-    # `fsnoaff` arm (free space alone). The values between them are the axis
-    # EXP-56 could not sweep, and they exist for one reason: with only two
-    # settings, every point on a concentration-against-attainment plot beyond
-    # those two has to come from a DIFFERENT system, and then nothing can be
-    # attributed to the concentration. These arms put five points of varying
-    # concentration inside one binary.
-    #
-    # The spacing is not uniform. The ordering flips where w*dShare equals
-    # (1-w)*dRoom, and dShare between two instances at 45 req/s is of order 0.5
-    # while dRoom is of order 0.1, which puts the crossing near w=0.17. Uniform
-    # spacing would spend three of five points in the region where the class
-    # preference already decides everything.
-    #
-    # FS_CLASS_HARM stays pinned false as in every other arm, which also means
-    # the weight acts in exactly one place here: the class term in the damage
-    # estimate is off, so these arms differ from `fluidserve` and `fsnoaff` in
-    # the feasible-set ordering and in nothing else.
-    fsw000)      policy=fluidserve; export FS_AFFINITY_WEIGHT=0.0  FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false ;;
-    fsw005)      policy=fluidserve; export FS_AFFINITY_WEIGHT=0.05 FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false ;;
-    fsw015)      policy=fluidserve; export FS_AFFINITY_WEIGHT=0.15 FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false ;;
-    fsw040)      policy=fluidserve; export FS_AFFINITY_WEIGHT=0.4  FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false ;;
-    fsw100)      policy=fluidserve; export FS_AFFINITY_WEIGHT=1.0  FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false ;;
     # EXP-43. Candidate A is in the baseline now, so both arms carry it and the
     # single difference is the class term in the damage estimate. Its compiled
     # default is true; it has been false in every deployment since 2026-07-28

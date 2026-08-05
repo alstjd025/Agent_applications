@@ -16,18 +16,19 @@ them by completely different amounts and reorders them. Whole-run figures:
               rejected   offered   admitted   goodput tok/s
   FluidServe     27.0%      70.0       95.9          18,014
   Llumnix SLO    42.1%      38.7       67.0          11,451
-  PolyServe       0.0%      13.9       13.9           3,198
+  PolyServe       0.0%      18.9       18.9           5,763
 
 PolyServe's two attainment numbers are the same because it never rejects; the
 other two gain 26 and 28 points from having refused work.
 
-PolyServe's 13.9 disagrees with the 17.6 in the EXP-54 write-up's headline
-table. 13.9 is what the runs give and it is what that write-up's OWN per-class
-table implies: 3.7 / 8.8 / 95.3 on chat / deep research / agent, over 140,304 /
-21,161 / 17,978 requests, weights out to 13.9. Every other cell of that table
-reproduces here, including PolyServe's goodput (3,198) and throughput (18,150)
-exactly, so the disagreement is one value in that document rather than a
-difference in window or scoring. Resolve it there before quoting either.
+POLYSERVE IS DRAWN FROM EXP-57 AND THE OTHER TWO FROM EXP-54. That arm's tier
+length table understated deep research by 3.58x and fed both its admission limit
+and its repartitioner; it was corrected on 2026-08-05 and the hour trace re-run
+for that arm alone. The correction is worth 5.0 points of attainment and 2,565
+tokens/s of goodput over the hour (13.9 -> 18.9 and 3,198 -> 5,763), so figures
+drawn before it, and the EXP-54 write-up's numbers for this arm, are superseded
+rather than merely imprecise. The superseded runs are still on disk under
+`exp54r1_polyserve_full` and `exp54r2_polyserve_full`.
 
 The goodput panel is the guard against all of this: rejected work produces no
 tokens, so no denominator choice can inflate it.
@@ -50,21 +51,23 @@ still in flight when the run ends has an unknown outcome, so `attain()` removes
 it from both denominators rather than counting it as a violation. That rule is
 right in general and wrong at the end of a backlogged run: the requests still in
 flight there are precisely the slow ones, so removing them removes the failures.
-PolyServe's final window has 3,678 arrivals of which 3,396 — 92.3% — never
-finished, leaving 282 fast ones and an attainment of 99.6% against 9.1% two
-minutes earlier. Nothing recovered; the population changed.
+PolyServe's final window has 3,681 arrivals of which 2,441 — 66.3% — never
+finished, and its attainment reads 22.6% there against 8.9% ninety seconds
+earlier. Nothing recovered; the population changed.
 
 Windows in which more than MAX_CUTOFF of arrivals were still in flight are
 therefore dropped, and all arms are cut at the same time so the panels stay
 comparable. FluidServe never exceeds 4.5% and Llumnix SLO 5.8%, because both
-reject and neither builds a backlog; PolyServe reaches 92.3%. The trim is
-reported when the script runs.
+reject and neither builds a backlog; PolyServe reaches 66.3%. The trim is
+reported when the script runs and lands at 58.2 of 59.8 minutes.
 
-ONE RUN PER ARM. Repeat 2 was still running when this was drawn and covers only
-FluidServe, so no arm here has a repeat and no feature on any line is
-noise-bounded. Do not add repeat 2's FluidServe alone: an arm with a band beside
-two arms without one reads as the better-measured arm rather than the only
-repeated one.
+ONE RUN PER ARM, AND A REPEAT NOW EXISTS FOR ALL THREE. When this was first
+drawn only FluidServe had a second run; `exp54r2_fluidserve_full`,
+`exp54r2_slo_full` and `exp57r2_polyserve_full` now complete the set. The figure
+still draws repeat 1 of each arm, so no feature on any line is noise-bounded —
+adding the second repeat as a band per window is a change to what the figure
+shows, not a redraw, and has not been made. Say in the caption that these are
+single runs.
 
     python3 paper_figures/fig_exp54_hour.py
 """
@@ -91,7 +94,12 @@ from exp41_dynamic_timeline import windows, WIN  # noqa: E402
 SERIES = [
     ("FluidServe", "results/260803_1751_exp54r1_fluidserve_full",
      ARM_COLOR["fluidserve"], "-"),
-    ("PolyServe", "results/260803_1905_exp54r1_polyserve_full",
+    # EXP-57, not EXP-54. This arm's tier length table understated deep research
+    # by 3.58x; it was corrected on 2026-08-05 and the hour trace re-run for
+    # this arm alone. `results/260803_1905_exp54r1_polyserve_full` and
+    # `260804_0140_exp54r2_polyserve_full` are the superseded runs and are still
+    # on disk. The other two arms do not read that flag and keep EXP-54.
+    ("PolyServe", "results/260805_0006_exp57r1_polyserve_full",
      ARM_COLOR["polyserve"], "-."),
     ("Llumnix SLO", "results/260803_2117_exp54r1_slo_full",
      ARM_COLOR["slo"], "--"),

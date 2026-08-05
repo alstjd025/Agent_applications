@@ -15,15 +15,15 @@ produced tokens, and at this rate the four arms lose very different shares of
 their arrivals before that, for very different reasons:
 
                 rejected   cut off at run end   in the CDF
-  FluidServe      16.1%           1.4%             82.5%
-  Llumnix SLO     20.7-22.8%      1.9-2.2%         75-77%
-  PolyServe        0.0%          24.5%             75.5%
+  FluidServe      16.1%           1.5%             82.4%
+  Llumnix SLO     21.8%           2.0%             76.2%
+  PolyServe        0.0%          19.6%             80.4%
   Llumnix          0.0%          13.9%             86.1%
 
 Normalised to completions, every curve would end at 1.0 and each arm would be
 showing the latency of a different three quarters of the load — and the quarter
 each one drops is the slow quarter. PolyServe rejects nothing but never finishes
-24.5% of what it accepts; those are its most backlogged requests, exactly the
+19.6% of what it accepts; those are its most backlogged requests, exactly the
 ones that belong in the tail. Normalising them away would hand the arm with the
 worst backlog the best-looking tail. Against arrivals, each curve instead tops
 out at the share of arrivals it actually served, so the missing mass is on the
@@ -39,8 +39,10 @@ THE AGENT CLASS HAS NO RULE ON EITHER OF THESE AXES. It is scored end to end at
 deep research are scored on TTFT *and* inter-token latency, so both of their
 panels carry one.
 
-Both repeats are pooled (repeat 1 `exp53r1*`, repeat 2 `exp53p2*`), about 46,000
-arrivals per arm.
+Both repeats are pooled, about 46,000 arrivals per arm. Three arms come from
+EXP-53 (repeat 1 `exp53r1*`, repeat 2 `exp53p2*`) and PolyServe from EXP-57,
+which re-measured that arm alone on a corrected tier length table; the
+correction is what moves its unfinished share from 24.5% to 19.6%.
 
     python3 paper_figures/fig_exp53_latency_cdf.py
 """
@@ -64,7 +66,16 @@ from paper_style import TEXT_W, STYLE, GRID, ARM_COLOR  # noqa: E402
 from paper_style import save  # noqa: E402
 from exp22_fluidserve import load_run, CLASSES, SLO_RULES  # noqa: E402
 
-RUNS = ["results/*exp53r1*_rpm_3000", "results/*exp53p2*_rpm_3000"]
+# One glob per arm at this rate, not one per session. PolyServe's tier length
+# table was corrected on 2026-08-05 and that arm alone re-measured as EXP-57, so
+# its EXP-53 runs are superseded -- they are still on disk and a session-shaped
+# glob still matches them, which would pool a stale tier table with a corrected
+# one inside a single CDF. The same reasoning as in `fig_exp53_policies.py`,
+# where the joint is also justified.
+UNCHANGED = ["loadbalance_m1", "slo_m1f", "fluidserve_m1"]
+RUNS = ([f"results/*exp53r1*_{a}_rpm_3000" for a in UNCHANGED]
+        + [f"results/*exp53p2*_{a}_rpm_3000" for a in UNCHANGED]
+        + ["results/*exp57r*_polyserve_m1_rpm_3000"])
 ARM_RE = re.compile(r"_(fluidserve|polyserve|slo|loadbalance)_m1f?_rpm_")
 ORDER = ["fluidserve", "polyserve", "slo", "loadbalance"]
 LABEL = {"fluidserve": "FluidServe", "polyserve": "PolyServe",

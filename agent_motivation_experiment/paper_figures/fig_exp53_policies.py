@@ -40,6 +40,14 @@ actually measured and the unlabelled ticks show where the other three are. The
 axis stays linear, which is why 45-60 looks crowded: those four rates really are
 10 req/s apart and the knee really is that narrow.
 
+DATA, AND THE ONE ARM THAT DOES NOT COME FROM EXP-53. Two repeats of every
+condition. PolyServe is drawn from EXP-57, which re-measured that arm alone
+after its tier length table was corrected; the correction moves it a long way at
+the rates this figure is about — at 70 req/s attainment 14.4 -> 24.0% and
+goodput 3,965 -> 10,220 tokens/s — so the EXP-53 PolyServe curve that earlier
+versions of this figure carried should not be quoted. See the RUNS comment
+below for why the two sessions can be joined.
+
     python3 paper_figures/fig_exp53_policies.py
 """
 import os
@@ -60,12 +68,32 @@ from paper_style import (  # noqa: E402
 )
 from exp53_compare import collect, ARMS  # noqa: E402
 
-# BOTH repeats. Repeat 2 was relaunched under the prefix `exp53p2` rather than
-# reusing `exp53r2` (EXP-53 §5), so the obvious glob `results/*exp53r*` matches
-# repeat 1 only and silently drops 32 of the 64 conditions. It did exactly that
-# here until 2026-08-04. `exp53r1r1` is the top-up that refilled four repeat-1
-# cells lost to an engine that did not come up.
-RUNS = ["results/*exp53r1*", "results/*exp53p2*"]
+# ONE GLOB PER ARM, not one per session, because the arms no longer come from
+# the same session. PolyServe's `--polyserve-tier-decode-tokens` understated
+# deep research by 3.58x, was corrected on 2026-08-05, and that arm alone was
+# re-measured as EXP-57; its EXP-53 runs are SUPERSEDED. They are still on disk
+# and `results/*exp53*` still matches them, so a session-shaped glob would
+# average a stale tier table into a corrected one and draw a policy that never
+# ran. No other arm reads that flag, so the other three keep their EXP-53 runs.
+#
+# That the two sessions can be joined was measured rather than assumed: Llumnix
+# SLO, unchanged in code and configuration, was re-run in the EXP-57 session at
+# 45 and 70 req/s and read 52.3 and 21.7 offered against EXP-53's 52.4 and 21.4,
+# inside EXP-53's own repeat spread. Those two conditions
+# (`exp57unchanged_slo_*`) are the check and are not drawn, so that every rate
+# keeps the same number of repeats.
+#
+# BOTH repeats of each arm. EXP-53's repeat 2 was relaunched under the prefix
+# `exp53p2` rather than `exp53r2` (EXP-53 §5), so the obvious `results/*exp53r*`
+# matches repeat 1 only and silently drops half the conditions; it did exactly
+# that here until 2026-08-04. `exp53r1r1` is the top-up that refilled four
+# repeat-1 cells lost to an engine that did not come up. The repeat prefixes are
+# named rather than using `*exp53*` so that `exp53smoker1_loadbalance_m1_rpm_2700`
+# -- a shakedown condition -- is not pooled with the two real repeats.
+UNCHANGED = ["loadbalance_m1", "slo_m1f", "fluidserve_m1"]
+RUNS = ([f"results/*exp53r1*_{a}_rpm_*" for a in UNCHANGED]
+        + [f"results/*exp53p2*_{a}_rpm_*" for a in UNCHANGED]
+        + ["results/*exp57r*_polyserve_m1_rpm_*"])
 ORDER = ["fluidserve", "polyserve", "slo", "loadbalance"]
 LABEL = {"fluidserve": "FluidServe", "polyserve": "PolyServe",
          "slo": "Llumnix SLO", "loadbalance": "Llumnix"}
@@ -160,6 +188,11 @@ def main():
     n = df.groupby(["arm", "rate"]).size()
     print(f"{len(df)} conditions, {df.arm.nunique()} arms, "
           f"repeats per cell: {sorted(set(n))}")
+    # Per arm, so that a glob which matched nothing is visible here rather than
+    # as a missing line on the figure.
+    for arm, k in df.groupby("arm").size().items():
+        print(f"  {arm:12s} {k:2d} conditions, "
+              f"{df[df.arm == arm].rate.nunique()} rates")
     build(df, os.path.join(HERE, "exp53_attainment_goodput_offered.pdf"),
           show_offered=True)
     build(df, os.path.join(HERE, "exp53_attainment_goodput_admitted.pdf"),

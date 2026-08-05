@@ -13,26 +13,32 @@ The dotted vertical rule in every panel is that class's knee, so a column reads
 straight down -- at the rate where attainment falls, this is what the engine
 looked like.
 
-That is the whole figure: **the three knees are 70, 28 and 18 req/s, and the
+That is the whole figure: **the three knees are 65, 24 and 16 req/s, and the
 engine state at those three moments is nothing alike.**
 
-              knee      KV p90   queue p90
-  chat        70 req/s    27%        2
-  agent       28 req/s    65%        2
-  deep res.   18 req/s   100%      144
+              knee     attainment   KV mean   queue mean
+  chat        65 req/s    94.9%       17.0%       0.6
+  agent       24 req/s    87.7%       25.8%       0.3
+  deep res.   16 req/s    99.9%       59.1%       0.2
 
-**Chat's collapse is invisible in both lower rows.** At the rate where its
-attainment falls from 94.9% to 53.3%, the KV pool is 27% used at its 90th
-percentile -- and never exceeds 35.4% at any sample in the run -- with two
-requests queued. A policy watching memory, or queue depth, sees nothing wrong at
-the moment chat is already missing its rule. That is the argument for modelling
+The knee drawn is the ONSET -- the last measured rate at which the class is
+still above 85% -- and the numbers above are the engine state at that rate. The
+state one rate LATER, after the class has fallen, is 20.8 / 43.0 / 77.1% of the
+pool and 0.6 / 0.4 / 45.0 queued, at attainments of 53.3 / 40.4 / 58.6%. Which
+end is quoted changes the lower two rows a great deal for deep research and
+hardly at all for chat, so the caption has to say which one the rule marks.
+
+**Chat's collapse is invisible in both lower rows.** At its knee the KV pool is
+17.0% used with 0.6 requests queued on average, and at the next rate up, where
+attainment has fallen from 94.9% to 53.3%, it is 20.8% used with the same 0.6
+queued. A policy watching memory, or queue depth, sees nothing change across the
+rate at which chat stops meeting its rule. That is the argument for modelling
 per-token pace per class rather than governing by a single occupancy threshold.
 
-Deep research is the opposite: it reaches the knee with the pool full and 144
-requests queued, and it is the only class where queueing enters the rule at all
-(at the knee 22.1% of its requests miss both halves of the rule and 3.0% miss
-time-to-first-token alone; one rate higher its TTFT median jumps from 0.69 s to
-11.21 s as the queue goes from 140 to 338). The agent class sits between the
+Deep research is the opposite: it holds 59.1% of the pool at a rate where it is
+still meeting its rule 99.9% of the time, and it is the only class where
+queueing enters the rule at all -- its queue is 0.2 at the knee and 45.0 one
+rate later, where attainment drops to 58.6%. The agent class sits between the
 two, and is scored end to end rather than on either of those axes.
 
 WHY THE MEAN FOR THE TWO ENGINE ROWS. The queue is zero for most of the run at
@@ -45,10 +51,10 @@ zero at low load, which is what lets the three classes share a baseline. Chat's
 mean queue at its knee is 0.6 against deep research's 45.0 -- a factor of 75 in
 one number. Same statistic for the KV row, so the two are read the same way.
 
-The ordering does not depend on the choice: at their knees the three classes sit
-at KV mean 20.8 / 43.0 / 77.1, median 21.6 / 39.8 / 98.7 and p90 27.0 / 64.7 /
-99.9. Both gauges are trimmed to the same analysis window `load_run` scores
-attainment on.
+The ordering does not depend on the choice of statistic: one rate past the knee
+the three classes sit at KV mean 20.8 / 43.0 / 77.1, median 21.6 / 39.8 / 98.7
+and p90 27.0 / 64.7 / 99.9. Both gauges are trimmed to the same analysis window
+`load_run` scores attainment on.
 
 The queue row is symlog: the values run from 0, which chat holds most of the
 run, to 2,666, and a plain log axis would drop the zeros.
@@ -201,9 +207,12 @@ def main():
         at = d[d.rate == knee]
         if len(at):
             a = at.iloc[0]
+            # mean, not p90 -- this line said p90 while `collect` has taken the
+            # mean since the row statistic was changed, which is how the
+            # docstring came to describe a state one rate away from the drawn one.
             print(f"{CLS[tag][0]:14s} knee {knee:5.1f} req/s  "
-                  f"attainment {a.attain:5.1f}%  KV p90 {a.kv:5.1f}%  "
-                  f"queue p90 {a.q:7.1f}")
+                  f"attainment {a.attain:5.1f}%  KV mean {a.kv:5.1f}%  "
+                  f"queue mean {a.q:7.1f}")
 
     # Short labels: the row is one metric for all three columns, and the
     # statistic (p90) belongs in the caption rather than repeated on the axis

@@ -29,7 +29,7 @@ STYLE = {
     "font.family": "serif",
     "font.serif": ["DejaVu Serif", "Times New Roman", "Liberation Serif"],
     "font.size": 8, "axes.labelsize": 8, "axes.titlesize": 8,
-    "axes.linewidth": 0.7, "legend.fontsize": 8, "legend.frameon": False,
+    "axes.linewidth": 0.5, "legend.fontsize": 8, "legend.frameon": False,
     "xtick.labelsize": 8, "ytick.labelsize": 8,
     "xtick.direction": "in", "ytick.direction": "in",
     "xtick.major.size": 2.5, "ytick.major.size": 2.5,
@@ -41,7 +41,13 @@ STYLE = {
     "pdf.fonttype": 42, "ps.fonttype": 42,
 }
 
-GRID = dict(ls=":", lw=0.5, alpha=0.6)
+# The grey is set directly and the line is drawn at full opacity, rather than
+# fading matplotlib's default #b0b0b0 with an alpha. Both routes reach the same
+# printed colour on white, but alpha also fades the grid against anything drawn
+# UNDER it and makes the printed value depend on the background, so the colour
+# is the honest control. #909090 is one step darker than the default; the grid
+# stays lighter than the 0.5 pt frame so it does not read as a fourth curve.
+GRID = dict(ls=":", lw=0.5, color="#909090", alpha=1.0)
 
 # Arm colours, identical to the analysis scripts so a colour means the same
 # policy in an exploratory figure and in the paper.
