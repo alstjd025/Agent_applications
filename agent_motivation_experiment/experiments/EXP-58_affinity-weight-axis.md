@@ -215,3 +215,47 @@ arm measured three times in EXP-56 (0.5 points), so one repeat is not enough.
 And this reading depends on the chat-free fraction being a step rather than a
 gradual rise; with points only at 0.05, 0.15 and 0.4 the location of that step is
 known to within a factor of three.
+
+### 7.3 Repeat 1 at 55 req/s — the knob is a weaker instrument there
+
+| w | offered | effective instances | chat-free instance-time % | rejection % | chat ms/token |
+|---|---|---|---|---|---|
+| 0.00 | 64.52 | 3.86 | 1.03 | 25.84 | 45.20 |
+| 0.05 | 65.32 | 3.80 | 1.03 | 25.83 | 45.41 |
+| **0.15** | **67.48** | **2.79** | **14.95** | 28.75 | **43.65** |
+| 0.40 | 65.80 | 3.61 | 1.55 | 26.36 | 45.21 |
+| 1.00 | **68.54** | 3.16 | 2.84 | 24.88 | 44.00 |
+
+**The weight does not order the outcome here.** `w=0.15` produces more separation
+than `w=0.40` (2.79 against 3.61 effective instances, 14.95% against 1.55%
+chat-free instance-time) and scores higher (67.48 against 65.80).
+
+That is what should be expected at this rate rather than a failure of the knob.
+EXP-56 measured three repeats of one configuration at 55 req/s and their
+chat-free instance-time read **1.6, 1.2 and 23.9%**: whether the separated state
+forms at all is stochastic in this band. With one repeat per weight, a weight
+that failed to catch it is indistinguishable from a weight that cannot produce
+it. Repeat 2 is what separates those.
+
+### 7.4 And that makes the experiment answer a sharper question than it asked
+
+Two predictors of the score are available in these runs: **the knob**, which we
+set, and **the separation the knob produced**, which we measured. Correlations
+with offered attainment, repeat 1, five weights per rate:
+
+| | corr(w, score) | corr(effective instances, score) | corr(chat-free time, score) |
+|---|---|---|---|
+| 45 req/s | +0.947 | **−0.997** | +0.938 |
+| 55 req/s | +0.786 | **−0.858** | +0.498 |
+
+**At both rates the separation predicts the score better than the knob does, and
+the gap is larger where the knob is a weaker instrument.** That ordering is the
+causal claim this experiment was built to support, and it is stronger than the
+monotone-in-`w` result the design predicted: it holds in the band where setting
+`w` does not reliably produce the separation.
+
+⚠ **One repeat, five points per rate.** The 55 req/s row also has the two
+mechanism variables disagreeing — `w=1` scores highest with only 2.84% chat-free
+time while `w=0.15` scores 67.48 with 14.95% — so at that rate the batch
+homogeneity path (chat 44.00 against 45.20 ms per token) may be carrying more
+than the gate path. **Not to be written up before repeat 2.**

@@ -168,6 +168,23 @@ def judge(df, out):
                              "separation hurts." if drop > spread else
                              "no turn inside the reachable range"))
 
+        # The knob and the thing the knob moves are not the same predictor, and
+        # which of them tracks the score is the causal question this experiment
+        # was built to ask. Printing both correlations answers it directly: if
+        # the separation predicts the score where the weight does not, then the
+        # weight is an instrument that perturbs the separation and the
+        # separation is what matters.
+        h = g.dropna(subset=["effinst"]) if "effinst" in g else g.iloc[0:0]
+        if len(h) >= 3:
+            print("\n--- what predicts the score: the knob, or the separation "
+                  f"it produces? (n={len(h)})")
+            for col, name in (("w", "the knob w"),
+                              ("effinst", "effective instances per class"),
+                              ("nochat", "chat-free instance-time")):
+                if col in h and not h[col].isna().all():
+                    print(f"  corr({name:32s}, offered) = "
+                          f"{np.corrcoef(h[col], h['offered'])[0, 1]:+.3f}")
+
         print("\n--- H3: does the repeat spread widen with the weight?")
         print(agg[["w", "n", "off_lo", "off_hi"]].assign(
             spread=agg["off_hi"] - agg["off_lo"]).to_string(
