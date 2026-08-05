@@ -47,6 +47,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from exp22_fluidserve import (  # noqa: E402
     PAPER_STYLE, CLASSES, CLASS_COLORS, load_run, attain,
 )
+from exp41_engine_view import title_slug  # noqa: E402
 
 # One entry per arm that may appear. An arm whose glob matches nothing is
 # skipped, so the same dict serves EXP-41 (slo vs fluidserve) and EXP-44
@@ -241,7 +242,11 @@ def main():
         fig.suptitle(f"{a.title} {a.variant} — one hour of moving load, {who}, "
                      f"stock FIFO (one run each)\n{src}", fontsize=8.5, y=1.02)
         fig.tight_layout()
-        p = os.path.join(a.out_dir, f"{a.title.lower().replace('-','')}_"
+        # Shared with exp41_engine_view so the two figures of one run agree on
+        # their names. A title naming two experiments -- "EXP-54/57", which is
+        # what these are called after PolyServe alone was re-measured -- used to
+        # put a slash in the path and fail on a directory nobody created.
+        p = os.path.join(a.out_dir, f"{title_slug(a.title)}_"
                          f"{a.variant}_timeline.png")
         fig.savefig(p, dpi=300, bbox_inches="tight")
         plt.close(fig)

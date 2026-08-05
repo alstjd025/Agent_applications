@@ -67,6 +67,29 @@ PFX_HIT = "vllm:prefix_cache_hits_total"
 PFX_Q = "vllm:prefix_cache_queries_total"
 
 
+def title_slug(t):
+    """A filename fragment from a free-text title.
+
+    The title used to go straight into the path with only hyphens stripped, so a
+    title naming two experiments -- "EXP-54/57", which is what the hour figures
+    are called after PolyServe alone was re-measured -- produced
+    'exp54/57_full_engine_timeline.png' and failed on a directory that was never
+    meant to exist.
+
+    Hyphens are still dropped rather than replaced, so "EXP-41" slugs to "exp41"
+    exactly as before. Replacing them would rename every figure already on disk
+    and leave the old one beside the new one, which is the stale-duplicate
+    problem one step later.
+    """
+    out = []
+    for c in t:
+        if c.isalnum():
+            out.append(c.lower())
+        elif c != "-":
+            out.append("_")
+    return "".join(out).strip("_").replace("__", "_")
+
+
 def pick(rec, prefix):
     """The engine series carry model-name labels, so match on the prefix."""
     for k, v in rec.items():
@@ -169,7 +192,7 @@ def fig_timeline(data, eng, variant, out_dir, exp_title="EXP-41"):
                      f"{WIN:.0f} s windows (dotted on row B is the window maximum)",
                      fontsize=9, y=1.005)
         fig.tight_layout()
-        p = os.path.join(out_dir, f"{exp_title.lower().replace(chr(45),'')}_{variant}_engine_timeline.png")
+        p = os.path.join(out_dir, f"{title_slug(exp_title)}_{variant}_engine_timeline.png")
         fig.savefig(p, dpi=300, bbox_inches="tight")
         plt.close(fig)
         print(f"wrote {p}")
@@ -213,8 +236,13 @@ def fig_requests(data, runs, variant, out_dir, exp_title="EXP-41"):
     for arm, r in data.items():
         f = os.path.join(runs[arm], "analysis", "request_engine.csv")
         if not os.path.exists(f):
-            print(f"  no request_engine.csv for {arm}; run build_request_engine_map.py")
-            return
+            # Skip the arm rather than abandon the figure. Returning here meant
+            # one arm without an attribution map cost every other arm its panel,
+            # and the message named the missing file without saying the figure
+            # had been dropped -- so it read as a warning and was a failure.
+            print(f"  no request_engine.csv for {arm}; that arm is OMITTED "
+                  f"(run build_request_engine_map.py to include it)")
+            continue
         j, n = attribute_engines(runs[arm], r)
         per[arm] = j
         print(f"  {arm}: {len(j)} of {n} admitted requests attributed "
@@ -288,7 +316,7 @@ def fig_requests(data, runs, variant, out_dir, exp_title="EXP-41"):
         fig.suptitle(f"{exp_title} {variant} — the dispatch side: faded bars are "
                      f"{ARMS[arms[0]]}, solid are {ARMS[arms[-1]]}", fontsize=9, y=1.04)
         fig.tight_layout()
-        p = os.path.join(out_dir, f"{exp_title.lower().replace(chr(45),'')}_{variant}_engine_requests.png")
+        p = os.path.join(out_dir, f"{title_slug(exp_title)}_{variant}_engine_requests.png")
         fig.savefig(p, dpi=300, bbox_inches="tight")
         plt.close(fig)
         print(f"wrote {p}")
