@@ -259,3 +259,98 @@ mechanism variables disagreeing — `w=1` scores highest with only 2.84% chat-fr
 time while `w=0.15` scores 67.48 with 14.95% — so at that rate the batch
 homogeneity path (chat 44.00 against 45.20 ms per token) may be carrying more
 than the gate path. **Not to be written up before repeat 2.**
+
+---
+
+## 8. Result, both repeats (2026-08-06)
+
+20 conditions, all completed.
+
+### 8.1 45 req/s — all three hypotheses resolved
+
+| w | offered (rep 1 / rep 2) | effective instances | chat-free instance-time % | chat ms/token |
+|---|---|---|---|---|
+| 0.00 | 86.33 / 86.23 | 3.93 | 1.03 | 44.07 |
+| 0.05 | 86.68 / 86.31 | 3.85 | 1.03 | 44.31 |
+| 0.15 | 87.42 / 87.34 | 3.78 | 1.03 | 43.95 |
+| 0.40 | 89.15 / **98.12** | 2.57 | 17.53 | 40.24 |
+| 1.00 | 90.21 / **99.04** | 2.38 | 20.75 | 39.97 |
+
+**H1 — confirmed.** Every endpoint distance is small against the width of the
+range it misses: `w=0` by 0.27 on a 0.50-wide attainment range, 0.01 on 0.03,
+0.03 on 0.00; `w=1` by 0.19 on 8.50, 0.18 on 1.38, 1.32 on 26.50. The weighted
+sum is the rule the switch was.
+
+**H2 — confirmed, no turn.** `w=1` scores 94.63 against `w=0.4`'s 93.63, a
+difference of +1.0 against a spread of 8.8 at the top. Nothing in the reachable
+range shows too much separation hurting, which is what the design predicted:
+no value of `w` makes the assignment fixed, and that is the property that makes
+full separation fail.
+
+**H3 — confirmed, and sharply.** The spread between repeats, by weight:
+
+| w | 0.00 | 0.05 | 0.15 | 0.40 | 1.00 |
+|---|---|---|---|---|---|
+| spread (points) | 0.09 | 0.37 | 0.07 | **8.97** | **8.83** |
+
+**Below `w = 0.4` the outcome is reproducible to a tenth of a point; at and
+above it the same configuration scores 89.15 or 98.12.** The mechanism variable
+says why: chat-free instance-time is 1.03% in all six runs at `w ≤ 0.15` and
+4.38 or 30.67% at `w = 0.4`. **The separated state is not reachable at low
+weight and is reachable but not certain at high weight**, which is what positive
+feedback scaled by `w` predicts.
+
+### 8.2 The main result is not H1, H2 or H3
+
+Two predictors of the score are available: the knob we set, and the separation
+it produced. Over the ten runs at 45 req/s, all one binary:
+
+| predictor | correlation with offered attainment |
+|---|---|
+| the knob `w` | **+0.710** |
+| effective instances per class | **−0.999** |
+| chat-free instance-time | **+0.994** |
+| chat's time per token | **−0.989** |
+
+**The separation predicts the score essentially perfectly and the knob does
+not.** That is the statement the motivation needed and could not make: until
+now every point beyond two on a separation-against-score plot came from a
+different system, so nothing on it could be attributed to the separation.
+
+At 55 req/s the same ordering holds and everything is weaker: `w` +0.664,
+effective instances −0.715, chat-free time +0.410, chat's time per token
+−0.886. The band matters — 45 req/s is where the gate arithmetic binds.
+
+### 8.3 A correction to section 7.2
+
+After repeat 1 this file recorded that the gate path and the batch-homogeneity
+path come apart on this axis, and that about 1.1 of the points arrive before any
+instance is free of chat. **The first half is right and the explanation was
+wrong.**
+
+With both repeats, at 45 req/s: from `w=0` to `w=0.15` the score rises **86.28 →
+87.38, +1.10 points**, and the repeat spread at those weights is 0.07 to 0.09,
+so the rise is real. But **neither mechanism variable moves**: chat-free
+instance-time is 1.03% at both, and chat's time per token goes 44.07 → 43.95, a
+tenth of a millisecond against a budget of 50. The effective instance count does
+move, 3.93 → 3.78, and the largest-instance share 28.9 → 32.2.
+
+**So 1.10 of the 8.35 points between `w=0` and `w=1` arrive through neither of
+the two mechanisms we know how to measure.** That is an open question, not a
+decomposition. What is measurable today says only that a small amount of
+class-preferential placement helps before it produces either a chat-free
+instance or a measurably faster chat batch.
+
+### 8.4 What this experiment still does not answer
+
+- **The fully separated end is still not reachable from inside our system.** The
+  lowest effective instance count any weight produced is 1.58, against
+  PolyServe's 1.09 on the hour trace, and no weight makes the assignment fixed,
+  which is the property that makes full separation fail. EXP-59 is the arm for
+  that end.
+- **The two paths are still not decomposed.** Above `w=0.4` they move together
+  again, and below it neither moves while the score still rises (§8.3).
+- **`w` is a poor operating knob.** It buys 8.35 points at 45 req/s and it buys
+  them by making the outcome bimodal: 0.09 points of spread at `w=0`, 8.83 at
+  `w=1`. A middle weight that keeps the gain and cuts the spread does not exist
+  in this sweep — the gain and the spread appear together at `w=0.4`.
