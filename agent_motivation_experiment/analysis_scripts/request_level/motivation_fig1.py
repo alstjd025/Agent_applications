@@ -18,7 +18,7 @@ Four panels.
      the same across policies while the second is not, and rescaling either
      would hide exactly that
   C  the same question counted in REQUESTS rather than tokens
-  D  A and B again at one rate, where the split is legible
+  D  what became of every request that arrived, at one rate
 
 C is not a restatement of B. B weights every request by how many tokens it
 produced, so a policy that keeps the long requests and refuses the short ones
@@ -35,6 +35,33 @@ Llumnix SLO's dotted line RISES from 56.8% to 71.3% between 45 and 70 req/s
 while its solid line falls from 52.4% to 21.4%: read on the accepted set alone
 it looks like a policy improving under load, and what it is doing is refusing
 more. The other two never reject, so their lines coincide.
+
+Rejecting cannot raise the offered number, because a rejection is a violation
+there. Llumnix SLO's offered attainment falls with load like everyone else's, 52.4
+to 21.4 between 45 and 70 req/s. What rises is the admitted number and the
+distance to the policies that never reject, 1.6x at 45 req/s and 5.5x at 70. Panel
+D says why that distance opens, by splitting every arrival three ways at 70 req/s:
+
+                        met its rule   served, too late   refused
+  Llumnix (load bal.)            3.9               96.1       0.0
+  PolyServe                     14.4               85.6       0.0
+  Llumnix SLO                   21.4                8.6      70.0
+
+A refusal and a late answer both score zero on the offered denominator, so
+Llumnix SLO converted 70 of the 96 requests load balancing served late into
+refusals and got 17.5 more requests met in exchange. Those 17.5 are work that
+succeeded on capacity the refusals freed, not a smaller denominator.
+
+So what separates the three is not whether they reject. It is how much of the
+fleet's work lands in neither column: 96.1%, 85.6%, 8.6%. FluidServe rejects too
+-- 45.1% at this rate, with 51.9% met and 3.0% late -- so the claim to make is
+that it rejects less than Llumnix SLO and meets more, never that rejecting is
+itself the fault.
+
+The split drops requests still running when the run ended, because their outcome
+is unknown rather than bad, which is the same denominator attain() uses. Without
+that exclusion load balance reads 30.9% met against the 3.9% its attainment
+reports, and that mismatch is how the omission was caught.
 
 Below about 35 req/s the three policies are indistinguishable on every panel:
 the routing decision does not matter until the fleet is loaded enough for it to.
@@ -89,12 +116,27 @@ def collect(pattern="results/*exp53*_rpm_*"):
         served = r[~rej]
         dur = r["rel"].max()
         met = served[~served["violate_served"]]
+        # Panel D splits arrivals three ways, on the SAME denominator attain()
+        # uses: requests still running when the run ended are dropped from both,
+        # because their outcome is unknown rather than bad. Computing the split
+        # without that exclusion put load balance at 30.9% met against the 3.9%
+        # its attainment reads, which is how the mismatch was caught.
+        k = r[~r["cutoff"]]
+        nk = max(len(k), 1)
+        k_rej = k["rejected"]
+        k_err = k["errored"] & ~k_rej
+        k_srv = k[~k_rej & ~k["errored"]]
+        k_met = k_srv[~k_srv["violate_served"]]
         rows.append(dict(arm=m.group(1), rate=int(m.group(2)) / 60.0,
                          thru=served["output_tokens"].sum() / dur,
                          good=met["output_tokens"].sum() / dur,
                          att_off=attain(r, "violate_offered"),
                          att_adm=attain(served, "violate_served"),
-                         rej=100.0 * rej.mean()))
+                         rej=100.0 * rej.mean(),
+                         o_met=100.0 * len(k_met) / nk,
+                         o_late=100.0 * (len(k_srv) - len(k_met)) / nk,
+                         o_rej=100.0 * k_rej.sum() / nk,
+                         o_err=100.0 * k_err.sum() / nk))
     return pd.DataFrame(rows)
 
 
@@ -108,7 +150,9 @@ def main(out):
                 good_lo=("good", "min"), good_hi=("good", "max"),
                 att_off=("att_off", "mean"), att_adm=("att_adm", "mean"),
                 att_off_lo=("att_off", "min"), att_off_hi=("att_off", "max"),
-                rej=("rej", "mean"),
+                rej=("rej", "mean"), o_met=("o_met", "mean"),
+                o_late=("o_late", "mean"), o_rej=("o_rej", "mean"),
+                o_err=("o_err", "mean"),
                 n=("thru", "size")).reset_index()
 
     for q, lab in (("thru", "total produced (output tokens/s)"),
@@ -177,7 +221,7 @@ def main(out):
         if not s_.empty:
             off = float(s_["att_off"].iloc[0])
             adm = float(s_["att_adm"].iloc[0])
-            rej = float(s_["rej"].iloc[0])
+            rej = float(s_["o_rej"].iloc[0])
             ax[2].annotate("", xy=(70, adm), xytext=(70, off),
                            arrowprops=dict(arrowstyle="<->", color="#2ca02c",
                                            lw=0.9))
@@ -191,33 +235,57 @@ def main(out):
                                            lw=0.7,
                                            connectionstyle="arc3,rad=0.20"))
 
-        # Panel D says the same thing at one rate, where the split is legible.
-        # The bar height is what the engines produced; the solid part is what a
-        # client could use and the hatched part is what was thrown away.
+        # Panel D: what became of every request that arrived, at one rate.
+        # Tokens are already covered across all rates by A and B, so restating
+        # them here would be redundant; what is NOT anywhere else is how much of
+        # each policy's failure is work done and wasted versus work refused.
+        # Those two score identically -- both are violations on the offered
+        # denominator -- and separating them is what makes the rejecting policy
+        # readable instead of suspicious.
         HL = 70.0
         xs = np.arange(len(ARMS))
-        usable = []
+        met_lab = []
         for i, (key, lab, col) in enumerate(ARMS):
             s_ = agg[(agg.arm == key) & (agg.rate == HL)]
             if s_.empty:
                 continue
-            good, thru = float(s_["good"].iloc[0]), float(s_["thru"].iloc[0])
-            ax[3].bar(i, good, color=col, width=0.62)
-            ax[3].bar(i, thru - good, bottom=good, color=col, width=0.62,
-                      alpha=0.22, hatch="////", edgecolor=col, lw=0)
-            ax[3].annotate(f"{100 * (thru - good) / thru:.0f}%\nthrown\naway",
-                           (i, good + (thru - good) / 2), ha="center", va="center",
-                           fontsize=6.5, color="#444444")
-            usable.append(f"{good:,.0f}")
+            met = float(s_["o_met"].iloc[0])
+            late = float(s_["o_late"].iloc[0])
+            rj = float(s_["o_rej"].iloc[0])
+            ax[3].bar(i, met, color=col, width=0.62)
+            ax[3].bar(i, late, bottom=met, color=col, width=0.62, alpha=0.22,
+                      hatch="////", edgecolor=col, lw=0)
+            ax[3].bar(i, rj, bottom=met + late, color="#bbbbbb", width=0.62,
+                      alpha=0.55)
+            if met > 6:
+                ax[3].annotate(f"{met:.0f}", (i, met / 2), ha="center",
+                               va="center", fontsize=7, color="white",
+                               weight="bold")
+            if late > 9:
+                ax[3].annotate(f"{late:.0f}", (i, met + late / 2), ha="center",
+                               va="center", fontsize=7, color="#444444")
+            if rj > 9:
+                ax[3].annotate(f"{rj:.0f}", (i, met + late + rj / 2),
+                               ha="center", va="center", fontsize=7,
+                               color="#333333")
+            met_lab.append(f"{met:.0f} met")
         ax[3].set_xlim(-0.62, len(ARMS) - 0.38)
         ax[3].set_xticks(xs)
         names = ["Llumnix\n(load bal.)", "Llumnix\nSLO", "Poly\nServe"]
-        ax[3].set_xticklabels([f"{n}\n{u}" for n, u in zip(names, usable)],
+        ax[3].set_xticklabels([f"{n}\n{m}" for n, m in zip(names, met_lab)],
                               fontsize=6.3)
-        ax[3].set_ylim(0, 22000)
-        ax[3].set_title(f"D. the same at {HL:.0f} req/s: bar height is\n"
-                        f"production, solid part is usable", fontsize=8)
+        ax[3].set_ylim(0, 100)
+        ax[3].set_ylabel("% of arrivals")
+        ax[3].set_title(f"D. what became of every request\nat {HL:.0f} req/s",
+                        fontsize=8)
         ax[3].grid(axis="y", ls=":", lw=0.7, alpha=0.6)
+        d_leg = [plt.Rectangle((0, 0), 1, 1, fc="#666666"),
+                 plt.Rectangle((0, 0), 1, 1, fc="#666666", alpha=0.22,
+                               hatch="////", ec="#666666"),
+                 plt.Rectangle((0, 0), 1, 1, fc="#bbbbbb", alpha=0.55)]
+        ax[3].legend(d_leg, ["met its rule", "served, too late", "refused"],
+                     loc="upper center", bbox_to_anchor=(0.5, -0.30), ncol=1,
+                     fontsize=6.3, handlelength=1.4, labelspacing=0.25)
 
         ax[0].set_title("A. what the engines produced", fontsize=8)
         ax[1].set_title("B. how much of it met its latency rule", fontsize=8)
@@ -248,12 +316,15 @@ def main(out):
 
         fig.suptitle(
             "Three existing policies, the same four engines, the same load. They "
-            "produce within 1.5x of each other, differ by 15x in how much of that\n"
-            "production a client could use, and the best of them returns 21% of "
-            "the requests that were sent to it inside the latency it promised.\n"
-            "Shaded band in A and B is the spread over repeats; it is invisible "
-            "because the repeats agree.",
-            fontsize=8, y=1.10)
+            "produce within 1.5x of each other and differ by 15x in how much of "
+            "that production a client could use.\n"
+            "The best of them returns 21% of the requests sent to it inside the "
+            "latency it promised, and gets there by refusing 70% of them: on "
+            "panel D a refusal and a late answer\nboth score zero, so what "
+            "separates the policies is how much of the fleet's work ends up in "
+            "neither column. "
+            "Shaded band in A and B is the spread over repeats.",
+            fontsize=8, y=1.13)
         p = os.path.join(out, "motivation_throughput_vs_goodput.png")
         fig.savefig(p, dpi=300, bbox_inches="tight")
         print(f"\nwrote {p}")
