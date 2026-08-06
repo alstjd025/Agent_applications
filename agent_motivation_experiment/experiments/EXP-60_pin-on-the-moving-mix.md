@@ -76,5 +76,30 @@ one shell and `set_arm` exported `FS_CLASS_PIN` without clearing it for the next
 arm. Fixed by clearing every ablation variable at the top of `set_arm`; the
 missing control repeat is **EXP-60b**. Full account in §63.5.
 
-So this experiment has **three pinned hour runs** (74.48 / 75.87 / 77.65) and
-**one control** (68.77, which matches EXP-54's 69.95 and 69.25 across sessions).
+So at the time this was written the experiment had **three pinned hour runs**
+(74.48 / 75.87 / 77.65) and **one control** (68.77, which matches EXP-54's 69.95
+and 69.25 across sessions). EXP-60b replaced the missing control.
+
+## 6. Judgement with the replacement control (2026-08-06 22:30 KST)
+
+EXP-60b's start-up line reads `classpin=off` and the log applies the pin zero
+times, so the contamination did not recur.
+
+| arm | repeats | offered (mean) | spread | rejected | token goodput |
+|---|---|---|---|---|---|
+| control | 2 | **69.02** | 68.77 ~ 69.27 | 27.3 / 27.6% | 17,545 ~ 17,752 |
+| pinned | 2 | **76.76** | 75.87 ~ 77.65 | 15.8 / 15.7% | 17,799 ~ 18,156 |
+
+**+7.74 points, against repeat spreads of 0.50 and 1.78.** The refutation branch
+stands.
+
+The contaminated control's per-class signature matches the pinned arm to within
+a point on every class and differs from the two clean controls by more than 30
+points on every class, so the diagnosis made from the log is confirmed by the
+data itself.
+
+**The gain is in requests, not in tokens.** Requests completed within SLO rise
+11.9% (124,428 → 139,179) while their output tokens rise 1.9% (17,649 → 17,978
+tok/s, against spreads of 207 and 357). The pin halves deepresearch, whose
+outputs are long, and fills the space with chat and swe, whose outputs are
+short. Details in `fluidserve-implementation.md` §63.3.1.
