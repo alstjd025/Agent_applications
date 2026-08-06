@@ -46,11 +46,22 @@ layer gave away even when it has the work.
 |---|---|---|---|---|---|
 | 45 | 30.71 | 29.57 | −1.14 | 1.16 | 8,245 → 8,016 |
 | 50 | 14.39 | 13.45 | **−0.93** | **0.29** | 3,323 → **2,997** |
-| 60 | 7.18 | 6.08 | −1.10 | 1.30 | 1,485 → **1,265** |
+| 60 | 7.18 | **6.73** (one repeat) | **−0.45** | — | 1,485 → **1,281** |
 
 **All three rates get slightly worse and goodput falls at all three** (−3, −10,
-−15%). At 50 req/s the difference exceeds the repeat spread, so that row is not
+−14%). At 50 req/s the difference exceeds the repeat spread, so that row is not
 noise.
+
+⚠ **One of the two QoServe repeats at 60 req/s is excluded**: the stack, not the
+policy, failed in it. Load balance has no admission control, yet that condition
+reported a 22.6% rejection rate; the gateway returned 400 from minute 3 and 503
+from minute 7, and the runner labels a 503 `no available inference worker` as
+`KV_THRESHOLD`, which is not our KV admission threshold. The other three
+conditions at this rate have zero of both errors. Account in
+`fluidserve-implementation.md` §63.6.1; the excluded run is listed with its
+reason in `ms_dev/notes/excluded_runs.tsv`. With it included the mean was 6.08,
+the difference −1.10 and goodput 1,265, so the direction and the conclusion are
+unchanged and only the magnitude moves.
 
 **Reading**: ordering by deadline chooses an order *within the set that can
 still be met*, and when arrivals are about twice capacity that set is nearly
