@@ -7,6 +7,20 @@ synthetic coding agent workload로 측정합니다.
 
 이 파일은 인덱스이고, 실제 실험 규칙·명령은 하위 문서가 더 자세합니다.
 
+> **바깥 저장소(`llumnix_reproduce`)와의 분담** — Llumnix 스케줄러 정책 실험을 할 때는
+> 규칙과 상태가 저쪽에 있습니다.
+> - **규칙**(반복해서 걸렸던 함정 A~F, 결과 판정 규칙, 서술 규칙): [`../CLAUDE.md`](../CLAUDE.md).
+>   세션마다 항상 로드되므로 따로 열 필요는 없습니다.
+> - **상태**(지금 무엇이 도는가, 어느 절이 정본인가, 인용하면 안 되는 수치):
+>   [`../ms_dev/notes/STATUS.md`](../ms_dev/notes/STATUS.md). 실험이 끝날 때마다 바뀌므로
+>   판단하기 전에 읽습니다.
+>
+> 이 파일과 `agent_motivation_experiment/CLAUDE.md`는 **이 저장소(부하 생성기·워크로드·
+> 분석 스크립트)의 규칙**만 담습니다. 두 그림 스타일 절이 비슷해 보이지만 서로 다릅니다 —
+> 여기 것은 job-level SGLang 실험용(파랑 = request/call-level, 빨강 = job-level)이고,
+> `exp-plot` 스킬 것은 FluidServe 정책 비교용(파랑 = FluidServe, 빨강 = PolyServe)이라
+> 색이 뜻하는 역할이 반대입니다. 섞어 쓰면 안 됩니다.
+
 ---
 
 ## Repo Layout
@@ -21,6 +35,8 @@ synthetic coding agent workload로 측정합니다.
 ```
 
 > 참고: 이 repo는 부모 디렉토리 `/home/nxc/mskim/agent/` 안에 위치합니다.
+> (NXC13 작업 호스트에서는 `/home/nxclab/llumnix_reproduce/Agent_applications`이고,
+> 부모는 `llumnix_reproduce` 저장소입니다. 아래 백업·터널 스크립트 설명은 앞의 호스트 기준입니다.)
 > 부모 쪽에는 결과 백업(`backup/`), 샘플 metrics(`swe_bench_test_data/`), 수동 SSH 터널 스크립트
 > (`pipe_sglang.sh`, `kill_pipe_sglang.sh`) 등이 있지만 **버전관리 대상이 아닙니다.**
 
@@ -69,7 +85,8 @@ synthetic coding agent workload로 측정합니다.
   새 분석은 새 CSV을 추가하는 방향으로.
 - 분석 스크립트를 옮기거나 편집한 뒤에는
   `python -m py_compile analysis_scripts/*.py run_experiment.py` 로 syntax sanity check.
-- **실험 결과를 보여주거나 정리/요약/비교/플롯을 만드는 요청**("보여줘/정리해줘/결과 만들어줘/비교해줘")이 들어오면, 표·그림을 만들기 전에 **어떤 metric을 / 어떤 정의로 / 어떤 run 범위에서** 측정하는지 한두 줄로 다시 적어 사용자 확인을 받는다. 이전 대화의 default를 자동으로 재사용하지 말고 명시적으로 inherit/변경할지 묻는다. 상세 규칙은 [`agent_motivation_experiment/CLAUDE.md`](agent_motivation_experiment/CLAUDE.md) 의 "Confirmation Before Reporting Results" 참고.
+- **실험 결과를 보여주거나 정리/요약/비교/플롯을 만드는 요청**("보여줘/정리해줘/결과 만들어줘/비교해줘")이 들어오면, 표·그림을 만들기 전에 measurement choice를 다시 적어 확인을 받는다. 무엇을 다시 적어야 하는지(metric / definition / run scope)와 이전 대화의 default를 재사용하지 않는 이유는 [`agent_motivation_experiment/CLAUDE.md`](agent_motivation_experiment/CLAUDE.md) 의 **"Confirmation Before Reporting Results"** 에 정본이 있다.
+- **서술**은 비유·관용구를 쓰지 않고 시스템 분야에서 보편적으로 쓰이는 용어로, 축약하지 않고, 수치 옆에 그 수치의 맥락(분모·반복 횟수·어느 run)을 같이 적는다. 정본은 [`../CLAUDE.md`](../CLAUDE.md) 의 "서술 규칙".
 
 ---
 

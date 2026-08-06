@@ -347,6 +347,16 @@ intended for the paper so the whole paper looks consistent. Figure size and
 inner axes box can vary per figure; the items below should stay fixed unless
 explicitly relaxed.
 
+> **Not the same as the FluidServe policy figures.** The `exp-plot` skill in the
+> outer repository carries a second style block for scheduler-policy comparison
+> figures, where the colours are bound to arms (`#1f77b4` FluidServe,
+> `#d62728` PolyServe, `#2ca02c` Llumnix SLO) rather than to metric levels. Here
+> blue is the request/call-level metric and red is the job-level one, so the two
+> palettes assign the same hex to opposite roles. Pick the block that matches
+> what the figure compares and do not mix them. The physical-size rules
+> (never `bbox_inches="tight"`, draw at the column width, `pdf.fonttype: 42`)
+> hold for both and are written out in `exp-plot`.
+
 Reference implementation: [analysis_scripts/job_level/summarize_sweep_window.py](analysis_scripts/job_level/summarize_sweep_window.py)
 (`plot_goodput_vs_lambda`).
 
