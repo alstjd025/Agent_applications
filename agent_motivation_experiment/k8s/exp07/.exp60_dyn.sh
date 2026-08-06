@@ -82,27 +82,6 @@ check_stack() {
 
 set_arm() {
   local policy
-  # Clear every ablation variable before the arm sets the ones it wants.
-  #
-  # This driver loops over arms INSIDE one shell, so an `export` from one arm is
-  # inherited by every arm after it. EXP-60 lost its second control condition
-  # that way: the arm order is fluidserve, fspin-demand, fluidserve,
-  # fspin-demand, and the third condition ran with the class pin the second one
-  # had exported. Its per-class result was the pinned signature, not the
-  # control's, and the log confirms three pin applications for two pinned arms.
-  #
-  # set_scheduler_profiling.py's own protection does not cover this: it removes
-  # an ablation flag that the invocation did not ASK for, and this invocation
-  # did ask, because the variable was in its environment. The same shape as the
-  # flag that stuck in the deployment spec for 61 conditions (section 38), one
-  # layer further out.
-  #
-  # run_exp27_mixsweep.sh is not affected while it is called once per condition
-  # from a chain script, which is how EXP-59 ran, but it has the same structure
-  # and gets the same clearing.
-  unset FS_PEND FS_SHED FS_AFFINITY FS_AFFINITY_WEIGHT FS_CLASS_PIN \
-        FS_FLUX FS_CLASS_HARM FS_HORIZON FS_Z FS_FORCE_MARGIN \
-        FS_OWN_BUDGET_GATE FS_KV_SLOPE FS_GATE_SLACK
   case "$1" in
     # EXP-44. class-harm is pinned in BOTH arms rather than left unset, because
     # set_scheduler_profiling.py now returns an unset ablation to its compiled

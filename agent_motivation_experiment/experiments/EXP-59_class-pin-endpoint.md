@@ -158,6 +158,51 @@ would be surprising and would need explaining before anything else is read.
   so the two are not the same configuration. A third pinned arm with spill would
   separate that, and is not in this run.
 
-## 7. Result
+## 7. Result (2026-08-06)
 
-*(to be filled in after the run)*
+12 conditions, no contamination: the log applied the pin exactly as many times
+as there were pinned conditions. The chain invokes the driver once per condition
+in a fresh process, so the environment variable an arm exports cannot reach the
+next one -- unlike EXP-60, where it did.
+
+| | 45 req/s | 55 req/s |
+|---|---|---|
+| control, no pin | 94.50 (90.26 / 98.74) | 68.42 (67.68 / 69.17) |
+| **`fspin-demand`** (chat 2 / dr 1 / swe 1) | **93.20** (93.19 / 93.21) | **84.79** (84.36 / 85.23) |
+| `fspin-poly` (chat 1 / dr 2 / swe 1) | **72.29** | **61.96** |
+
+**H1 is refuted for one of the two allocations.** `fspin-poly` loses 22.2 points
+at 45 req/s and 6.5 at 55, well past the 10-point threshold. `fspin-demand`
+loses 1.3 at 45 and **gains 16.4** at 55, which is inside the 5-point band the
+rules named as the narrowing outcome.
+
+**H2's second branch fired**, the one the rules called the more interesting
+outcome: a well-chosen static allocation is not worse than continuous
+placement at this fleet size, and at 55 req/s it is much better. It also rejects
+far less (7.7% against 24.1%) and reproduces to 0.02-0.9 points where the
+control spans 8.5.
+
+**H3 holds.** The pinned arms have more instance-time free of the tightest class
+and a lower score in the `fspin-poly` case, which is the point restated inside
+one system: separation is not the objective.
+
+**H4 holds.** `fspin-poly` puts chat, 76.9% of arrivals, on one instance and its
+rejection rate goes to 27-37%.
+
+### 7.1 What the design could not see
+
+The allocation `fspin-demand` uses was derived from this workload's measured
+output-token mix, and an eight-minute static condition holds that mix fixed, so
+the allocation is right for the whole condition by construction. **The claim
+being tested -- that fixing the assignment costs when the mix moves -- cannot
+appear here.** The pre-registration listed two outcomes and missed this third
+one: the workload cannot exhibit the failure mode. EXP-60 was written for that,
+and section 63.4 of the implementation notes records that the one-hour trace
+cannot show it either, for a different reason: with four instances, three
+classes and a floor of one instance each, the demand-implied integer allocation
+is (2,1,1) in every one of the trace's four mix segments.
+
+**What survives from this experiment**: `fspin-poly` is 22.2 points worse than
+the control, which makes "PolyServe's way of choosing the allocation is wrong" an
+ablation of our own policy rather than a comparison against a different system.
+That was one of the two things this experiment was built for.
