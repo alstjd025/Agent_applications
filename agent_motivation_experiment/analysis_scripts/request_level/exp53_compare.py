@@ -48,27 +48,50 @@ ARMS = {
     "polyserve":   ("PolyServe",   "#d62728", "-"),
     "slo":         ("Llumnix SLO", "#2ca02c", "-"),
     "loadbalance": ("Llumnix",     "#9467bd", "-"),
+    # EXP-66. Brown rather than the orange next in tab10, because orange is
+    # bound to the deep-research class in the per-class figures and the two
+    # kinds of figure sit next to each other in the same directory.
+    "llmdslo":     ("llm-d",       "#8c564b", "-"),
 }
-ARM_RE = re.compile(r"_(fluidserve|polyserve|slo|loadbalance)_m1f?_rpm_(\d+)$")
+# `llmdslo` runs carry the m1f config for the same reason the Llumnix SLO arm
+# does: neither policy can express an end-to-end budget, so the agent class is
+# restated as 2,500 ms + 52 ms/token inside the same 30 s. Scoring is unaffected
+# -- load_run judges that class end to end whatever the config said.
+ARM_RE = re.compile(r"_(fluidserve|polyserve|slo|loadbalance|llmdslo)_m1f?_rpm_(\d+)$")
 
 
 def rescheduling_pairs(run):
-    """How many non-zero rescheduling decisions the scheduler made.
+    """(pairs the scheduler decided on, pairs whose migration call failed).
 
     Migration being enabled is not the same as migration happening. The smoke
     condition had it on, ran the loop 19 times, and generated zero pairs every
     time, so a sweep could finish with the feature nominally on and never
     engaged. That has to appear in the table rather than be assumed either way.
+
+    The failure count is separate because deciding on a pair and moving a
+    request are two different events, and until 2026-08-07 only the first was
+    counted. When the engine is started without migration the scheduler still
+    decides on pairs and every call comes back
+    `ResourceExhausted: No enough migrate out slots for requests`; the scheduler
+    then logs `Finish migrating from X to Y` on the next line whether or not
+    anything moved, so neither the decision count nor that line is evidence that
+    a KV cache was transferred. The EXP-66 llm-d conditions made this visible:
+    they read 125 decided pairs while their engines had migration off, and all
+    125 calls failed. Checked against the arms already measured, PolyServe's 77
+    are all failures for the same reason and the Llumnix load-balance arm's 23
+    are real.
     """
     p = os.path.join(run, "server_metrics", "migration_events.log")
     if not os.path.exists(p):
         return None
-    n = 0
+    n = failed = 0
     for line in open(p, errors="ignore"):
         m = re.search(r"Generate rescheduling pairs, count: (\d+)", line)
         if m and int(m.group(1)) > 0:
             n += int(m.group(1))
-    return n
+        elif "failed to migrate instance" in line:
+            failed += 1
+    return n, failed
 
 
 def collect(patterns):
@@ -92,7 +115,10 @@ def collect(patterns):
                        goodput=tok / span,
                        total=pd.to_numeric(adm.get("output_tokens"),
                                            errors="coerce").fillna(0).sum() / span,
-                       pairs=rescheduling_pairs(d), run=os.path.basename(d))
+                       run=os.path.basename(d))
+            mig = rescheduling_pairs(d)
+            rec["pairs"] = None if mig is None else mig[0]
+            rec["pairs_failed"] = None if mig is None else mig[1]
             for c in CLASSES:
                 rec[c] = attain(r[r["class"] == c], "violate_offered")
                 rec[c + "_adm"] = attain(r[r["class"] == c], "violate_served")
@@ -147,12 +173,14 @@ def main():
     print(f"{len(df)} conditions.  offered = every arrival in the denominator, "
           f"a rejection is a violation.  admitted = rejections leave it.\n")
     print(f"{'rate':>5} {'arm':>12} {'off':>6} {'adm':>6} {'rej%':>6} {'goodput':>8} "
-          f"{'total':>8} {'chat':>6} {'dr':>6} {'swe':>6} {'mig':>5}")
+          f"{'total':>8} {'chat':>6} {'dr':>6} {'swe':>6} {'mig':>9}")
     for _, r in df.sort_values(["rate", "arm"]).iterrows():
-        pairs = "-" if r["pairs"] is None else f"{int(r['pairs'])}"
+        # decided/failed, so a column of "7/7" cannot be read as seven moves.
+        pairs = ("-" if r["pairs"] is None
+                 else f"{int(r['pairs'])}/{int(r['pairs_failed'])}")
         print(f"{r['rate']:>5.0f} {r['arm']:>12} {r['off']:>6.1f} {r['adm']:>6.1f} "
               f"{r['rej']:>6.1f} {r['goodput']:>8.0f} {r['total']:>8.0f} "
-              f"{r['chat']:>6.1f} {r['deepresearch']:>6.1f} {r['swe']:>6.1f} {pairs:>5}")
+              f"{r['chat']:>6.1f} {r['deepresearch']:>6.1f} {r['swe']:>6.1f} {pairs:>9}")
 
     print("\nequal weight across classes -- reported beside the per-request "
           "table above, not instead of it")
@@ -167,16 +195,30 @@ def main():
     print("      (admitted / offered)")
 
     tot = df.groupby("arm")["pairs"].sum(min_count=1)
-    print("\nmigration: non-zero rescheduling pairs summed over each arm's conditions")
+    bad = df.groupby("arm")["pairs_failed"].sum(min_count=1)
+    print("\nmigration, summed over each arm's conditions: pairs the scheduler "
+          "decided on, of which failed, leaving how many requests actually moved")
     for arm in ARMS:
         if arm in tot.index:
-            v = tot[arm]
-            print(f"  {ARMS[arm][0]:<24}{'n/a' if pd.isna(v) else int(v)}")
-    print("  Zero means the feature was enabled and never engaged, which is a "
-          "result to report, not an assumption to make.")
+            v, f = tot[arm], bad.get(arm)
+            if pd.isna(v):
+                print(f"  {ARMS[arm][0]:<24}n/a")
+            else:
+                f = 0 if pd.isna(f) else int(f)
+                print(f"  {ARMS[arm][0]:<24}{int(v):>5} decided, {f:>5} failed, "
+                      f"{int(v) - f:>5} moved")
+    print("  Zero moved means the feature was either off at the engine or "
+          "enabled and never engaged; both are results to report rather than "
+          "assumptions to make. A failed call is logged as "
+          "'No enough migrate out slots', and the scheduler prints "
+          "'Finish migrating' on the next line either way.")
 
-    note = ("Llumnix arms run with migration enabled; FluidServe and PolyServe "
-            "do not use it and run without. Bars are min..max over repeats.")
+    note = ("Llumnix arms run with migration enabled; FluidServe, PolyServe and "
+            "llm-d do not use it and run without. Bars are min..max over repeats.")
+    if "llmdslo" in set(df.arm):
+        # Said on the figure because none of it can be recovered from the lines.
+        note += ("\nllm-d: one repeat, a session five days later, and the only "
+                 "arm whose conditions were preceded by a 3 min pre-run.")
     with plt.rc_context(PAPER_STYLE):
         fig, ax = plt.subplots(figsize=(3.4, 2.6))
         for arm in ARMS:

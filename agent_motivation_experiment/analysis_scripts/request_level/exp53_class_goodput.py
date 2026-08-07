@@ -16,8 +16,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from exp22_fluidserve import PAPER_STYLE, CLASSES, load_run
 
 ARMS = {"fluidserve": ("FluidServe", "#1f77b4"), "polyserve": ("PolyServe", "#d62728"),
-        "slo": ("Llumnix SLO", "#2ca02c"), "loadbalance": ("Llumnix", "#9467bd")}
-R = re.compile(r"_(fluidserve|polyserve|slo|loadbalance)_m1f?_rpm_(\d+)$")
+        "slo": ("Llumnix SLO", "#2ca02c"), "loadbalance": ("Llumnix", "#9467bd"),
+        "llmdslo": ("llm-d", "#8c564b")}
+R = re.compile(r"_(fluidserve|polyserve|slo|loadbalance|llmdslo)_m1f?_rpm_(\d+)$")
 
 
 # The default is EXP-53's own sessions. It is a DEFAULT and not a fact about

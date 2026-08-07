@@ -215,3 +215,52 @@ goodput 70에서 22,308 대 17,990.
 **축 검사**(§9.10): 4·5는 지지되지 않고 7만 지지된다. **격차는 아직 설명되지 않았다.**
 
 **rep 2**: 2026-08-07 23:24 KST 시작, ≈02:10 KST 종료 예정.
+
+---
+
+## 8. 그림과 축 3의 답 (2026-08-08)
+
+그림은 `results/aggregate_analysis/exp66r1/`이고 **정본은 그 디렉토리의 `README.md`**이다.
+다시 만드는 명령:
+
+```bash
+bash analysis_scripts/redraw_static_sweep_llmd.sh
+```
+
+`redraw_static_sweep.sh`(EXP-53/57의 정본 그림)는 건드리지 않는다 — llm-d는 반복 1회이고
+세션이 다르고 예열 주행이 있어 아직 그 비교에 넣지 않는다.
+
+### 8.1 채점 재확인
+
+rpm 4200 조건을 원 `metrics.csv`에서 손으로 다시 계산해 equal-mix offered 66.1015를 얻었고
+요약표의 66.101473과 일치한다. 창(도착 60~522초, 69.81 req/s), 클래스별 개수 합(24,795 +
+4,970 + 2,484 = 32,249 = n), 스트리밍 폴백(여덟 조건 전부 0~3건)을 함께 확인했다.
+
+**보고상의 주의 하나**: llm-d의 거절은 클라이언트가 `is_rejected`와 `is_error`를 둘 다
+세우므로 `exp22_summary.csv`의 `rejected`와 `errored` 열이 같은 요청을 두 번 보고한다.
+`violate_offered`는 OR이라 점수에 영향이 없고, **진짜 오류는 0건**이다. 거절 사유가
+`KV_THRESHOLD`로 찍히는 것은 Llumnix용 라벨이 llm-d 거절 본문에 붙은 것이다.
+
+### 8.2 엔진 귀속 — Envoy에서 얻는다
+
+llm-d는 Llumnix 스케줄러를 안 거치므로 `scheduler_dispatch.log`가 비어 있다. 엔진 이름은
+Envoy access log의 `%UPSTREAM_HOST%`(= `<pod-ip>:<port>`)에 있다. 새 스크립트가
+`analysis_scripts/request_level/llmd_engine_map.py`이고, 시각과 소요 시간으로 1:1 매칭한다.
+**여덟 조건 전부 99.88~99.97% 매칭**, 70 req/s에서 시작 시각 차이 중앙값 1.6 ms.
+
+### 8.3 축 3 — 클래스 분리가 아니라 prefix cache다
+
+클래스당 유효 인스턴스 수(창별 중앙값): llm-d는 15 req/s의 2.77에서 70 req/s의 3.75로
+**퍼지고**, FluidServe는 45 req/s의 3.34에서 70 req/s의 2.41로 **모인다**. 점수 격차가 가장
+큰 구간에서 llm-d가 가장 덜 분리한다.
+
+70 req/s 엔진 총계: prefix hit **93.5%**(llm-d) 대 75.1%(FluidServe) 대 79.9%(Llumnix SLO).
+실제 계산하는 prefill 토큰이 4,585 대 12,274 tok/s이고 decode가 20,661 대 16,562 tok/s다.
+**예열 주행 때문이 아니다** — cold restart 직후 예열 주행의 첫 1분이 이미 96.2%다.
+
+### 8.4 부수적으로 고친 것 — migration 카운터
+
+`exp53_compare.py`의 migration 열이 `Generate rescheduling pairs`만 세고 있어서, migration을
+끈 엔진에서도 스케줄러가 결정한 pair가 그대로 찍혔다(llm-d 125건). 실패 호출을 따로 세니
+**llm-d 125건 전부 실패, PolyServe 77건 전부 실패, 실제로 움직인 것은 Llumnix load-balance의
+23건뿐**이다. 결정·실패·성공을 셋 다 출력하도록 고쳤다.

@@ -66,6 +66,8 @@ ARM_STYLE = {
     "sloqoserve": dict(color="#98df8a", ls="--", marker="o", label="Llumnix SLO + QoServe"),
     "fluidservefifo": dict(color="#1f77b4", ls="-", marker="s", label="FluidServe + FIFO"),
     "fluidserveqoserve": dict(color="#aec7e8", ls="--", marker="s", label="FluidServe + QoServe"),
+    # EXP-66. Brown, not orange: orange is the deep-research class colour.
+    "llmdslo": dict(color="#8c564b", ls="-", marker="D", label="llm-d"),
 }
 PAPER_STYLE = {
     "font.family": "serif",

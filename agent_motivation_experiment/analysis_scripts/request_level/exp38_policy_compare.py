@@ -46,8 +46,10 @@ import matplotlib.pyplot as plt  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from exp22_fluidserve import PAPER_STYLE, arm_of  # noqa: E402
 
-ARM_ORDER = ["polyserve", "slo", "fluidserve"]
-ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO", "fluidserve": "FluidServe"}
+ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo", "fluidserve"]
+ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
+             "loadbalance": "Llumnix", "llmdslo": "llm-d",
+             "fluidserve": "FluidServe"}
 ENGINE_COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
 
 E_RUN = "vllm:num_requests_running"
