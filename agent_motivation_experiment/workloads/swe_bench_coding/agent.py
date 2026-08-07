@@ -252,8 +252,16 @@ _REJECTION_BODIES = (
 )
 
 
+# 500 is in the list because llm-d's admitter answers with it. The EPP wraps the
+# denial as an internal error -- "inference error: Internal - request cannot be
+# admitted: no valid endpoint available to serve the request" -- so the status
+# code says failure while the body says admission decision. Matching on the body
+# is what separates the two; the status code only narrows the search. Without
+# 500 here the 2026-08-07 smoke counted 4,895 rejections as errors, which put
+# them in the wrong denominator and reported a rejection rate of 130 where the
+# real number was about 5,025.
 def _raise_if_llumnix_rejected(resp) -> None:
-    if resp.status_code in (429, 503):
+    if resp.status_code in (429, 500, 503):
         body = resp.text
         if any(m in body for m in _REJECTION_BODIES):
             raise LlumnixRejectedError(resp.status_code, body)

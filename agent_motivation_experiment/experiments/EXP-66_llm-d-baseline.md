@@ -44,16 +44,38 @@ llm-d v0.8의 predicted-latency scheduling은 **우리와 같은 계층에서 �
 | `llmd-pred` | 같음 | predicted-latency-producer + prefix-cache-affinity-filter + latency-scorer + weighted-random-picker. **SLO 헤더 안 보냄** |
 | `llmd-slo` | 같음 | 위 + slo-headroom-tier-filter + latency-slo-admitter, `streamingMode: true`. **SLO 헤더 보냄**, 세 클래스 전부 sheddable |
 
-### 2.1 SLO 헤더 매핑
+### 2.1 SLO 헤더 매핑 — 워크로드 설정은 `m1f`다 (2026-08-07 정정)
 
 | 클래스 | `x-llm-d-slo-ttft-ms` | `x-llm-d-slo-tpot-ms` | 출처 |
 |---|---|---|---|
-| chat | 5000 | 50 | 워크로드 설정 `slo` 블록 그대로 |
-| deepresearch | 10000 | 100 | 그대로 |
-| swe | 11800 | 25 | **채점 규칙은 전체 시간 30초인데 헤더로는 표현할 수 없다.** 워크로드 설정에 이미 있는 분해(11,800 + 25 × 728 = 30,000 ms)를 쓴다. 이 분해는 Niyama 이식 때 만든 것이고 새로 지어낸 값이 아니다 |
+| chat | 5,000 | 50 | `mix_short_m1_slofair.json`의 `slo` 블록 그대로 |
+| deepresearch | 10,000 | 100 | 그대로 |
+| **swe** | **2,500** | **52** | 같은 파일. 이 값은 **Llumnix SLO가 쓰는 것과 같다** |
 
-**논문에 적을 것**: swe의 전체 시간 예산을 TTFT + 토큰당으로 분해해 넣었고, 분해에 쓴 기대
-출력 길이가 728 토큰이라는 것.
+**⚠ 처음에는 `m1`(balanced)으로 돌렸고 그것이 틀렸다.** m1의 swe는 (11,800, **25**)인데, 25는
+30초를 나눈 값이 아니라 **EXP-16에서 잰 유휴 상태 디코드 ITL 중앙값**이다(`agent.py`의
+`DEFAULT_TBT_MS` 주석). 부하가 걸리면 거의 항상 초과되므로, **전체 시간 예산을 표현할 수 없는
+정책은 모든 인스턴스를 거부한다.** 2026-08-07 smoke에서 llm-d가 swe 클래스를 17~49% 거절했고,
+`mix_short_m1_slofair.json`의 주석에 따르면 **Llumnix SLO가 먼저 같은 벽에 부딪혀 그 클래스의
+98%를 거절했다.** m1f는 그것 때문에 만들어진 파일이다.
+
+```
+FluidServe의 명목 속도 = 30,000 / 520.2 (실측 출력 토큰) = 57.7 ms/token
+m1f 의 분해            =  2,500 + 520.2 × 52 = 29,550 ms ≤ 30,000
+```
+
+**네 정책이 swe에 대해 받는 것** — 채점은 넷 다 전체 시간 30초로 같다.
+
+| 정책 | 설정 | swe (ttft, 토큰당) | 그 값을 쓰나 |
+|---|---|---|---|
+| FluidServe | m1 | (11,800, 25) | **안 쓴다.** `--fluidserve-class-budgets`의 `25:e2e:30000`이 tier 25를 전체 시간으로 재정의 |
+| PolyServe | m1 | (11,800, 25) | 쓴다 |
+| Llumnix SLO | **m1f** | (2,500, 52) | 쓴다 |
+| **llm-d** | **m1f** | **(2,500, 52)** | 쓴다 |
+
+**논문에 적을 것 둘**: ① swe의 전체 시간 예산을 (TTFT, 토큰당) 쌍으로 분해해 넣었고 그것이
+동등한 진술이 아니라는 것 — E2E 예산은 두 양을 맞바꿀 수 있는데 고정 쌍은 곡선 위 한 점만
+고정한다. ② **EXP-53 표에 llm-d 열을 더하면 m1f 열이 둘(Llumnix SLO, llm-d), m1 열이 셋이 된다.**
 
 ### 2.2 `llmd-pred`와 `llmd-slo`가 왜 방향이 반대인가
 

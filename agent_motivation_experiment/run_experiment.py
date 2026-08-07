@@ -608,7 +608,16 @@ class MotivationExperimentRunner:
         metrics_tracker = MetricsTracker(
             self.csv_path,
             server_base_url=self.server_base_url,
-            enable_server_metrics=True,
+            # Was hard-coded True while the two sweep paths (below) pass
+            # `args.engine != "llumnix"`. On the SGLang path the base URL is the
+            # engine itself and the per-request scrape is nearly free. Against a
+            # router it is not: the URL is the router, so every request also
+            # sends a GET /metrics through it. The 2026-08-07 llm-d smoke logged
+            # 21,660 such requests, exactly one per request, and the router's
+            # scheduler had to pick an endpoint for each -- doubling the
+            # scheduling load it was being measured on. The background collector
+            # (llumnix_metrics.py) already scrapes the engines directly.
+            enable_server_metrics=self.enable_server_metrics,
             tbt_jsonl_path=self.tbt_jsonl_path,
         )
         metrics_tracker.start_task(job_id)
