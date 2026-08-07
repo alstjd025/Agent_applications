@@ -236,11 +236,26 @@ class LlumnixRejectedError(RuntimeError):
             f"llumnix admission rejected (HTTP {status_code}): {body[:200]}")
 
 
+# Bodies that mean "the system declined this request", as opposed to "the
+# request failed". The distinction decides which denominator the request lands
+# in: a rejection is an admission decision and belongs in offered-but-not-
+# admitted, while an error is a broken run. The first two come from the Llumnix
+# gateway. The third is llm-d's latency-slo-admitter, which returns
+# ServiceUnavailable when no endpoint can meet the request's SLO
+# (pkg/epp/framework/plugins/requestcontrol/admitter/latencyslo/plugin.go).
+# Without that third string an llm-d rejection is counted as an error, the
+# admitted denominator is wrong, and the rejection rate reads as zero.
+_REJECTION_BODIES = (
+    "no available inference worker",
+    "rate limit exceeded",
+    "no valid endpoint available to serve the request",
+)
+
+
 def _raise_if_llumnix_rejected(resp) -> None:
     if resp.status_code in (429, 503):
         body = resp.text
-        if ("no available inference worker" in body
-                or "rate limit exceeded" in body):
+        if any(m in body for m in _REJECTION_BODIES):
             raise LlumnixRejectedError(resp.status_code, body)
 
 
@@ -299,6 +314,40 @@ class LlumnixCompletionsLLM:
         # and used sequentially within a chain, so this is not shared across
         # concurrent calls.
         self.last_request_id = None
+
+    # ---- llm-d wiring -----------------------------------------------------
+    # Off unless FS_LLMD_HEADERS is set, so every arm that is not an llm-d arm
+    # sends exactly the bytes it sent before this was added. The check is done
+    # per request rather than cached so a driver that exports the variable for
+    # one condition and not the next cannot leak it across arms.
+    #
+    # The two SLO headers are what opts a request into llm-d's SLO-aware path
+    # (pkg/epp/metadata/consts.go). They are read from slo_spec, which the mixed
+    # workload already fills per class, so nothing new is invented here: chat
+    # gets 5000/50, deep research 10000/100, and swe 11800/25, the last being
+    # the decomposition of its 30 s end-to-end budget that the Niyama port
+    # already used (11800 + 25 x 728 = 30000).
+    #
+    # The objective header names the InferenceObjective that carries the
+    # request's priority. llm-d's latency-slo-admitter only ever rejects a
+    # request whose priority is negative, so without this header nothing is
+    # rejected and the rejection rate is a property of our configuration rather
+    # than of the policy.
+    def _extra_headers(self) -> dict:
+        if not os.environ.get("FS_LLMD_HEADERS"):
+            return {}
+        h = {}
+        spec = self.slo_spec or {}
+        ttft = spec.get("ttft_ms")
+        tpot = spec.get("tbt_ms")
+        if ttft is not None:
+            h["x-llm-d-slo-ttft-ms"] = str(int(round(float(ttft))))
+        if tpot is not None:
+            h["x-llm-d-slo-tpot-ms"] = str(int(round(float(tpot))))
+        obj = os.environ.get("FS_LLMD_OBJECTIVE")
+        if obj:
+            h["x-llm-d-inference-objective"] = obj
+        return h
 
     def _payload(self, messages: list, stream: bool) -> dict:
         payload = {
@@ -359,6 +408,7 @@ class LlumnixCompletionsLLM:
             json=self._payload(messages, stream=True),
             stream=True,
             timeout=self.timeout,
+            headers=self._extra_headers() or None,
         )
         _raise_if_llumnix_rejected(resp)
         resp.raise_for_status()
@@ -388,6 +438,7 @@ class LlumnixCompletionsLLM:
             self.completions_url,
             json=self._payload(messages, stream=False),
             timeout=self.timeout,
+            headers=self._extra_headers() or None,
         )
         _raise_if_llumnix_rejected(resp)
         resp.raise_for_status()
