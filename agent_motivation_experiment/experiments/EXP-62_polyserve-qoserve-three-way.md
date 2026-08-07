@@ -131,6 +131,61 @@ measured −3.6% of total throughput) is paid whether or not the ordering helps.
   on top of the allocation PolyServe actually chooses, not on top of the best
   static allocation.
 
-## 6. Result
+## 6. Result (2026-08-07)
 
-To be filled in when the run finishes.
+18 conditions, no gateway 400 or 503 responses in any of them.
+
+| req/s | arm | offered (min~max) | rejected | goodput | chat / dr / swe |
+|---|---|---|---|---|---|
+| 45 | PolyServe + FIFO | 34.10 (33.95~34.24) | 0.0% | 8,399 | 8.3 / 100 / 100 |
+| 45 | PolyServe + QoServe | **35.08** (34.99~35.17) | 0.0% | 8,301 | 9.5 / 100 / 100 |
+| 45 | **FluidServe + FIFO** | **94.76** (90.22~99.30) | 3.8% | **19,360** | 96.0 / 97.7 / 76.9 |
+| 50 | PolyServe + FIFO | 32.65 (31.94~33.36) | 0.0% | 9,150 | 6.8 / 100 / 99.9 |
+| 50 | PolyServe + QoServe | **35.30** (35.11~35.50) | 0.0% | 9,132 | 9.3 / 100 / 99.9 |
+| 50 | **FluidServe + FIFO** | **78.42** (77.80~79.03) | 16.2% | **18,230** | 79.7 / 90.8 / 42.3 |
+| 60 | PolyServe + FIFO | 30.47 (29.67~31.27) | 0.0% | 10,546 | 5.2 / 100 / 99.1 |
+| 60 | PolyServe + QoServe | **33.26** (32.70~33.82) | 0.0% | 10,560 | 8.1 / 100 / 98.8 |
+| 60 | **FluidServe + FIFO** | **59.99** (55.72~64.25) | 31.4% | **17,606** | 59.0 / 85.8 / 23.1 |
+
+**H1 holds, but with the opposite sign from EXP-61.** The paired differences are
++0.98 / +2.65 / +2.79, all inside the 3-point band the rule named, and far
+inside the quarter-of-the-gap clause: at 45 req/s the distance to FluidServe is
+60.66 points, a quarter of which is 15.2, and the engine scheduler moves 0.98.
+Under Llumnix load balance the same scheduler moved −1.14 / −0.93 / −0.45. **The
+sign reversal was not predicted and is the most useful part of the run.**
+
+**H2 holds exactly.** In all four PolyServe conditions one engine carries a
+median of 2,293 to 2,746 waiting requests and the other three carry zero
+(maximum 12), and QoServe does not change that at all. Reordering chooses a
+sequence inside an instance; it cannot move a request to one of the three idle
+instances.
+
+**H3's prediction is confirmed by where the gain sits: entirely in chat.**
+deepresearch and swe are already at 99 to 100 and have no room; chat moves
+8.3→9.5, 6.8→9.3, 5.2→8.1. The class piled onto the single instance is the class
+the reordering helps, and it is the only one.
+
+**H4 is refuted.** Goodput does not fall under QoServe here (8,399→8,301,
+9,150→9,132, 10,546→10,560, i.e. −1.2% / −0.2% / +0.1%), where under load
+balance it fell 3 to 14%. The dynamic-chunking cost is presumably still paid,
+but with three engines idle the fleet has the throughput to absorb it.
+
+### 6.1 The three-way comparison, and what it added
+
+FluidServe now has all three static rates measured on the current binary in one
+session: 94.76 at 45, **78.42 at 50 (a point that did not exist)**, 59.99 at 60.
+The 45 req/s value agrees with EXP-59's 94.50.
+
+**The swe defect recorded in implementation.md §63.8 appears in the static
+conditions too, rising monotonically with arrival rate**: swe attainment
+76.9 → 42.3 → 23.1 and swe rejection 3.8 → 16.2 → 31.4%. The one-hour trace's
+62% is the continuation of that curve rather than something specific to a moving
+mix, which means the cause can be investigated in an eight-minute condition.
+
+### 6.2 Figure
+
+`results/aggregate_analysis/motivation/qoserve_cross.png`
+(`analysis_scripts/request_level/qoserve_cross.py`), three panels: what the
+engine scheduler changes, the levels it would have to close, and where a queue
+exists for it to reorder. Details and the two defects found while building it
+are in `fluidserve-implementation.md` §64.5.
