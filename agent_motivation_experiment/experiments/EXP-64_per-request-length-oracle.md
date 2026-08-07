@@ -4,28 +4,37 @@ Written before the run. 2026-08-07 01:50 KST.
 
 ## 1. The question
 
-Our policy knows each class's output-length distribution and nothing about the
-individual request. Two of the systems this work is compared against know more:
-Scorpio classifies each request into one of 100 length bins, AdaGen predicts its
-decode length with a DistillBERT model at 76.4% accuracy. SLOs-Serve assumes the
-decode length is known exactly.
+**We already predict; the question is the granularity.** Reading a class's
+output-length distribution off past traffic and using it for the next request is
+a prediction — it assumes the future looks like the past. What distinguishes us
+from the systems we are compared against is not that they predict and we do not,
+it is **how finely**: ours is conditioned on the class, Scorpio's on a 100-bin
+classifier over the request, AdaGen's on a DistillBERT regression at 76.4%
+accuracy, and SLOs-Serve assumes the decode length is known exactly.
+
+*(This paragraph was rewritten on 2026-08-07. It previously said we have no
+predictor, which is wrong and would have been read as a claim that we use no
+historical information at all.)*
 
 So a reviewer can ask two things and we can answer neither today:
 
-1. **Would a per-request predictor help us?** If it would help a lot, the design
-   is leaving something on the table and the paper should say so.
+1. **Would a finer-grained predictor help us?** If it would help a lot, the
+   design is leaving something on the table and the paper should say so.
 2. **Is our class-conditional estimate the reason we win?** If per-request truth
-   adds nothing, then the answer is no, and the comparison against systems that
-   do use predictors is not an information-advantage comparison.
+   adds nothing, then the answer is no, and the comparison against systems with
+   finer predictors is not an information-advantage comparison.
 
 **Building a predictor answers neither cleanly**, because a negative result would
 be attributable to the predictor being bad. **Giving the policy the answer does.**
 Whatever the gain from near-perfect per-request length knowledge turns out to be,
 no predictor can beat it, so it is an upper bound on the whole question.
 
-EXP-63 measures the cost of the class-level estimate being *biased*. This
-measures the value of removing its *per-request variance*. They are the two
-halves of "how much does the length input matter".
+EXP-63 was built to measure the cost of the class-level estimate being *biased*
+and did not manage it: scaling one class also re-weights the classes against each
+other, so what moved was separation rather than accuracy (§65.7). Its replacement,
+scaling all three classes together, is deferred. This experiment measures the
+other half — the value of removing the estimate's *per-request variance* — and
+carries the same hazard, which is why H3 below is a validity condition.
 
 ## 2. What "oracle" means here, exactly
 
@@ -114,7 +123,29 @@ next version of the design.
 because its p90/p50 ratio is the one the class mean serves worst in absolute
 tokens.
 
-### H3 — the mechanism is admission, not placement
+### H3 — the mechanism is admission, not placement. **This is now a validity condition, not a hypothesis**
+
+**EXP-63 showed why.** Scaling one class's length distribution moved offered
+attainment by up to 5.6 points, and the movement was not accuracy at all: the
+length profile is an input to "how loaded is this instance" as well as to "how
+much more will this request produce", so inflating one class's lengths protects
+the instances holding it and changes how strongly classes separate. Effective
+instances per class tracked the scale factor at −0.897 and the score tracked
+separation at −0.955 while demand did not move (§65.6, §65.7).
+
+**Per-request truth does the same thing at request granularity.** A deepresearch
+request whose real output is 1,400 tokens rather than the class mean of 985 makes
+its instance look busier; one at 600 makes it look freer. So a gain here could be
+accuracy or could be a separation shift, exactly as in EXP-63.
+
+**Prediction, and the condition the run must satisfy to mean anything**: the
+rejection rate moves and **effective instances per class move by less than 0.3**
+between the two arms.
+
+**If separation moves by 0.3 or more, this experiment did not measure accuracy
+either**, and the answer needs the code split instead — a different length source
+for `overIncumbents` than for the request's own feasibility test. Record that
+outcome as a finding about the design rather than as a result about prediction.
 
 **Prediction**: the rejection rate changes more than the per-engine class
 composition. A better length estimate sharpens the feasibility test, which
@@ -127,10 +158,13 @@ than where it was wired in and the wiring must be re-read.
 
 ## 6. What this cannot answer
 
-- **It is not a predictor.** A deployed system would have to predict the length
-  from the prompt, and the accuracy achievable there is 76.4% in AdaGen's
-  measurement, well below the 65.7%-exact / few-token-error hint used here.
-  **The result bounds the value; it does not deliver it.**
+- **It does not deliver a predictor.** A deployed system would have to predict
+  the length from the prompt, and the accuracy achievable there is 76.4% in
+  AdaGen's measurement, well below the 65.7%-exact / few-token-error hint used
+  here. **The result bounds what finer granularity is worth; it does not build
+  it.**
+- **It may not isolate accuracy**, for the reason in H3. The separation numbers
+  have to be read before the score is interpreted.
 - **It says nothing about the profile being biased**, which is EXP-63.
 - **Static only**, for the join-key reason in §2.
 
