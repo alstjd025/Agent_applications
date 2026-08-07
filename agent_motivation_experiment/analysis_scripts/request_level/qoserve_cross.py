@@ -50,17 +50,17 @@ import numpy as np                          # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from exp22_fluidserve import PAPER_STYLE, load_run, attain   # noqa: E402
 
-OUT = "results/aggregate_analysis/motivation"
+OUT = "results/aggregate_analysis/exp62"
 
 # plane -> (experiment tag, arm stem). The arm directory is <stem>fifo or
 # <stem>qoserve, and the repeat is the r<N> in the session tag.
 PLANES = [
-    ("Llumnix load balance", "exp61", "loadbalance"),
+    ("Llumnix", "exp61", "loadbalance"),
     ("Llumnix SLO",          "exp40", "slo"),
     ("PolyServe",            "exp62", "polyserve"),
     ("FluidServe",           "exp40", "fluidserve"),
 ]
-COLOR = {"Llumnix load balance": "#7f7f7f", "Llumnix SLO": "#2ca02c",
+COLOR = {"Llumnix": "#7f7f7f", "Llumnix SLO": "#2ca02c",
          "PolyServe": "#d62728", "FluidServe": "#1f77b4"}
 RATES = [45, 50, 60]
 # Excluded with its reason in ms_dev/notes/excluded_runs.tsv: load balance has no
@@ -72,7 +72,7 @@ EXCLUDE = ["260806_0328_exp61r1_loadbalanceqoserve_m1_rpm_3600"]
 # rather than EXP-40 so that panel C shows the current policy; the queue is zero
 # in both, which is the point being made.
 QUEUE_RUNS = {
-    "Llumnix load balance": "results/260806_0241_exp61r1_loadbalancefifo_m1_rpm_3600",
+    "Llumnix": "results/260806_0241_exp61r1_loadbalancefifo_m1_rpm_3600",
     "Llumnix SLO": "results/260803_0128_exp53p2r1_slo_m1f_rpm_3600",
     "PolyServe": "results/260806_0801_exp62r1_polyservefifo_m1_rpm_3600",
     "FluidServe": "results/260806_0843_exp62r1_fluidservefifo_m1_rpm_3600",
