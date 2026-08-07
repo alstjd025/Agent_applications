@@ -129,8 +129,8 @@ llm-d v0.8의 predicted-latency scheduling은 **우리와 같은 계층에서 �
 |---|---|---|
 | 0 | ghcr.io에서 이미지 넷을 받는다 | ✅ **2026-08-07 통과.** EPP 23 MB / Envoy 33 MB / 학습 617 MB / 예측 617 MB, 네임스페이스 `llmd`에서 확인 |
 | 1 | 예측기 둘이 뜨고 예측 서버가 학습 서버에서 모델을 받는다 | ✅ **2026-08-07 통과.** 학습 1 + 예측 3 파드 Ready, 예측 서버가 `GET /model/{ttft,tpot}/info` 200. 학습 루프 1초 주기 확인 |
-| 2 | 경로 A(file-discovery)로 EPP + Envoy가 뜨고 `curl` 한 번이 엔진에 닿는다 | |
-| 3 | **요청 → 엔진 연결이 100%다** (Envoy 접근 로그의 `%UPSTREAM_HOST%`) | |
+| 2 | 경로 A(file-discovery)로 EPP + Envoy가 뜨고 `curl` 한 번이 엔진에 닿는다 | ✅ **2026-08-07 통과.** 응답 200, 접근 로그에 처리 엔진이 찍힌다 |
+| 3 | **요청 → 엔진 연결이 100%다** (Envoy 접근 로그의 `%UPSTREAM_HOST%`) | ✅ **2026-08-07 통과, 12/12 = 100%.** 엔진 넷에 3/4/3/3. **클라이언트 변경 불필요** — Envoy가 붙인 x-request-id를 vLLM이 completion id로 되돌려 주고 클라이언트가 그것을 이미 기록한다 |
 | 4 | 헤더 전송을 껐을 때 `fluidserve` arm의 요청이 지금까지와 같다 | |
 | 5 | 경로 B에서 **거절이 0이 아니다** | |
 
