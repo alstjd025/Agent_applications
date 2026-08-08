@@ -110,7 +110,14 @@ set_arm() {
     # from EXP-27 pass 2 to EXP-43 ran with it false (implementation.md 38).
     # Without pinning, the fluidserve arm would differ from EXP-41 in two ways
     # instead of none.
-    fluidserve)  policy=fluidserve; export FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false ;;
+      # FS_PREFIX=false is explicit and must stay that way. The compiled
+      # default became true at v0.2, and every results directory named
+      # *_fluidserve_* that already exists was produced with it OFF. Leaving
+      # this arm on the compiled default would make one arm name mean two
+      # configurations depending on when it ran, which is the failure this
+      # repository keeps hitting. The arm that exercises the shipped default is
+      # `fspfx`, and it sets FS_PREFIX=true explicitly for the same reason.
+    fluidserve)  policy=fluidserve; export FS_PREFIX=false FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false ;;
     fsa)         policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false ;;
     # EXP-56. The class-preference ablation. --fluidserve-enable-affinity=false
     # removes BOTH places a class preference acts: the ordering of the feasible

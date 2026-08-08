@@ -91,7 +91,14 @@ set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
     # The two policies under test. Neither uses migration, so neither gets it.
     # FS_GATE_SLACK is set from the value EXP-52 selects; 1.0 is the shipped
     # policy and is what this defaults to until that experiment says otherwise.
-    fluidserve)  policy=fluidserve; ARM_MIG=0; ARM_WCFG=m1
+      # FS_PREFIX=false is explicit and must stay that way. The compiled
+      # default became true at v0.2, and every results directory named
+      # *_fluidserve_* that already exists was produced with it OFF. Leaving
+      # this arm on the compiled default would make one arm name mean two
+      # configurations depending on when it ran, which is the failure this
+      # repository keeps hitting. The arm that exercises the shipped default is
+      # `fspfx`, and it sets FS_PREFIX=true explicitly for the same reason.
+    fluidserve)  policy=fluidserve; export FS_PREFIX=false; ARM_MIG=0; ARM_WCFG=m1
                  export FS_CLASS_HARM=false FS_FORCE_MARGIN=false \
                         FS_OWN_BUDGET_GATE=false FS_GATE_SLACK="${FS_SLACK:-1.0}" ;;
     polyserve)   policy=polyserve;  ARM_MIG=0; ARM_WCFG=m1 ;;

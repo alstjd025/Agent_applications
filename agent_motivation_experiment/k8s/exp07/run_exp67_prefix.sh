@@ -92,7 +92,14 @@ set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
     # ablation to its compiled default, which for class-harm is true, while every
     # FluidServe condition from EXP-27 pass 2 to EXP-46 ran with it false (§38).
     # EXP-47's first run went out with classharm=true for exactly this reason.
-    fluidserve)  policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false ;;
+      # FS_PREFIX=false is explicit and must stay that way. The compiled
+      # default became true at v0.2, and every results directory named
+      # *_fluidserve_* that already exists was produced with it OFF. Leaving
+      # this arm on the compiled default would make one arm name mean two
+      # configurations depending on when it ran, which is the failure this
+      # repository keeps hitting. The arm that exercises the shipped default is
+      # `fspfx`, and it sets FS_PREFIX=true explicitly for the same reason.
+    fluidserve)  policy=fluidserve; export FS_PREFIX=false FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false ;;
     # EXP-67. The prefill charge for an arriving prompt becomes per instance:
     # the prompt minus the leading blocks the candidate instance is believed to
     # already hold, from an index the scheduler keeps of what it dispatched

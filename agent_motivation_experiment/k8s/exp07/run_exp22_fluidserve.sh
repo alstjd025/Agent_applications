@@ -67,7 +67,14 @@ check_stack() {
 set_arm() {  # $1 = fluidserve | polyserve | loadbalance
   local policy
   case "$1" in
-    fluidserve)  policy=fluidserve ;;
+      # FS_PREFIX=false is explicit and must stay that way. The compiled
+      # default became true at v0.2, and every results directory named
+      # *_fluidserve_* that already exists was produced with it OFF. Leaving
+      # this arm on the compiled default would make one arm name mean two
+      # configurations depending on when it ran, which is the failure this
+      # repository keeps hitting. The arm that exercises the shipped default is
+      # `fspfx`, and it sets FS_PREFIX=true explicitly for the same reason.
+    fluidserve)  policy=fluidserve; export FS_PREFIX=false ;;
     polyserve)   policy=polyserve ;;
     loadbalance) policy=load-balance ;;
     *) echo "[exp22] unknown arm: $1" >&2; return 1 ;;
