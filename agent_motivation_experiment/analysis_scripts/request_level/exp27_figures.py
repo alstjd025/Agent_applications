@@ -55,7 +55,11 @@ ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
          # line style below. fig_sweep builds its arm list as
          # [a for a in ARM_C if a in set(df["arm"])], so an unregistered arm is
          # dropped from the figure in silence.
-         "llmdslo": "#8c564b", "fspfx": "#1f77b4", "fspfxb": "#1f77b4"}
+         # fspfx started on the FluidServe blue because it is the same control
+         # plane, which made the control and the treatment the same colour on
+         # every figure that carries both -- exactly the case this comparison
+         # exists for. Cyan reads as the same family and is distinguishable.
+         "llmdslo": "#8c564b", "fspfx": "#17becf", "fspfxb": "#bcbd22"}
 ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "fluidserve": "FluidServe", "fluidserveflat": "FluidServe (v20 off)",
          "slofifo": "Llumnix SLO + FIFO", "sloqoserve": "Llumnix SLO + QoServe",
