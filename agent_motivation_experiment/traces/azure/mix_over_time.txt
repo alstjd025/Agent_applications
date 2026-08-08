@@ -1,0 +1,43 @@
+scanning AzureLLMInferenceTrace_conv_2024.csv ...
+  27,303,999 rows
+scanning AzureLLMInferenceTrace_code_2024.csv ...
+  16,803,695 rows
+
+=== totals
+  conv   27,303,999 requests,  44,548,646,118 input tokens, mean 1,632
+  code   16,803,695 requests,  42,198,710,773 input tokens, mean 2,511
+  code share overall: requests  38.1%, input tokens  48.6%
+
+=== view 1: 10-minute bins, aligned on each file's own start (1008 bins = 168 h)
+    this is the alignment build_dynamic_mix_trace.py uses
+  code share of REQUESTS     p5   7.5%  p50  29.0%  p95  65.1%  min   3.9%  max  76.0%   p95/p5 = 8.67x
+  code share of INPUT TOKENS p5  10.0%  p50  36.8%  p95  76.2%  min   5.3%  max  83.8%   p95/p5 = 7.59x
+
+=== view 2: hour of day (UTC), averaged over all days in each file
+  hour  conv req/h  code req/h  code share req  code share tok
+     0   1,011,355     545,462           35.0%           42.7%
+     1   1,091,217     526,039           32.5%           38.8%
+     2   1,090,492     488,691           30.9%           37.3%
+     3     901,875     411,910           31.4%           38.5%
+     4     900,745     333,383           27.0%           33.4%
+     5     971,624     273,375           22.0%           27.5%
+     6   1,110,482     231,381           17.2%           23.2%
+     7   1,195,917     186,253           13.5%           19.3%
+     8   1,229,190     168,283           12.0%           17.8%
+     9   1,181,247     168,761           12.5%           19.3%
+    10   1,101,287     177,692           13.9%           20.9%
+    11   1,166,420     256,642           18.0%           25.8%
+    12   1,288,411     471,170           26.8%           36.5%
+    13   1,438,285     793,696           35.6%           46.7%
+    14   1,498,485   1,117,786           42.7%           54.4%
+    15   1,425,491   1,229,749           46.3%           58.4%
+    16   1,306,044   1,175,012           47.4%           59.7%
+    17   1,249,075   1,334,248           51.6%           63.8%
+    18   1,238,580   1,475,542           54.4%           66.7%
+    19   1,165,697   1,508,380           56.4%           68.7%
+    20   1,090,732   1,426,399           56.7%           69.0%
+    21     928,730   1,070,491           53.5%           65.5%
+    22     840,264     808,419           49.0%           60.1%
+    23     882,354     624,931           41.5%           50.9%
+
+  hour-of-day range: requests  12.0% ..  56.7% (4.71x),  input tokens  17.8% ..  69.0% (3.87x)
