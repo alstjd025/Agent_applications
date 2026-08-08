@@ -41,6 +41,9 @@ HOSTWORK=/home/nxclab/llumnix_reproduce/Agent_applications/agent_motivation_expe
 # other baseline that cannot state an end-to-end budget.
 # Full account: ms_dev/notes/llmd-baseline.md section 3.3, CLAUDE.md trap group A.
 WCFG=/work/workload_configs/mix_short_m1_slofair.json
+# The hour-trace pair, used only by the `full` entry point below.
+DYN_TRACE=/work/traces/dynamic/canonical/dyn60_short_m123_b1045.csv
+DYN_WCFG=/work/workload_configs/mix_dyn60_short_m123_b1045_slofair.json
 ENVOY_LOG=/home/nxclab/tools/llmd-envoy/envoy_access.log
 META="$HOSTWORK/results/exp66_meta"
 ENGINE_PORTS="8000 8001 8002 8003"
@@ -277,6 +280,39 @@ case "${1:-}" in
     condition "${2:?usage: one <rate-rpm> <session>}" "${3:?session}" || exit 1
     say "ONE DONE"
     ;;
+  # EXP-71. The hour-long trace. llm-d had no trace path at all: WCFG above is a
+  # static config and `condition` only knows a rate in rpm. This entry swaps both
+  # for the dynamic pair -- the m1f workload config, because llm-d cannot express
+  # an end-to-end budget and would otherwise read swe's 25 ms tier key as a
+  # per-token target, and the trace whose class plan that config names.
+  #
+  # No pre-run here. The 3 min pre-run exists to give the predictor a warm start
+  # at a rate the measured run will then hold; a trace whose rate moves between
+  # 10.8 and 45.0 req/s has no such rate, and the trace carries its own 60 s
+  # warmup segment. The predictor therefore learns during the measured hour,
+  # which is what a deployment would do, and it is stated in the record rather
+  # than hidden.
+  full)
+    session="${2:?usage: full <session>}"
+    preflight || exit 1
+    say "=== hour trace $session"
+    restart_engine            || exit 1
+    restart_predictor_stack   || exit 1
+    verify_predictor_empty    || exit 1
+    drain
+    off=$(stat -c%s "$ENVOY_LOG")
+    kubectl -n $NS delete job bench-runner-exp71 --ignore-not-found >/dev/null
+    sed -e "s/__JOBNAME__/bench-runner-exp71/" -e "s/__SESSION__/$session/" \
+        -e "s/__ARM__/llmdslo/" \
+        -e "s#__TRACE__#$DYN_TRACE#" -e "s#__WCFG__#$DYN_WCFG#" \
+        "$HERE/runner-exp71-llmd-dyn.template.yaml" | kubectl apply -f - >/dev/null
+    wait_job "bench-runner-exp71" 120 || {
+      say "hour trace failed"; kubectl -n $NS logs job/bench-runner-exp71 --tail=60; exit 1; }
+    kubectl -n $NS logs job/bench-runner-exp71 --tail=400 2>/dev/null | grep -aE "Success:|rc=" | tail -3
+    kubectl -n $NS delete job bench-runner-exp71 --ignore-not-found >/dev/null
+    collect "$session" "$off"
+    say "=== hour trace $session DONE"
+    ;;
   rep)
     rep="${2:?usage: rep <n>}"
     preflight || exit 1
@@ -286,5 +322,5 @@ case "${1:-}" in
     say "=== EXP-66 REPEAT ${rep} DONE $(date -u +%Y-%m-%d\ %H:%M:%S)Z"
     ;;
   *)
-    echo "usage: $0 {smoke|one <rpm> <session>|rep <n>}"; exit 2 ;;
+    echo "usage: $0 {smoke|one <rpm> <session>|full <session>|rep <n>}"; exit 2 ;;
 esac

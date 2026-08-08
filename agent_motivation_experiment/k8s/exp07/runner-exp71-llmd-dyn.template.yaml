@@ -1,0 +1,124 @@
+---
+# EXP-66: the same rate sweep as EXP-27/EXP-53, sent to the llm-d router instead
+# of the Llumnix gateway. Copied from runner-exp27.template.yaml with four
+# changes, each marked CHANGED below:
+#   1. --server-base-url points at Envoy in the llmd namespace
+#   2. FS_LLMD_HEADERS / FS_LLMD_OBJECTIVE turn on the client's llm-d wiring,
+#      which is off by default so every other arm is unaffected
+#   3. --restart-per-condition is dropped: this template runs one condition per
+#      Job and the driver owns the restarts, because the engine and the three
+#      predictor pods have to come back in a specific order that
+#      llumnix_deploy.restart_llumnix does not know about
+#   4. no scheduler/gateway rollout, since neither is in the path
+# Placeholders: __JOBNAME__ __SESSION__ __TRACE__ __ARM__ __WCFG__
+#
+# EXP-71. The hour-long trace against llm-d. Identical to runner-exp66 except
+# that the arrival process comes from a trace file instead of a rate list, so
+# the two differ in exactly the mode line. llm-d had never been run on the hour
+# trace: its driver hardcoded a static workload config and had no trace entry
+# point, which is why every dynamic-trace result up to EXP-60 covers only the
+# Llumnix-side policies.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: __JOBNAME__
+  namespace: llumnix
+spec:
+  backoffLimit: 0
+  completions: 1
+  template:
+    metadata:
+      labels:
+        app: bench-runner-exp21
+    spec:
+      serviceAccountName: bench-runner
+      restartPolicy: Never
+      containers:
+        - name: runner
+          image: llumnix-registry.cn-beijing.cr.aliyuncs.com/llumnix/vllm:20260306-165123
+          workingDir: /work
+          env:
+            - { name: NVIDIA_VISIBLE_DEVICES, value: "void" }
+            - { name: HF_HOME, value: /hf-cache }
+            - { name: HF_HUB_OFFLINE, value: "1" }
+            - { name: HF_DATASETS_OFFLINE, value: "1" }
+            - { name: TRACE, value: "__TRACE__" }
+            - { name: LOAD_PROCS, value: "12" }
+            - { name: ARM, value: "__ARM__" }
+            - { name: TRANSCRIPT, value: "/work/results/exp10_transcript/transcript_swe_short7k_mix1500.jsonl" }
+            - { name: WCFG_PATH, value: "__WCFG__" }
+            # CHANGED 2. The client sends the two SLO headers and the objective
+            # header only when these are set; unset, it sends what it always
+            # sent. sheddable is the InferenceObjective carrying priority -1,
+            # without which llm-d's admitter never rejects anything.
+            - { name: FS_LLMD_HEADERS, value: "1" }
+            - { name: FS_LLMD_OBJECTIVE, value: "sheddable" }
+            # Output-token cap. Unset, agent.py falls back to DEFAULT_MAX_TOKENS
+            # = 2048, and the deep-research class was being cut there: with the
+            # seven-section report structure the model reached section two and
+            # stopped mid-word, so its length was set by the cap rather than by
+            # the material. chat (p99 1,440) and the agent class (p99 859) end on
+            # their own well below it and are unaffected by raising it.
+            - { name: MAX_TOKENS, value: "4096" }
+            - { name: RESULT_UID, value: "3092" }
+            - { name: RESULT_GID, value: "1999" }
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -uo pipefail
+              ln -sf /usr/local/bin/k3s /usr/local/bin/kubectl
+              kubectl version --client >/dev/null 2>&1 && echo "[runner] kubectl ok"
+              PYBIN=/work/.venv/bin/python
+              "$PYBIN" -c "import langchain_openai, pandas, pyarrow, tiktoken" \
+                && echo "[runner] venv deps ok" || { echo "[runner] venv missing deps"; exit 1; }
+              [ -s "${TRANSCRIPT}" ] || { echo "[runner] transcript missing: ${TRANSCRIPT}"; exit 1; }
+              WCFG="${WCFG_PATH}"
+              [ -s "$WCFG" ] || { echo "[runner] missing $WCFG"; exit 1; }
+              # The config's class plan and the trace must be the same file, or the
+              # mix schedule scored would not be the one replayed. runner-dyn checks
+              # this and so does this one.
+              PLANNED=$("$PYBIN" -c "import json,os;print(json.load(open(os.environ['WCFG_PATH'])).get('class_plan_file',''))")
+              [ "$PLANNED" = "${TRACE}" ] \
+                || { echo "[runner] ABORT: workload class_plan_file=$PLANNED but --trace-file=${TRACE}"; exit 1; }
+              echo "[runner] exp71 llm-d dyn: arm=${ARM} trace=${TRACE}"
+              "$PYBIN" -c "import json,os;d=json.load(open(os.environ['TRACE'].rsplit('.csv',1)[0]+'.plan.json'));print('[runner] plan:',d['totals'],'mix',d['mix']['schedule'])" 
+              echo "[runner] target=http://llmd-router.llmd.svc.cluster.local:8080 headers=${FS_LLMD_HEADERS} objective=${FS_LLMD_OBJECTIVE}"
+              echo "[runner] slo/tier keys: $(grep -A4 '"slo"' "$WCFG" | tr -d ' \n')"
+              "$PYBIN" run_experiment.py \
+                --engine llumnix --in-cluster \
+                --server-base-url http://llmd-router.llmd.svc.cluster.local:8080 \
+                --workload mixed_request_level_poisson \
+                --mode trace-replay \
+                --trace-file "${TRACE}" \
+                --load-procs "${LOAD_PROCS}" \
+                --load-threads 2048 \
+                --disable-timeouts \
+                --workload-config "${WCFG}" \
+                --priority-mode deadline \
+                --max-tokens "${MAX_TOKENS}" \
+                --model meta-llama/Meta-Llama-3.1-70B-Instruct \
+                --post-duration-grace 60 \
+                --output-dir /work/results \
+                --session-name "__SESSION__" \
+                --metrics-interval 1.0
+              rc=$?
+              chown -R "${RESULT_UID}:${RESULT_GID}" /work/results 2>/dev/null || true
+              echo "[runner] done rc=$rc"
+              exit $rc
+          volumeMounts:
+            - { name: work, mountPath: /work }
+            - { name: k3s, mountPath: /usr/local/bin/k3s, readOnly: true }
+            - { name: hf-cache, mountPath: /hf-cache }
+      volumes:
+        - name: work
+          hostPath:
+            path: /home/nxclab/llumnix_reproduce/Agent_applications/agent_motivation_experiment
+            type: Directory
+        - name: k3s
+          hostPath:
+            path: /usr/local/bin/k3s
+            type: File
+        - name: hf-cache
+          hostPath:
+            path: /NHNHOME/huggingface
+            type: Directory

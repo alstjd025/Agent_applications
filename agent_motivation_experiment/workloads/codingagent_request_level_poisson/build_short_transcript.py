@@ -232,6 +232,25 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--in", dest="src", required=True)
     ap.add_argument("--out", dest="dst", required=True)
+    # Pinning the ratio is what makes a larger build a SUPERSET of a smaller one
+    # rather than a different workload. Everything else here is a pure function
+    # of message content: shorten_message is keyed on (content, ratio) and the
+    # system prompt on --system-tail-chars, so two builds that share a ratio
+    # produce byte-identical output for every record they share. The ratio
+    # itself is the one global, solved from the mean input length of whatever
+    # file is passed in, so rebuilding from a larger transcript moves it -- 1,500
+    # records give 0.369435 and the full 13,218 give 0.373289, a 1.04%
+    # difference that would silently rewrite every record already measured.
+    #
+    # Pass the earlier build's ratio to extend a transcript. The mean then lands
+    # near the target rather than on it (6,970 instead of 7,000 for the full
+    # file at 0.369435), which is the right trade: 0.4% off a target that was
+    # itself chosen round, against a workload that stays comparable.
+    ap.add_argument("--ratio", type=float, default=None,
+                    help="Override the solved conversation ratio. Use the "
+                         "ratio an earlier build printed to make this build a "
+                         "superset of it; the mean will then land near "
+                         "--target-mean-tokens rather than on it.")
     ap.add_argument("--target-mean-tokens", type=float, default=7000.0,
                     help="target mean input tokens per request after shortening")
     ap.add_argument("--system-tail-chars", type=int, default=1200)
@@ -268,6 +287,9 @@ def main() -> int:
               f"prompt alone ({sys_after} tokens)", file=sys.stderr)
         return 1
     ratio = min(1.0, tail_target / tail_before)
+    if args.ratio is not None:
+        print(f"ratio overridden: solved {ratio:.6f} -> given {args.ratio:.6f}")
+        ratio = args.ratio
 
     cache: dict[str, str] = {}
     out_records = []

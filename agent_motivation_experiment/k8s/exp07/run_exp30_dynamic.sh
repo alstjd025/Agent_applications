@@ -40,6 +40,11 @@ mkdir -p "$META"
 declare -A TRACE=(
   [ablation]=/work/traces/dynamic/canonical/dyn09_short_mixcycle_flat.csv
   [full]=/work/traces/dynamic/canonical/dyn60_short_m123.csv
+  # EXP-71. Same hour, arrival band 25-75 -> 10-45 req/s. EXP-70 put the knee at
+  # 28.1 req/s for v0.2 and 18.2 for llm-d, and on the old band 93% of the hour
+  # sat above ours, so the rate never crossed it. Here it is above 47% of the
+  # minutes and below the rest.
+  [fullb]=/work/traces/dynamic/canonical/dyn60_short_m123_b1045.csv
   [azcode]=/work/traces/dynamic/canonical/azcode_w60_m1.csv
 )
 # The SLO filter has no end-to-end mode and reads tbt_ms literally, so on the
@@ -51,10 +56,12 @@ declare -A TRACE=(
 declare -A WCFG=(
   [ablation]=/work/workload_configs/mix_dyn09_short_mixcycle_flat.json
   [full]=/work/workload_configs/mix_dyn60_short_m123.json
+  [fullb]=/work/workload_configs/mix_dyn60_short_m123_b1045.json
   [azcode]=/work/workload_configs/mix_azcode_w60_m1.json
 )
 declare -A WCFG_FAIR=(
   [full]=/work/workload_configs/mix_dyn60_short_m123_slofair.json
+  [fullb]=/work/workload_configs/mix_dyn60_short_m123_b1045_slofair.json
   [azcode]=/work/workload_configs/mix_azcode_w60_m1_slofair.json
 )
 SHORT_TRANSCRIPT="$HOSTWORK/results/exp10_transcript/transcript_swe_short7k_mix1500.jsonl"
@@ -118,6 +125,13 @@ set_arm() {
       # repository keeps hitting. The arm that exercises the shipped default is
       # `fspfx`, and it sets FS_PREFIX=true explicitly for the same reason.
     fluidserve)  policy=fluidserve; export FS_PREFIX=false FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false ;;
+    # EXP-71. The deployed default since v0.2: the prefill charge for an
+    # arriving prompt is per instance. FS_PREFIX=true is set explicitly even
+    # though it is now the compiled default, so the startup line states the
+    # configuration rather than leaving it to be inferred, and so this arm keeps
+    # meaning one thing if the default ever moves again. Everything else matches
+    # the `fluidserve` arm above, which is therefore its prefix-off ablation.
+    fspfx)       policy=fluidserve; export FS_PREFIX=true  FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false ;;
     fsa)         policy=fluidserve; export FS_FORCE_MARGIN=true  FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false ;;
     # EXP-56. The class-preference ablation. --fluidserve-enable-affinity=false
     # removes BOTH places a class preference acts: the ordering of the feasible
@@ -229,7 +243,7 @@ case "${1:-}" in
     check_stack
     SESSION_PREFIX=exp30smoke run_cell fluidserve ablation
     ;;
-  ablation|full|azcode)
+  ablation|full|fullb|azcode)
     check_stack
     VARIANT=$1
     REPS=${2:-2}
