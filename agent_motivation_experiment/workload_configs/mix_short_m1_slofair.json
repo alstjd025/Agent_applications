@@ -24,7 +24,8 @@
     "",
     "chat and deep research are unchanged: their SLOs are natively (ttft, tbt).",
     "",
-    "mean_input_tokens is MEASURED at the gateway, not estimated by the transcript builder. The agent class was declared 6,812 from a tiktoken pass over the transcript file while the runtime actually sends 5,557, and deep research moved 4,055 -> 4,639 when its system prompt grew and its notes became the question's own. The request-count ratios below are NOT retuned to restore the old token shares: the trace files and every earlier run encode those counts, and changing the workload and the mix in the same step would make the two indistinguishable. Realised input token shares with these means: m1 30/43/26, m2 64/23/14, m3 20/24/57."
+    "mean_input_tokens is MEASURED at the gateway, not estimated by the transcript builder. The agent class was declared 6,812 from a tiktoken pass over the transcript file while the runtime actually sends 5,557, and deep research moved 4,055 -> 4,639 when its system prompt grew and its notes became the question's own. The request-count ratios below are NOT retuned to restore the old token shares: the trace files and every earlier run encode those counts, and changing the workload and the mix in the same step would make the two indistinguishable. Realised input token shares with these means: m1 30/43/26, m2 64/23/14, m3 20/24/57.",
+    "2026-08-08: num_conversations 1,000 -> 10,000. 이유는 두 가지가 겹친 것이다. (1) run_experiment._worker_main의 워커별 데이터셋 분할이 mixed 워크로드에서 한 번도 실행되지 않아(load_dataset이 dict를 돌려주므로 isinstance(dataset, list)가 거짓) 워커 12개가 같은 프롬프트 열을 그대로 보냈고, 모든 프롬프트가 정확히 12.00번씩 나갔다. 그 분할을 고쳤다. (2) 분할을 고쳐도 chat만 풀이 모자라서 재생이 남는다 — 70 req/s 8분 조건이 chat 요청 25,896건인데 1,000 대화가 주는 것은 3,354건이라 워커마다 자기 조각을 7.7바퀴 돈다. 10,000 대화면 약 33,540건이라 워커당 조각이 2,795건이고 draw가 2,158건이므로 한 바퀴도 안 돈다. 표본은 고정 시드로 섞은 뒤 앞에서 N개를 취하므로 1,000 집합은 10,000 집합의 앞부분이고, 대화 색인이 그대로라 앞 1,000개의 task id도 바뀌지 않는다. 영향받는 지표는 엔진의 prefix cache hit rate 하나이고 도착률·클래스 비율·출력 길이·SLO 채점은 그대로다. 자세한 것은 ms_dev/notes/fluidserve-prefix.md 8절과 workload-decision.md."
   ],
   "mix": {
     "chat": 10,
@@ -37,7 +38,7 @@
     "swe": 5557
   },
   "chat_config": {
-    "num_conversations": 1000
+    "num_conversations": 10000
   },
   "deepresearch_config": {},
   "swe_config": {

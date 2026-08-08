@@ -196,13 +196,39 @@ class Workload:
         return tasks
 
     def create_task_pool(self, dataset, baseline_latencies, rng, args, workload_config):
+        shard = workload_config.get("_shard") or {}
+        sidx = int(shard.get("idx", 0))
+        nsh = max(1, int(shard.get("n", 1)))
         pools = {}
         for cls, ds in dataset["datasets"].items():
             sub_cfg = self._sub_config(workload_config, cls)
+            # Disjoint slice per worker. run_experiment._worker_main does this
+            # for workloads whose load_dataset returns a list; this one returns
+            # a dict, so its isinstance check skipped us and all n workers sent
+            # byte-identical prompt streams -- measured as exactly 12.00x
+            # duplication of every prompt in EXP-66, at both 45 and 70 req/s.
+            #
+            # That inflates one quantity and no other: the share of an arriving
+            # prompt the engine has to recompute. Arrival rate, class mix,
+            # output lengths and SLO scoring are unaffected by a prompt being
+            # sent twelve times. But prefix cache reuse is exactly the quantity
+            # EXP-66 found separating llm-d from FluidServe, so every mixed-
+            # workload run measured it under far more reuse than the workload
+            # intends. See ms_dev/notes/fluidserve-prefix.md section 8.
+            #
+            # Reported rather than applied silently: a guard that skips is
+            # indistinguishable from one that ran, which is how this survived.
+            if isinstance(ds, list) and len(ds) >= nsh:
+                ds = ds[sidx::nsh]
+                print(f"[mixed] shard {sidx}/{nsh}: class {cls!r} -> "
+                      f"{len(ds)} of its records")
+            else:
+                print(f"[mixed] shard {sidx}/{nsh}: class {cls!r} NOT sharded "
+                      f"(type {type(ds).__name__}); its prompts will repeat "
+                      f"across workers")
             pools[cls] = self._delegates[cls].create_task_pool(
                 ds, baseline_latencies, rng, args, sub_cfg
             )
-        shard = workload_config.get("_shard") or {}
         return MixedPool(pools, self._class_seq, class_plan=self._class_plan,
                          shard_idx=shard.get("idx", 0), n_shards=shard.get("n", 1))
 
