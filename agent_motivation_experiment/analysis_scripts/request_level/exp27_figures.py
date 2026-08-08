@@ -27,6 +27,7 @@ import json
 import os
 import re
 import sys
+import textwrap
 
 import numpy as np
 import pandas as pd
@@ -47,16 +48,26 @@ ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
          # lighter shade of the same hue is the deadline-aware engine. Reading
          # the pair of shades is reading what the engine changed.
          "slofifo": "#2ca02c", "sloqoserve": "#98df8a",
-         "fluidservefifo": "#1f77b4", "fluidserveqoserve": "#aec7e8"}
+         "fluidservefifo": "#1f77b4", "fluidserveqoserve": "#aec7e8",
+         # EXP-66/67/68. llm-d is brown because orange is the deep-research
+         # class colour; the prefix-aware FluidServe arms keep the FluidServe
+         # hue because they are the same control plane, and are separated by
+         # line style below. fig_sweep builds its arm list as
+         # [a for a in ARM_C if a in set(df["arm"])], so an unregistered arm is
+         # dropped from the figure in silence.
+         "llmdslo": "#8c564b", "fspfx": "#1f77b4", "fspfxb": "#1f77b4"}
 ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "fluidserve": "FluidServe", "fluidserveflat": "FluidServe (v20 off)",
          "slofifo": "Llumnix SLO + FIFO", "sloqoserve": "Llumnix SLO + QoServe",
          "fluidservefifo": "FluidServe + FIFO",
-         "fluidserveqoserve": "FluidServe + QoServe"}
+         "fluidserveqoserve": "FluidServe + QoServe",
+         "llmdslo": "llm-d", "fspfx": "FluidServe (prefix-aware)",
+         "fspfxb": "FluidServe (prefix-aware, calibration fixed)"}
 # Line style per arm for the latency CDFs, where colour already encodes class.
 ARM_LS = {"fluidserve": "-", "slo": "--", "polyserve": ":",
           "fluidservefifo": "-", "fluidserveqoserve": "--",
-          "slofifo": "-.", "sloqoserve": ":"}
+          "slofifo": "-.", "sloqoserve": ":",
+          "llmdslo": "-", "fspfx": "--", "fspfxb": "-."}
 MIX_TITLE = {
     "m1": "m1 balanced\n31/37/31% of input tokens",
     "m2": "m2 chat-heavy\n64/19/16%",
@@ -420,6 +431,23 @@ def main():
 
 
 
+def _titled(ax, title, note, width=64, note_width=78):
+    """Set a title, wrapping it so the canvas is not stretched by one long line.
+
+    `savefig(bbox_inches="tight")` crops the canvas to the ink, so a title given
+    as a single unwrapped string makes the saved image as wide as that string
+    rather than as wide as the axes. An EXP-68 figure came out 7,334 px wide with
+    the plot occupying about a seventh of it, because the caveat note was one
+    283-character line. Wrapping is what keeps the axes the widest thing on the
+    canvas; the width is in characters because the title font size is fixed by
+    PAPER_STYLE.
+    """
+    txt = textwrap.fill(title, width)
+    if note:
+        txt += "\n" + textwrap.fill(note, note_width)
+    ax.set_title(txt, fontsize=7.5)
+
+
 def fig_split(df, out_prefix, title, note=""):
     """Attainment and goodput as two separate figures.
 
@@ -466,7 +494,7 @@ def fig_split(df, out_prefix, title, note=""):
         ax.set_ylim(0, 105)
         ax.grid(axis="y", ls=":", lw=0.7, alpha=0.6)
         ax.legend(loc="lower left", fontsize=7)
-        ax.set_title(title + ("\n" + note if note else ""))
+        _titled(ax, title, note)
         fig.tight_layout()
         fig.savefig(f"{out_prefix}_attainment.png", dpi=300, bbox_inches="tight")
         plt.close(fig)
@@ -484,9 +512,8 @@ def fig_split(df, out_prefix, title, note=""):
         ax.set_ylim(0, None)
         ax.grid(axis="y", ls=":", lw=0.7, alpha=0.6)
         ax.legend(loc="upper left", fontsize=7)
-        ax.set_title("Token goodput — output tokens/s from requests that met "
-                     "their SLO\n" + title + ("\n" + note if note else ""),
-                     fontsize=8)
+        _titled(ax, "Token goodput — output tokens/s from requests that met "
+                    "their SLO. " + title, note)
         fig.tight_layout()
         fig.savefig(f"{out_prefix}_goodput.png", dpi=300, bbox_inches="tight")
         plt.close(fig)

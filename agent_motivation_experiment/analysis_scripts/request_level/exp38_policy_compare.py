@@ -46,10 +46,19 @@ import matplotlib.pyplot as plt  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from exp22_fluidserve import PAPER_STYLE, arm_of  # noqa: E402
 
-ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo", "fluidserve"]
+# An arm missing from ARM_ORDER is dropped from the figure and the script still
+# writes a plausible-looking PNG with the remaining columns, so adding an arm
+# here is part of running a new experiment. On 2026-08-08 an EXP-68 comparison
+# was drawn with only the llm-d column because `fspfx` was not listed; the
+# `arms=[...]` line the script prints at the end is what caught it, and the
+# check below turns that from something to notice into something that fails.
+ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
+             "fluidserve", "fspfx", "fspfxb"]
 ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
              "loadbalance": "Llumnix", "llmdslo": "llm-d",
-             "fluidserve": "FluidServe"}
+             "fluidserve": "FluidServe",
+             "fspfx": "FluidServe\n(prefix-aware)",
+             "fspfxb": "FluidServe\n(prefix-aware, calib. fixed)"}
 ENGINE_COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
 
 E_RUN = "vllm:num_requests_running"
@@ -134,6 +143,11 @@ def main():
 
     for rpm in sorted(cells, key=str):
         arms = [x for x in ARM_ORDER if x in cells[rpm]]
+        unknown = sorted(set(cells[rpm]) - set(ARM_ORDER))
+        if unknown:
+            sys.exit(f"{rpm}: these arms have runs but are not in ARM_ORDER, so "
+                     f"they would be dropped from the figure without a message: "
+                     f"{unknown}. Add them to ARM_ORDER and ARM_LABEL.")
         if not arms:
             continue
         loaded = {x: series(cells[rpm][x]) for x in arms}

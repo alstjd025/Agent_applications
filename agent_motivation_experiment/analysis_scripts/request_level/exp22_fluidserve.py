@@ -68,6 +68,17 @@ ARM_STYLE = {
     "fluidserveqoserve": dict(color="#aec7e8", ls="--", marker="s", label="FluidServe + QoServe"),
     # EXP-66. Brown, not orange: orange is the deep-research class colour.
     "llmdslo": dict(color="#8c564b", ls="-", marker="D", label="llm-d"),
+    # EXP-67/68. Same hue as `fluidserve` because it is the same control plane;
+    # a different line style and marker so that the plain arm and the
+    # prefix-aware one stay separable if a figure ever carries both. Registering
+    # them matters more than the colours do: fig_engines and make_figures build
+    # their arm list as [k for k in ARM_STYLE if k in slides], so an arm that is
+    # absent here is dropped from every figure without a message, and the figure
+    # still renders with the remaining arms and a plausible legend.
+    "fspfx": dict(color="#1f77b4", ls="--", marker="P",
+                  label="FluidServe (prefix-aware)"),
+    "fspfxb": dict(color="#1f77b4", ls="-.", marker="X",
+                   label="FluidServe (prefix-aware, calibration fixed)"),
 }
 PAPER_STYLE = {
     "font.family": "serif",
