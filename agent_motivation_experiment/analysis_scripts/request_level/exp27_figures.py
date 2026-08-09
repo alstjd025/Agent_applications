@@ -62,12 +62,12 @@ ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
          # exists for. Cyan reads as the same family and is distinguishable.
          "llmdslo": "#8c564b", "fspfx": "#17becf", "fspfxb": "#bcbd22"}
 ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
-         "fluidserve": "FluidServe", "fluidserveflat": "FluidServe (v20 off)",
+         "fluidserve": "FluidServe (prefix acct. off)", "fluidserveflat": "FluidServe (v20 off)",
          "slofifo": "Llumnix SLO + FIFO", "sloqoserve": "Llumnix SLO + QoServe",
          "fluidservefifo": "FluidServe + FIFO",
          "fluidserveqoserve": "FluidServe + QoServe",
-         "llmdslo": "llm-d", "fspfx": "FluidServe (prefix-aware)",
-         "fspfxb": "FluidServe (prefix-aware, calibration fixed)"}
+         "llmdslo": "llm-d", "fspfx": "FluidServe v0.2",
+         "fspfxb": "FluidServe v0.2 (calibration fixed)"}
 # Line style per arm for the latency CDFs, where colour already encodes class.
 ARM_LS = {"fluidserve": "-", "slo": "--", "polyserve": ":",
           "fluidservefifo": "-", "fluidserveqoserve": "--",
@@ -552,7 +552,12 @@ def fig_split(df, out_prefix, title, note=""):
         ax.set_xticks(rps(sorted(df.rpm.unique())))
         ax.set_ylim(0, None)
         ax.grid(axis="y", ls=":", lw=0.7, alpha=0.6)
-        ax.legend(loc="upper left", fontsize=7)
+        # Below the axes, not inside them. With four arms this legend is eight
+        # entries, and inside the axes it covered 20-25 req/s on the upper left
+        # -- which is exactly where llm-d's total output peaks before turning
+        # down, the single most informative feature on the figure.
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=2,
+                  fontsize=7, frameon=False)
         _titled(ax, "Throughput and goodput — the gap is output the fleet "
                     "produced that arrived too late. " + title, note)
         fig.tight_layout()
