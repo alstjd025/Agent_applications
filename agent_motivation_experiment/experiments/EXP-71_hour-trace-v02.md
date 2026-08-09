@@ -1,8 +1,11 @@
 # EXP-71 — 한 시간 trace: FluidServe v0.2 대 llm-d, 무릎을 오르내리는 대역에서
 
-**상태**: 완료 (2026-08-09 13:10 KST, 4 run).
-**그림**: `results/aggregate_analysis/exp71`(pass 1), `.../exp71_r2`(pass 2).
-**정본 스크립트**: `analysis_scripts/redraw_hour_trace_exp71.sh`.
+**상태**: FluidServe v0.2·llm-d 2반복 완료, Llumnix SLO 2반복 완료(2026-08-09 18:08 KST),
+PolyServe는 pass 1만 — pass 2가 18:10 KST에 시작했다.
+**그림**: 두 arm 판은 `results/aggregate_analysis/exp71`(pass 1)·`.../exp71_r2`(pass 2),
+**네 arm 판은 `.../exp71_four/`**(README 포함).
+**정본 스크립트**: 두 arm은 `analysis_scripts/redraw_hour_trace_exp71.sh`,
+네 arm은 `analysis_scripts/redraw_hour_trace_exp71_four.sh`.
 
 ## 1. 왜 돌렸나 — 못 하고 있던 것 둘
 
@@ -136,7 +139,7 @@ KV 100%에 붙는 엔진이 구간마다 옮겨 다닌다.
 **PolyServe의 chat이 3.5%다.** 요청의 76.9%를 차지하는 클래스에 인스턴스 1.00대를 준 결과가
 이것이다.
 
-**배정과 그 클래스의 출력 토큰이 함의하는 참조선**(창 120초, 중앙값):
+**배정과 그 클래스의 출력 토큰이 함의하는 참조선**(`separation_measures.py` 기본값인 창 60초·간격 30초, 창들의 중앙값):
 
 | | 유효 인스턴스 chat / dr / swe | 참조선 chat / dr / swe | chat 없는 인스턴스-시각 | 이동 8칸/1칸 |
 |---|---|---|---|---|
