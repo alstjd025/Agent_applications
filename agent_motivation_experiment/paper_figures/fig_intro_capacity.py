@@ -86,13 +86,20 @@ CRITERIA = [95.0, 90.0, 80.0, 70.0]
 # Post-fix static conditions only. The globs are written out rather than
 # widened, because the pre-fix sweeps match any looser pattern and averaging
 # them in would silently mix two workloads.
+# Ordered worst to best so the bars read left to right as an argument. An arm
+# with no post-fix runs yet is skipped with a message rather than silently
+# dropped, and rather than being filled in from its pre-fix sweep -- EXP-53/57
+# and EXP-66 are a different workload and putting them on this axis is the
+# same-name-two-quantities failure this repository keeps hitting.
 ARMS = [
-    ("FluidServe v0.2", "#17becf", "s",
-     ["results/*exp68s*_fspfx_*_rpm_*", "results/*exp69*_fspfx_*_rpm_*",
-      "results/*exp70*_fspfx_*_rpm_*", "results/*exp68r*_fspfx_*_rpm_*"]),
+    ("PolyServe", "#d62728", "o", ["results/*exp72*_polyserve_*_rpm_*"]),
+    ("Llumnix SLO", "#2ca02c", "^", ["results/*exp72*_slo_*_rpm_*"]),
     ("llm-d", "#8c564b", "D",
      ["results/*exp68s*_llmdslo_*_rpm_*", "results/*exp70*_llmdslo_*_rpm_*",
       "results/*exp68r*_llmdslo_*_rpm_*"]),
+    ("FluidServe v0.2", "#17becf", "s",
+     ["results/*exp68s*_fspfx_*_rpm_*", "results/*exp69*_fspfx_*_rpm_*",
+      "results/*exp70*_fspfx_*_rpm_*", "results/*exp68r*_fspfx_*_rpm_*"]),
 ]
 
 
@@ -135,11 +142,15 @@ def fig_bars(data, caps, out):
             ax.annotate(f"{caps[name]:.1f}", (i, caps[name]), ha="center",
                         va="bottom", fontsize=8, color=col, weight="bold",
                         xytext=(0, 1.5), textcoords="offset points")
-        hi, lo = caps[names[0]], caps[names[-1]]
-        ax.annotate(f"{hi / lo:.2f}x", xy=(0.5, max(caps.values()) * 0.55),
-                    ha="center", fontsize=8, color="#333333")
+        # The ratio names the two arms it is between, because with more than
+        # two bars "1.50x" alone does not say of what.
+        best = max(caps, key=caps.get)
+        worst = min(caps, key=caps.get)
+        ax.annotate(f"{caps[best] / caps[worst]:.2f}x", ha="center", fontsize=8,
+                    color="#333333", xy=((names.index(best) + names.index(worst)) / 2,
+                                         max(caps.values()) * 1.10))
         ax.set_xticks(range(len(names)))
-        ax.set_xticklabels(names)
+        ax.set_xticklabels(names, fontsize=7 if len(names) > 2 else 8)
         ax.set_ylabel("sustained rate (req/s)")
         ax.set_ylim(0, max(caps.values()) * 1.22)
         ax.grid(axis="y", **ps.GRID)
@@ -181,10 +192,16 @@ def fig_curves(data, caps, out):
 
 
 def main():
+    global ARMS
     data = {name: sweep(pats) for name, _, _, pats in ARMS}
-    for name, pts in data.items():
-        if not pts:
-            sys.exit(f"no post-fix static runs matched for {name}")
+    absent = [n for n, pts in data.items() if not pts]
+    for n in absent:
+        print(f"  NOT DRAWN: {n} has no static conditions on the post-fix "
+              f"workload yet")
+    ARMS = [a for a in ARMS if data[a[0]]]
+    data = {n: p for n, p in data.items() if p}
+    if len(ARMS) < 2:
+        sys.exit("fewer than two arms have post-fix runs")
     caps = {name: crossing(pts) for name, pts in data.items()}
 
     print(f"capacity at >= {LEVEL:.0f}% offered attainment "
@@ -194,13 +211,17 @@ def main():
         reps = ", ".join(f"{k:g}:{len(v)}" for k, v in sorted(pts.items()))
         print(f"  {name:18s} {caps[name]:5.1f} req/s     repeats per rate  {reps}")
     names = [n for n, _, _, _ in ARMS]
-    print(f"  ratio {names[0]} / {names[-1]} = "
-          f"{caps[names[0]] / caps[names[-1]]:.2f}x")
+    # Highest over lowest, named. Taking the first and last of the list gave
+    # 0.67x the moment the list was reordered, which is the same number upside
+    # down and reads as a loss.
+    best, worst = max(caps, key=caps.get), min(caps, key=caps.get)
+    print(f"  ratio {best} / {worst} = {caps[best] / caps[worst]:.2f}x")
     print("\nsensitivity to where 'saturated' is drawn")
     for lv in CRITERIA:
         v = {n: crossing(data[n], lv) for n in names}
+        b2, w2 = max(v, key=v.get), min(v, key=v.get)
         print(f"  {lv:.0f}%  " + "  ".join(f"{n} {v[n]:5.1f}" for n in names)
-              + f"   ratio {v[names[0]] / v[names[-1]]:.2f}x")
+              + f"   {b2}/{w2} = {v[b2] / v[w2]:.2f}x")
 
     fig_bars(data, caps, os.path.join(HERE, "intro_capacity.pdf"))
     fig_curves(data, caps, os.path.join(HERE, "intro_capacity_curves.pdf"))

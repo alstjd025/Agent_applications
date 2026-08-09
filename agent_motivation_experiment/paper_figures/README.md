@@ -692,6 +692,13 @@ python3 paper_figures/fig_exp54_hour.py
 **데이터**: 2026-08-08 워크로드 수정 **이후**의 정적 조건만. arm당 8 rate
 (10/15/20/25/35/45/55/70 req/s). EXP-70(10~25, 1반복) + EXP-68·69(35~70, 2반복).
 
+**arm 넷이 등록돼 있고 지금 둘만 그려진다.** PolyServe와 Llumnix SLO는 수정 후 정적 조건이
+0개라 스크립트가 `NOT DRAWN`을 출력하고 건너뛴다. **수정 이전 sweep(EXP-53/57)으로 채우지
+않는다** — 다른 워크로드를 한 축에 놓는 것이고, `motivation_capacity_is_a_policy_llmd.png`에서
+llm-d가 45.8로 1위인 것이 바로 그 워크로드다. **EXP-72가 그 둘을 재고 있고
+(`/home/nxclab/tools/exp72_static_arms.sh`, 16조건 약 4.3시간), 끝나면 이 스크립트를 다시
+돌리는 것만으로 막대 넷이 된다.**
+
 | 포화 기준 | FluidServe v0.2 | llm-d | 비 |
 |---|---|---|---|
 | 95% | 25.4 | 12.2 | 2.08 |
