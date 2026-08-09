@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
-# The standard rate-sweep figure set for the FOUR control planes on the
-# post-2026-08-08 workload.
+# The standard rate-sweep figure set for the FOUR control planes on the workload
+# as it has stood since the 2026-08-08 load-generator fix.
+#
+# The name carries the date rather than saying "post-fix", because this project
+# has two boundaries -- the 2026-08-08 workload fix and the 2026-08-09 hour-trace
+# band change -- and "post-fix" does not say which. It also does not carry an
+# experiment number, which is the convention for everything else under
+# results/aggregate_analysis/, because the four arms come from four experiments:
+# EXP-68/69/70 for FluidServe v0.2 and llm-d, EXP-72 for the other two. Calling
+# it exp72 would put that number on two arms it did not measure.
 #
 # Why a fourth redraw script. redraw_static_sweep.sh draws the canonical
 # comparison from EXP-53/57 and redraw_static_sweep_llmd.sh adds llm-d to it;
@@ -34,10 +42,10 @@
 #   almost all of it. Scoring is unaffected: that class is judged end-to-end at
 #   30 s whatever the config says.
 #
-#   bash analysis_scripts/redraw_static_sweep_postfix.sh [out-dir]
+#   bash analysis_scripts/redraw_static_sweep_workload2026-08-08.sh [out-dir]
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
-OUT=${1:-results/aggregate_analysis/static_postfix}
+OUT=${1:-results/aggregate_analysis/static_sweep_workload2026-08-08}
 R=analysis_scripts/request_level
 mkdir -p "$OUT"
 
