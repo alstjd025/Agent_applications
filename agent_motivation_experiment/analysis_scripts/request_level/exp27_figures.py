@@ -60,19 +60,27 @@ ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
          # plane, which made the control and the treatment the same colour on
          # every figure that carries both -- exactly the case this comparison
          # exists for. Cyan reads as the same family and is distinguishable.
-         "llmdslo": "#8c564b", "fspfx": "#17becf", "fspfxb": "#bcbd22"}
+         "llmdslo": "#8c564b", "fspfx": "#17becf", "fspfxb": "#bcbd22",
+         # EXP-73's three ablations of the v0.2 binary. Same control plane, so
+         # they could share its hue, but this sweep exists to separate them from
+         # the control, so each gets its own.
+         "fspnopend": "#9467bd", "fspnoaff": "#e377c2", "fspslos": "#7f7f7f"}
 ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "fluidserve": "FluidServe (prefix acct. off)", "fluidserveflat": "FluidServe (v20 off)",
          "slofifo": "Llumnix SLO + FIFO", "sloqoserve": "Llumnix SLO + QoServe",
          "fluidservefifo": "FluidServe + FIFO",
          "fluidserveqoserve": "FluidServe + QoServe",
          "llmdslo": "llm-d", "fspfx": "FluidServe v0.2",
-         "fspfxb": "FluidServe v0.2 (calibration fixed)"}
+         "fspfxb": "FluidServe v0.2 (calibration fixed)",
+         "fspnopend": "FluidServe, holding off",
+         "fspnoaff": "FluidServe, class preference off",
+         "fspslos": "FluidServe, both off"}
 # Line style per arm for the latency CDFs, where colour already encodes class.
 ARM_LS = {"fluidserve": "-", "slo": "--", "polyserve": ":",
           "fluidservefifo": "-", "fluidserveqoserve": "--",
           "slofifo": "-.", "sloqoserve": ":",
-          "llmdslo": "-", "fspfx": "--", "fspfxb": "-."}
+          "llmdslo": "-", "fspfx": "--", "fspfxb": "-.",
+          "fspnopend": "--", "fspnoaff": ":", "fspslos": "-."}
 MIX_TITLE = {
     "m1": "m1 balanced\n31/37/31% of input tokens",
     "m2": "m2 chat-heavy\n64/19/16%",

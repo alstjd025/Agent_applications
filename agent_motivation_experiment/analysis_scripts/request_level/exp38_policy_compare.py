@@ -53,9 +53,17 @@ from exp22_fluidserve import PAPER_STYLE, arm_of  # noqa: E402
 # `arms=[...]` line the script prints at the end is what caught it, and the
 # check below turns that from something to notice into something that fails.
 ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
-             "fluidserve", "fspfx", "fspfxb"]
+             "fluidserve", "fspfx", "fspfxb",
+             # EXP-73's ladder. Registered before that sweep's engine-layer
+             # figures are drawn rather than after, because the check below
+             # aborts on an unregistered arm and the abort is the point: an arm
+             # missing here used to be dropped from the figure in silence.
+             "fspnopend", "fspnoaff", "fspslos"]
 ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
              "loadbalance": "Llumnix", "llmdslo": "llm-d",
+             "fspnopend": "FluidServe\n(holding off)",
+             "fspnoaff": "FluidServe\n(class pref. off)",
+             "fspslos": "FluidServe\n(both off)",
              # From v0.2 onward `fspfx` is the deployed default and is the arm the
              # paper calls FluidServe, while `fluidserve` is the ablation with
              # prefix accounting switched off -- the four drivers pin FS_PREFIX=false
