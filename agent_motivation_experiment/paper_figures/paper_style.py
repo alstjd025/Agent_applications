@@ -57,6 +57,12 @@ ARM_COLOR = {
     "slo": "#2ca02c",
     "loadbalance": "#9467bd",
     "fluidserveflat": "#ff7f0e",
+    # llm-d, brown, as `redraw_hour_trace_exp71_four.sh` assigns it. NOTE that
+    # the same script gives FluidServe v0.2 cyan (#17becf) rather than the blue
+    # used here and in every other paper figure; the paper figures keep blue so
+    # that one colour means one policy across the whole paper, and v0.2 is not
+    # a different policy from the one those figures already call FluidServe.
+    "llmd": "#8c564b",
 }
 # One marker per arm, reused (dotted, faded) for that arm's offered curve so the
 # two denominators of one policy read as the same policy.

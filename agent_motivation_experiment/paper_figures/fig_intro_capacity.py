@@ -106,12 +106,21 @@ CRITERIA = [95.0, 90.0, 80.0, 70.0]
 # and EXP-66 are a different workload and putting them on this axis is the
 # same-name-two-quantities failure this repository keeps hitting.
 ARMS = [
-    ("PolyServe", "#d62728", "o", ["results/*exp72*_polyserve_*_rpm_*"]),
-    ("Llumnix SLO", "#2ca02c", "^", ["results/*exp72*_slo_*_rpm_*"]),
-    ("llm-d", "#8c564b", "D",
+    ("PolyServe", ps.ARM_COLOR["polyserve"], "o",
+     ["results/*exp72*_polyserve_*_rpm_*"]),
+    ("Llumnix SLO", ps.ARM_COLOR["slo"], "^",
+     ["results/*exp72*_slo_*_rpm_*"]),
+    ("llm-d", ps.ARM_COLOR["llmd"], "D",
      ["results/*exp68s*_llmdslo_*_rpm_*", "results/*exp70*_llmdslo_*_rpm_*",
       "results/*exp68r*_llmdslo_*_rpm_*"]),
-    ("FluidServe v0.2", "#17becf", "s",
+    # Named "FluidServe" and drawn in the shared blue, matching every other
+    # paper figure and `fig_exp71_hour.py`. The arm is FluidServe v0.2 and the
+    # version is stated in the docstring and the caption instead of on the axis:
+    # no other version of ours appears in this paper, so "v0.2" on a tick label
+    # asks the reader to hold a distinction the figure never uses. The cyan this
+    # carried came from the EXP-71 analysis script, where it separates v0.2 from
+    # the earlier arm; here that separation does not exist.
+    ("FluidServe", ps.ARM_COLOR["fluidserve"], "s",
      ["results/*exp68s*_fspfx_*_rpm_*", "results/*exp69*_fspfx_*_rpm_*",
       "results/*exp70*_fspfx_*_rpm_*", "results/*exp68r*_fspfx_*_rpm_*"]),
 ]
@@ -146,27 +155,49 @@ def crossing(pts, level=LEVEL):
     return float("nan")
 
 
+# Narrower than one column, so this is the one figure here that must NOT be
+# included with `width=\columnwidth`: that would scale 2.90 in up to 3.335 and
+# multiply every glyph by 1.15. Include it at its natural size --
+# `\includegraphics{intro_capacity}` or `width=2.9in` -- and it lands at the
+# 8 pt everything else in the paper is set at, leaving 0.44 in of column beside
+# it. The bars are 0.40 wide rather than 0.55 for the same reason the canvas is
+# narrower: at four bars the default reads as a block of colour.
+# 2.90, not 2.60. At 2.60 the four arm names at 8 pt run into each other:
+# "PolyServe" ends exactly where "Llumnix" begins. Rendering the tick row at
+# 2.60 / 2.90 / 3.10 in and reading it back, 2.90 is where they separate. The
+# alternative was to keep 2.60 and set this axis at 7 pt, which is what the
+# figure did before and is the reason it did not match the other figures.
+BAR_W = 2.90
+BAR_H = 1.85
+# Tick labels only; the legend of the curve figure has room for the full name.
+TICK_BREAK = {"Llumnix SLO": "Llumnix\nSLO"}
+
+
 def fig_bars(data, caps, out):
     with plt.rc_context(ps.STYLE):
-        fig, ax = plt.subplots(figsize=(ps.COL_W, 2.05))
+        fig, ax = plt.subplots(figsize=(BAR_W, BAR_H))
         names = [n for n, _, _, _ in ARMS]
         for i, (name, col, _, _) in enumerate(ARMS):
-            ax.bar(i, caps[name], color=col, width=0.55,
+            ax.bar(i, caps[name], color=col, width=0.40,
                    edgecolor="white", linewidth=0.4)
             ax.annotate(f"{caps[name]:.1f}", (i, caps[name]), ha="center",
                         va="bottom", fontsize=8, color=col, weight="bold",
                         xytext=(0, 1.5), textcoords="offset points")
-        # The ratio names the two arms it is between, because with more than
-        # two bars "1.50x" alone does not say of what.
-        best = max(caps, key=caps.get)
-        worst = min(caps, key=caps.get)
-        ax.annotate(f"{caps[best] / caps[worst]:.2f}x", ha="center", fontsize=8,
-                    color="#333333", xy=((names.index(best) + names.index(worst)) / 2,
-                                         max(caps.values()) * 1.10))
+        # The best-over-worst ratio is NOT drawn on the figure. It is still
+        # printed when the script runs, and it belongs in the caption, where the
+        # two arms it is between can be named -- with four bars a bare "1.78x"
+        # floating above them does not say of what.
         ax.set_xticks(range(len(names)))
-        ax.set_xticklabels(names, fontsize=7 if len(names) > 2 else 8)
-        ax.set_ylabel("sustained rate (req/s)")
-        ax.set_ylim(0, max(caps.values()) * 1.22)
+        # 8 pt, the size everything else in this paper is set at. This axis was
+        # at 7, which is the only place any paper figure departs from it and is
+        # visible beside the others. 2.60 in leaves about 0.51 in per tick and
+        # "Llumnix SLO" does not fit on one line at 8 pt, so that one label is
+        # broken in two rather than the whole row being set smaller.
+        ax.set_xticklabels([TICK_BREAK.get(n, n) for n in names], fontsize=8)
+        ax.set_ylabel("Maximum capacity (req/s)")
+        # 1.12 rather than 1.22: the headroom existed for the ratio annotation,
+        # and with that gone it is empty canvas above the tallest bar.
+        ax.set_ylim(0, max(caps.values()) * 1.12)
         ax.grid(axis="y", **ps.GRID)
         ax.set_axisbelow(True)
         fig.tight_layout(rect=(0, 0, 1, 1))
