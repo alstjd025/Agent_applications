@@ -47,7 +47,7 @@ echo
 echo "=== what the trace offered: rate and mix over the hour"
 python3 traces/dynamic/plot_trace_shape.py \
   traces/dynamic/canonical/dyn60_short_m123_b1045.csv \
-  --knee 28.1 "FluidServe v0.2" --knee 18.2 "llm-d" \
+  --knee 28.1 "FluidServe v0.2" --knee 18.7 "llm-d" \
   --mean-input 687 4538 6758 \
   --title "EXP-71 hour trace: Azure-shaped rate rebanded to 10-45 req/s, class mix stepping m1 m2 m3 m1 every 15 min. Mean input tokens are the measured 687 / 4,538 / 6,758. Knees are EXP-70's." \
   --out "$OUT/trace_shape.png" >/dev/null 2>&1 && echo "  ok" || echo "  FAILED"

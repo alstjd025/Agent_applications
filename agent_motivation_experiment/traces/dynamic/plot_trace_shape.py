@@ -25,7 +25,7 @@ Usage
 -----
     python3 traces/dynamic/plot_trace_shape.py \\
         traces/dynamic/canonical/dyn60_short_m123_b1045.csv \\
-        --knee 28.1 "FluidServe v0.2" --knee 18.2 "llm-d" \\
+        --knee 28.1 "FluidServe v0.2" --knee 18.7 "llm-d" \\
         --out results/aggregate_analysis/exp71/trace_shape.png
 """
 import argparse
