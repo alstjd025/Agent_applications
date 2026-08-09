@@ -54,10 +54,12 @@ research at 30 req/s reads 61.3% attainment over 4 minutes and 27.5% over 8.
 
   python3 motivation_fig3.py <out-dir>
 """
+import argparse
 import glob
 import os
 import re
 import sys
+import textwrap
 
 import matplotlib
 matplotlib.use("Agg")
@@ -84,8 +86,14 @@ CLS_LABEL = {"chat": "chat", "deepresearch": "deep research", "swe": "swe"}
 ARMS = [("polyserve", "PolyServe\n(static partition)", "#d62728"),
         ("loadbalance", "Llumnix\n(load balance)", "#9467bd"),
         ("slo", "Llumnix SLO\n(latency aware)", "#2ca02c"),
+        # llm-d is not in the default selection. Its sweep is EXP-66, a
+        # different session from EXP-53's, and it is scored from the m1f
+        # workload config because it cannot express an end-to-end budget. Both
+        # are stated on the figure when --arms asks for it.
+        ("llmdslo", "llm-d\n(predicted latency)", "#8c564b"),
         ("fluidserve", "FluidServe\n(this paper)", "#1f77b4")]
-BASELINES = {"polyserve", "loadbalance", "slo"}
+BASELINES = {"polyserve", "loadbalance", "slo", "llmdslo"}
+DEFAULT_ARMS = ["polyserve", "loadbalance", "slo", "fluidserve"]
 
 CRITERIA = [95.0, 90.0, 80.0, 70.0]
 MAIN = 90.0
@@ -154,14 +162,22 @@ def _supersede(df):
 # and 70 req/s and read 52.3 and 21.7 against EXP-53's 52.4 and 21.4, inside
 # EXP-53's own repeat spread. Those two conditions are excluded from the sweep
 # below so the repeat count stays even across rates.
-def mixed(pattern="results/*exp5[37]*_rpm_*"):
-    """EXP-53: the mix, four policies. Repeats averaged before interpolating."""
+def mixed(patterns=("results/*exp5[37]*_rpm_*",)):
+    """The mix, one row per (arm, rate). Repeats averaged before interpolating.
+
+    Takes a list of globs so an arm measured in its own experiment can be added
+    without loosening the default one. llm-d's sweep is EXP-66 and lives under a
+    different session tag; passing its glob here is what puts it on the figure.
+    """
     rows = []
-    for d in sorted(glob.glob(pattern)):
+    seen = set()
+    for pattern in patterns:
+      for d in sorted(glob.glob(pattern)):
         base = os.path.basename(d)
-        if "unchanged" in base:
+        if "unchanged" in base or "PRERUN" in base or d in seen:
             continue
-        m = re.search(r"_(polyserve|slo|loadbalance|fluidserve)_m1f?_rpm_(\d+)$", base)
+        seen.add(d)
+        m = re.search(r"_(polyserve|slo|loadbalance|fluidserve|llmdslo)_m1f?_rpm_(\d+)$", base)
         if not m:
             continue
         r = load_run(d)
@@ -170,6 +186,7 @@ def mixed(pattern="results/*exp5[37]*_rpm_*"):
         rows.append(dict(arm=m.group(1), rate=int(m.group(2)) / 60.0,
                          src="exp57" if "exp57" in base else "exp53",
                          off=attain(r, "violate_offered")))
+      # end for d
     df = _supersede(pd.DataFrame(rows))
     return df.groupby(["arm", "rate"], as_index=False).agg(
         off=("off", "mean"), n=("off", "size"))
@@ -189,10 +206,18 @@ def knees(sc, mx, level):
     return k, pred, got, share, cap_share
 
 
-def main(out):
-    sc, mx = single_class(), mixed()
+def main(out, arms=None, extra_patterns=(), out_name="motivation_capacity_is_a_policy.png",
+         extra_note=""):
+    arms = list(arms or DEFAULT_ARMS)
+    sc = single_class()
+    mx = mixed(("results/*exp5[37]*_rpm_*",) + tuple(extra_patterns))
+    mx = mx[mx.arm.isin(arms)]
     if sc.empty or mx.empty:
         sys.exit("no EXP-55 or EXP-53 runs matched")
+    missing = [a for a in arms if a not in set(mx.arm)]
+    if missing:
+        sys.exit(f"asked for arms {missing} but no runs matched them; "
+                 f"pass their glob with --extra")
 
     k, pred, got, share, cap = knees(sc, mx, MAIN)
     tok_tot = sum(MIX_COUNT[c] * MIX_INTOK[c] for c in MIX_COUNT)
@@ -297,7 +322,12 @@ def main(out):
         ax[2].invert_xaxis()
         ax[2].set_xlabel("attainment counted as saturated", fontsize=7)
         ax[2].set_ylabel("measured / predicted")
-        ax[2].set_ylim(0.5, 1.35)
+        lo = min(v for lv in CRITERIA for v in sens[lv].values())
+        hi = max(v for lv in CRITERIA for v in sens[lv].values())
+        # Never clip: an arm whose ratio swings far more than the others is
+        # telling you its curve has a different shape, which is exactly what
+        # this panel is for. Fixed limits hid llm-d running to 1.43.
+        ax[2].set_ylim(min(0.5, lo - 0.05), max(1.35, hi + 0.05))
         ax[2].set_title("C. and it is not the threshold", fontsize=8)
         ax[2].grid(ls=":", lw=0.7, alpha=0.6)
         ax[2].legend(loc="lower right", fontsize=6, handlelength=1.6,
@@ -305,21 +335,53 @@ def main(out):
 
         base_lo = min(got[a] for a in keys if a in BASELINES)
         base_hi = max(got[a] for a in keys if a in BASELINES)
+        nbase = sum(1 for a in keys if a in BASELINES)
+        # Every number and every count in this sentence comes from the table the
+        # panels are drawn from. It used to say "one of them exceeds it", which
+        # stopped being true the moment a fourth arm was added: with llm-d on the
+        # figure two exceed the prediction. A caption that states a count has to
+        # compute it.
+        over = [next(l for k_, l, _ in ARMS if k_ == a).split("\n")[0]
+                for a in keys if got[a] > pred]
+        if not over:
+            verdict = "None of them lands on it, and none exceeds it."
+        elif len(over) == 1:
+            verdict = f"None of them lands on it, and one exceeds it ({over[0]})."
+        else:
+            verdict = (f"None of them lands on it, and {len(over)} exceed it "
+                       f"({', '.join(over)}).")
         fig.suptitle(
             f"How much load do four engines take? The question has no single "
             f"answer. With the mix and the hardware held fixed, the choice of "
             f"routing policy alone moves it by {base_hi/base_lo:.1f}x across "
-            f"the three existing policies\nand {max(got.values())/base_lo:.1f}x "
+            f"the {nbase} existing policies\nand {max(got.values())/base_lo:.1f}x "
             f"including ours. The dashed line is what the three classes, "
             f"measured one at a time on the same engines, predict if they "
-            f"competed for a single resource\nin fixed proportions. None of the "
-            f"four policies lands on it, and one of them exceeds it.",
+            f"competed for a single resource\nin fixed proportions. " + verdict,
             fontsize=8, y=1.14)
-        p = os.path.join(out, "motivation_capacity_is_a_policy.png")
+        if extra_note:
+            # tight_layout has already packed the axes against the bottom, so a
+            # note placed at a negative y lands on the tick labels. Reserve the
+            # space first, then draw into it.
+            n = textwrap.fill(extra_note, 150)
+            fig.subplots_adjust(bottom=0.26 + 0.030 * n.count("\n"))
+            fig.text(0.5, 0.015, n, ha="center", va="bottom", fontsize=7,
+                     color="#444444")
+        p = os.path.join(out, out_name)
         fig.savefig(p, dpi=300, bbox_inches="tight")
         print(f"\nwrote {p}")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1
-         else "results/aggregate_analysis/motivation")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("out", nargs="?", default="results/aggregate_analysis/motivation")
+    ap.add_argument("--arms", nargs="+", default=None,
+                    help=f"which arms to draw; default {DEFAULT_ARMS}")
+    ap.add_argument("--extra", nargs="*", default=[],
+                    help="additional run globs, for an arm measured in its own "
+                         "experiment (e.g. llm-d's EXP-66 sweep)")
+    ap.add_argument("--out-name", default="motivation_capacity_is_a_policy.png")
+    ap.add_argument("--note", default="",
+                    help="a line under the figure, for what the selection mixes")
+    a = ap.parse_args()
+    main(a.out, a.arms, a.extra, a.out_name, a.note)
