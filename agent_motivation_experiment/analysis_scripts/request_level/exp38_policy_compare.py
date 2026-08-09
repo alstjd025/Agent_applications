@@ -56,9 +56,15 @@ ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
              "fluidserve", "fspfx", "fspfxb"]
 ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
              "loadbalance": "Llumnix", "llmdslo": "llm-d",
-             "fluidserve": "FluidServe",
-             "fspfx": "FluidServe\n(prefix-aware)",
-             "fspfxb": "FluidServe\n(prefix-aware, calib. fixed)"}
+             # From v0.2 onward `fspfx` is the deployed default and is the arm the
+             # paper calls FluidServe, while `fluidserve` is the ablation with
+             # prefix accounting switched off -- the four drivers pin FS_PREFIX=false
+             # on it so that older result directories keep one meaning. Labelling
+             # `fluidserve` as plain "FluidServe" put the ablation and the system
+             # under names a reader would read as the same thing.
+             "fluidserve": "FluidServe\n(prefix acct. off)",
+             "fspfx": "FluidServe v0.2",
+             "fspfxb": "FluidServe v0.2\n(calibration fixed)"}
 ENGINE_COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
 
 E_RUN = "vllm:num_requests_running"
