@@ -719,3 +719,50 @@ llm-d가 45.8로 1위인 것이 바로 그 워크로드다. **EXP-72가 그 둘�
 
 ⚠ **`motivation_capacity_is_a_policy_llmd.png`(수정 이전 워크로드)의 45.1 / 45.8과 같은 표에
 넣으면 안 된다.** 거기서는 llm-d가 위인데, 그것은 다른 워크로드다.
+
+---
+
+## `motivation_four_panels.pdf` — 네 컨트롤플레인의 throughput / goodput / 달성률
+
+**스크립트**: `fig_motivation_four_panels.py`. `--no-ours`를 주면 FluidServe를 빼고
+`motivation_four_panels_noours.pdf`를 쓴다.
+**크기**: 7.0 × 1.62 in, `figure*`에 `width=\textwidth`로 넣는다(스케일 1.0).
+
+**무엇을 주장하는 그림인가.** 같은 네 엔진에서 컨트롤플레인만 바꾸면 **엔진이 만드는 토큰의
+양보다 그중 규칙 안에 도착하는 양이 훨씬 크게 갈린다.** 45 req/s에서 총 출력은
+6,847~13,077 tok/s(1.9배 폭)이고 goodput은 1,325~11,836(**8.9배 폭**)이다.
+
+**데이터** (수정 후 워크로드, 정적 sweep 8 rate, 총 40조건):
+
+| arm | 글롭 | 반복 |
+|---|---|---|
+| FluidServe (`fspfx`) | `*exp68s*`, `*exp68r*`, `*exp69*`, `*exp70*`의 `_fspfx_m1_rpm_*` | 35~70은 **2**, 10~25는 **1** |
+| llm-d (`llmdslo`) | `*exp68s*`, `*exp68r*`, `*exp70*`의 `_llmdslo_m1f_rpm_*` | 35~70은 **2**, 10~25는 **1** |
+| Llumnix SLO (`slo`) | `*exp72r1_slo_m1f_rpm_*` | 전 구간 **1** |
+| PolyServe | `*exp72r1_polyserve_m1_rpm_*` | 전 구간 **1** |
+
+**그려지는 값** (평균; 괄호는 두 반복이 있는 칸의 폭):
+
+| req/s | | FluidServe | llm-d | Llumnix SLO | PolyServe |
+|---|---|---|---|---|---|
+| 20 | 총 출력 / goodput / offered | 9,095 / 9,040 / 99.6 | 8,762 / 8,383 / 88.7 | 9,106 / 8,994 / 95.4 | 9,017 / 4,159 / 39.9 |
+| 45 | | 13,077 / 11,836 / 59.4 | 6,847 / 6,298 / 24.9 | 8,045 / 2,132 / 6.4 | 10,548 / 1,325 / 9.6 |
+| 70 | | 13,952 / 11,897 / 38.2 | 7,102 / 6,663 / 17.7 | 8,825 / 747 / 1.3 | 8,443 / 424 / 1.2 |
+
+**캡션이 반드시 담아야 하는 것 넷.**
+
+1. **음영이 없는 곡선이 더 정확한 것이 아니다.** 음영은 두 반복의 min..max이고, PolyServe와
+   Llumnix SLO는 전 구간 1반복이라 음영이 아예 없다. **덜 정확한 쪽에 띠가 없다.**
+2. **Llumnix SLO와 llm-d는 `m1f` 워크로드 설정을 받는다** — 두 정책 모두 전체 시간 예산을
+   표현할 수 없어서다. 채점은 넷 다 전체 30초다.
+3. **(a)를 "throughput은 정책과 무관하게 유지된다"로 읽으면 안 된다.** PolyServe는 35 req/s의
+   10,628에서 70의 8,443으로 내려가고, llm-d는 25의 8,985에서 45의 6,847로 내려간다(그때
+   거절률 71.5%). FluidServe만 단조 증가한다.
+4. **goodput의 측정 구간은 0부터 마지막 도착까지다.** `exp23_rate_sweep.py`는 첫 도착부터
+   재므로 이 trace에서 약 1.65% 크게 나온다.
+
+**다시 만들려면**: `python3 paper_figures/fig_motivation_four_panels.py`
+
+⚠ **`motivation_throughput_vs_goodput.pdf`와 같은 자리에 쓰지 않는다.** 그것은 수정 이전
+워크로드의 세 정책이고, 그 워크로드는 부하 생성기가 모든 프롬프트를 정확히 12번씩 보내서
+엔진 prefix hit rate가 83~86%로 부풀어 있던 상태다(고친 뒤 28.9%).
