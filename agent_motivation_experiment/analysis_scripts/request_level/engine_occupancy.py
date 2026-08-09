@@ -47,6 +47,7 @@ Usage
   python3 engine_occupancy.py --runs 'results/*exp22*' --summary-only
 """
 import argparse
+import csv
 import glob
 import json
 import os
@@ -121,13 +122,88 @@ def summarise(engines):
     }
 
 
+def pct(xs, q):
+    """Percentile without pulling numpy in for four numbers."""
+    if not xs:
+        return float("nan")
+    xs = sorted(xs)
+    if len(xs) == 1:
+        return float(xs[0])
+    i = q / 100.0 * (len(xs) - 1)
+    lo, hi = int(i), min(int(i) + 1, len(xs) - 1)
+    return float(xs[lo] + (xs[hi] - xs[lo]) * (i - lo))
+
+
+def per_engine_rows(run, engines, window_s=None):
+    """One record per (run, engine). This is what --csv writes.
+
+    Percentiles rather than the mean, because the mean of a queue depth over an
+    hour says very little: the same mean comes from a queue that is always 200
+    deep and from one that is empty for fifty minutes and 2,000 deep for ten.
+
+    The window argument exists because a run's file can be much longer than the
+    period in which it was under load, and every statistic taken over the whole
+    file is then diluted by the idle part. The PolyServe hour run
+    (260808_2245_exp71r1_polyserve_fullb) is the case that prompted this: the
+    engines are at KV 99.4-99.8% with a median queue of 700-5,600 requests from
+    500 s to 3,500 s, and from 4,000 s to the end of the 7,300 s file they are at
+    KV 0.0% with an empty queue. Over the whole file that engine's KV median
+    reads 9.0%; over the first 3,700 s it reads 99.6%. The second number is the
+    one that describes the run.
+    """
+    out = []
+    names = sorted(engines)
+    t0 = engines[names[0]][0][0]
+    for e in names:
+        rows = engines[e]
+        if window_s is not None:
+            rows = [r for r in rows if r[0] - t0 <= window_s]
+        if not rows:
+            continue
+        run_b = [r[1] for r in rows]
+        wait = [r[2] for r in rows]
+        kv = [r[3] for r in rows]
+        pre = [r[4] for r in rows if r[4] is not None]
+        hit = [r[5] for r in rows if r[5] is not None]
+        qry = [r[6] for r in rows if r[6] is not None]
+        out.append({
+            "run": os.path.basename(run),
+            "engine": e,
+            "samples": len(rows),
+            "span_s": round(rows[-1][0] - rows[0][0], 1),
+            "batch_p50": round(pct(run_b, 50), 1),
+            "batch_p95": round(pct(run_b, 95), 1),
+            "kv_p50_pct": round(100 * pct(kv, 50), 1),
+            "kv_p95_pct": round(100 * pct(kv, 95), 1),
+            "kv_max_pct": round(100 * max(kv), 1),
+            "queue_p50": round(pct(wait, 50), 1),
+            "queue_p95": round(pct(wait, 95), 1),
+            "queue_max": round(max(wait), 1),
+            "preemptions": round(pre[-1] - pre[0], 0) if len(pre) > 1 else "",
+            "prefix_hit_pct": (round(100 * (hit[-1] - hit[0]) / (qry[-1] - qry[0]), 1)
+                               if len(hit) > 1 and len(qry) > 1 and qry[-1] > qry[0] else ""),
+        })
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run")
     ap.add_argument("--runs", help="glob over run directories")
     ap.add_argument("--step", type=int, default=30, help="rows to skip between printed samples")
     ap.add_argument("--summary-only", action="store_true")
+    # Until 2026-08-09 this script printed everything and wrote nothing, so every
+    # engine-layer number that reached a document had been copied by hand out of
+    # a terminal and could not be checked against the run afterwards.
+    ap.add_argument("--csv", help="also write one row per (run, engine) here")
+    ap.add_argument("--window-s", type=float,
+                    help="for --csv only: restrict to the first N seconds of each "
+                         "run, measured from its first sample. Use it when the "
+                         "drain tail is long enough to dilute the statistics. The "
+                         "printed summary above the CSV line always covers the "
+                         "whole file, so the two disagree on purpose when this is set.")
     a = ap.parse_args()
+    csv_rows = []
 
     runs = []
     if a.run:
@@ -194,6 +270,20 @@ def main():
             print("  -> a queue this deep is work the router committed to an engine that "
                   "could not take it. A dispatched request cannot be recalled, so this is "
                   "not something later decisions can undo.")
+        if a.csv:
+            csv_rows.extend(per_engine_rows(run, engines, a.window_s))
+
+    if a.csv:
+        if not csv_rows:
+            print("\nno per-engine series in any run; nothing written")
+            return 1
+        os.makedirs(os.path.dirname(os.path.abspath(a.csv)) or ".", exist_ok=True)
+        with open(a.csv, "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=list(csv_rows[0].keys()))
+            w.writeheader()
+            w.writerows(csv_rows)
+        note = f", first {a.window_s:.0f}s of each run" if a.window_s else ""
+        print(f"\nwrote {a.csv}  ({len(csv_rows)} rows{note})")
     return 0
 
 
