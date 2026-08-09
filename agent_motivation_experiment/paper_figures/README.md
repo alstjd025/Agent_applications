@@ -682,3 +682,33 @@ its two arms peak at 4.4% and 6.3%.
 cd agent_motivation_experiment
 python3 paper_figures/fig_exp54_hour.py
 ```
+
+## `intro_capacity.pdf` / `intro_capacity_curves.pdf` (2026-08-09)
+
+**주장**: 도착한 요청의 90% 이상이 자기 지연 규칙을 지키는 최대 도착률이
+**FluidServe v0.2 28.1 req/s, llm-d 18.7 req/s로 1.50배**다. 거절은 위반으로 세므로
+전부 거절해서 이 값을 살 수 없다. `paper_figures/fig_intro_capacity.py`.
+
+**데이터**: 2026-08-08 워크로드 수정 **이후**의 정적 조건만. arm당 8 rate
+(10/15/20/25/35/45/55/70 req/s). EXP-70(10~25, 1반복) + EXP-68·69(35~70, 2반복).
+
+| 포화 기준 | FluidServe v0.2 | llm-d | 비 |
+|---|---|---|---|
+| 95% | 25.4 | 12.2 | 2.08 |
+| **90%** | **28.1** | **18.7** | **1.50** |
+| 80% | 33.7 | 22.7 | 1.49 |
+| 70% | 39.2 | 25.8 | 1.52 |
+
+**캡션에 반드시 들어가야 하는 것 넷** (스크립트 docstring이 정본):
+
+1. **arm이 둘이다.** PolyServe와 Llumnix SLO는 이 워크로드의 정적 조건이 없다. 5 baseline
+   sweep이 채운다(격자는 EXP-70이 정했다).
+2. **10~25 req/s가 1반복**이고 90% 통과가 FluidServe는 25~35, llm-d는 20~25 사이에서
+   보간되므로 **두 값 다 1반복 점을 가로지른다.**
+3. **swe를 llm-d만 m1f로 채점**한다(전체 시간 예산을 표현 못 해서). 채점 규칙 자체는 양쪽 다
+   전체 30초다.
+4. **예측선이 없다.** `motivation_capacity_is_a_policy.png`의 점선은 EXP-55에서 오는데
+   그것은 수정 이전 워크로드다. 되살리려면 EXP-55 재측정이 필요하다.
+
+⚠ **`motivation_capacity_is_a_policy_llmd.png`(수정 이전 워크로드)의 45.1 / 45.8과 같은 표에
+넣으면 안 된다.** 거기서는 llm-d가 위인데, 그것은 다른 워크로드다.
