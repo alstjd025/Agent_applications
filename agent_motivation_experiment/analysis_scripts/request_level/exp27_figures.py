@@ -38,6 +38,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from exp22_fluidserve import (  # noqa: E402
     CLASSES, CLASS_COLORS, PAPER_STYLE, load_run, per_request, goodput_tokens,
+    total_tokens,
     arm_of,
 )
 
@@ -129,6 +130,13 @@ def collect(patterns):
                 "attain": per_request(r, "violate_served"),
                 "attain_off": per_request(r, "violate_offered"),
                 "goodput": goodput_tokens(r, w),
+                # Total output tokens per second, SLO or not. The pair
+                # (throughput, goodput) is what separates "the engines are
+                # busy" from "the work is arriving in time", and the two can
+                # move in opposite directions: EXP-53 measured 20,057 and
+                # 20,212 total tokens/s from two policies whose goodput was 710
+                # and 9,064.
+                "tokens": total_tokens(r, w),
                 "rejected": 100.0 * r["rejected"].mean(),
             })
     return pd.DataFrame([r for r in rows if r["rpm"] and r["mix"]])
@@ -472,6 +480,8 @@ def fig_split(df, out_prefix, title, note=""):
             sloOHi=("attain_off", "max"),
             gp=("goodput", "mean"), gpLo=("goodput", "min"),
             gpHi=("goodput", "max"), rej=("rejected", "mean"),
+            tk=("tokens", "mean"), tkLo=("tokens", "min"),
+            tkHi=("tokens", "max"),
         ).reset_index().sort_values("rpm")
 
     with plt.rc_context(PAPER_STYLE):
@@ -521,6 +531,34 @@ def fig_split(df, out_prefix, title, note=""):
         fig.tight_layout()
         fig.savefig(f"{out_prefix}_goodput.png", dpi=300, bbox_inches="tight")
         plt.close(fig)
-    print(f"wrote {out_prefix}_attainment.png and {out_prefix}_goodput.png")
+
+        # Throughput beside goodput on one axis. They are the same unit and the
+        # gap between them IS the wasted work, so here the second line earns its
+        # place on the same axes rather than in a second figure: what is being
+        # read is the distance, not either value to three digits. Solid is every
+        # output token the fleet produced; dotted is the part that arrived
+        # inside its own latency rule.
+        fig, ax = plt.subplots(figsize=(4.6, 3.4))
+        for a_ in arms:
+            d, c = agg(a_), ARM_C[a_]
+            ax.errorbar(rps(d.rpm), d.tk, yerr=[d.tk - d.tkLo, d.tkHi - d.tk],
+                        color=c, ls="-", marker="o", capsize=2,
+                        label=f"{ARM_L[a_]} — all output")
+            ax.errorbar(rps(d.rpm), d.gp, yerr=[d.gp - d.gpLo, d.gpHi - d.gp],
+                        color=c, ls=":", marker="^", ms=3.5, alpha=0.6, capsize=2,
+                        label=f"{ARM_L[a_]} — met its rule")
+        ax.set_xlabel("offered rate (requests/s)")
+        ax.set_ylabel("output tokens/s")
+        ax.set_xticks(rps(sorted(df.rpm.unique())))
+        ax.set_ylim(0, None)
+        ax.grid(axis="y", ls=":", lw=0.7, alpha=0.6)
+        ax.legend(loc="upper left", fontsize=7)
+        _titled(ax, "Throughput and goodput — the gap is output the fleet "
+                    "produced that arrived too late. " + title, note)
+        fig.tight_layout()
+        fig.savefig(f"{out_prefix}_throughput.png", dpi=300, bbox_inches="tight")
+        plt.close(fig)
+    print(f"wrote {out_prefix}_attainment.png, {out_prefix}_goodput.png "
+          f"and {out_prefix}_throughput.png")
 if __name__ == "__main__":
     sys.exit(main())
