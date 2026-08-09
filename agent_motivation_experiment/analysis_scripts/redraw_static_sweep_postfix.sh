@@ -66,7 +66,7 @@ echo "  (같은 디스크에 수정 전 조건 $(ls -d results/*exp5[347]*_rpm_*
 # Kept to two lines. A note long enough to wrap six times pushes the axes into
 # the lower two thirds of the canvas, and the detail belongs in the experiment
 # file rather than on the image.
-NOTE="Two repeats only for FluidServe v0.2 and llm-d at 35-70 req/s; every other point is one run, and all four crossings of the 90% rule fall in that region. Llumnix SLO and llm-d take the m1f config; the agent class is scored end-to-end at 30 s regardless."
+NOTE="Two repeats only for FluidServe v0.2 and llm-d at 35-70 req/s; every other point is one run, and all four crossings of the 90% rule fall in that region. The arms come from two sessions a day and a half apart -- FluidServe v0.2 and llm-d from EXP-68/69/70 on 08-08, PolyServe and Llumnix SLO from EXP-72 on 08-09/10 -- and session-to-session movement on this workload has been measured at up to 4.6 points, which is far smaller than the differences read here. Llumnix SLO and llm-d take the m1f config; the agent class is scored end-to-end at 30 s regardless."
 
 echo
 echo "=== 달성률·goodput·처리량 (요청 단위, 두 분모)"
