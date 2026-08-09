@@ -7,8 +7,12 @@
 **The claim.** Capacity is defined here as the highest offered rate at which at
 least 90% of ARRIVING requests still meet their own latency rule -- rejections
 counted as misses, so a policy cannot buy the number by refusing work. On the
-same four engines, the same request mix and the same rule, FluidServe v0.2
-sustains 28.1 req/s and llm-d 18.7, a factor of 1.50.
+same four engines, the same request mix and the same rule:
+
+      FluidServe v0.2   28.1 req/s
+      Llumnix SLO       20.4
+      llm-d             18.7
+      PolyServe         15.8
 
 **Why two files.** The bar chart is the compact statement. The curve version
 shows where each bar comes from: attainment against offered rate with a rule at
@@ -21,24 +25,34 @@ short or the same quantity has already been introduced.
 conditions that bracket 90%, which is the definition motivation_fig3.py uses so
 the two agree. Eight rates per arm: 10, 15, 20, 25, 35, 45, 55, 70 req/s.
 
-**Robustness.** The ratio does not depend on where the line is drawn:
+**Robustness, and the part of it that does NOT hold.**
 
-      counted as saturated   FluidServe   llm-d   ratio
-             95%                25.4       12.2    2.08
-             90%                28.1       18.7    1.50
-             80%                33.7       22.7    1.49
-             70%                39.2       25.8    1.52
+      counted as saturated   PolyServe  Llumnix SLO   llm-d   FluidServe
+             95%                15.4        20.0       12.2      25.4
+             90%                15.8        20.4       18.7      28.1
+             80%                16.7        21.3       22.7      33.7
+             70%                17.5        22.1       25.8      39.2
+
+FluidServe is first at every threshold, so "this policy sustains the highest
+rate" does not depend on where the line is drawn. **The ordering among the three
+baselines does.** llm-d is LAST at 95%, third at 90%, and second at 80% and 70%,
+because it degrades gradually while the other two fall off a cliff -- Llumnix SLO
+holds 95.4% at 20 req/s and drops to 34.4% at 25, and PolyServe holds 99.9% at 15
+and drops to 39.9% at 20. A single capacity number therefore ranks our policy
+against the baselines robustly and ranks the baselines against each other only at
+the threshold it was computed for. Say so in the caption; the curve figure shows
+it directly and is the better choice where the ranking of baselines matters.
 
 **CAVEATS that belong in the caption.**
 
-1. **Two arms, not five.** PolyServe and Llumnix SLO have no static conditions
-   on this workload; their sweeps predate the 2026-08-08 load-generator fix and
-   cannot be placed beside these. The five-baseline sweep is what fills the
-   figure out, on the grid EXP-70 chose.
-2. **One repeat at 10, 15, 20 and 25 req/s** (EXP-70, whose purpose was to locate
-   the knee), two at 35 through 70 (EXP-68/69). The crossing at 90% falls between
-   25 and 35 for FluidServe and between 20 and 25 for llm-d, so **both bars are
-   interpolated across a single-repeat point** and the figure says so.
+1. **Four arms, not five.** vLLM's production stack router is not ported, so it
+   is absent. The other four are all on the post-2026-08-08 workload.
+2. **Repeats are uneven, and the crossings sit in the thin part.** FluidServe and
+   llm-d have two repeats at 35-70 req/s and one at 10-25 (EXP-68/69/70);
+   PolyServe and Llumnix SLO have **one repeat at every rate** (EXP-72). Every
+   one of the four crossings falls in a single-repeat region. A second repeat of
+   EXP-72, and of the low rates for the other two, is what this figure needs
+   before it goes in the paper.
 3. **swe is scored from a different workload config for llm-d** (m1f, 2,500 ms /
    52 ms per token) than for FluidServe (m1 with a 25:e2e:30000 override),
    because llm-d cannot express an end-to-end budget. Both are judged against the
@@ -162,6 +176,7 @@ def fig_bars(data, caps, out):
 def fig_curves(data, caps, out):
     with plt.rc_context(ps.STYLE):
         fig, ax = plt.subplots(figsize=(ps.COL_W, 2.20))
+        crossings = []
         for name, col, mk, _ in ARMS:
             pts = data[name]
             x = sorted(pts)
@@ -171,7 +186,22 @@ def fig_curves(data, caps, out):
             # Drop the crossing to the axis so the bar's number is visibly the
             # x coordinate where the curve meets the rule, not a separate claim.
             ax.plot([c, c], [0, LEVEL], color=col, ls="--", lw=0.7)
-            ax.annotate(f"{c:.1f}", (c, 2), color=col, fontsize=8,
+            crossings.append((c, name, col))
+        # The crossing labels are placed after all the curves are drawn, because
+        # with four arms three of them land within 5 req/s of each other and
+        # collide into an unreadable run of digits. Stack them instead: sort by
+        # x, and step the y position for any label whose neighbour is closer
+        # than `gap` on the x axis. Alternating heights would still collide when
+        # three cluster, so this counts the run.
+        crossings.sort()
+        gap = 0.09 * (ax.get_xlim()[1] - ax.get_xlim()[0])
+        row = 0
+        for i, (c, name, col) in enumerate(crossings):
+            if i and c - crossings[i - 1][0] < gap:
+                row += 1
+            else:
+                row = 0
+            ax.annotate(f"{c:.1f}", (c, 2 + 7.5 * row), color=col, fontsize=8,
                         weight="bold", ha="center", va="bottom",
                         bbox=dict(fc="white", ec="none", pad=0.6))
         ax.axhline(LEVEL, color="#333333", lw=0.7, ls=":")
