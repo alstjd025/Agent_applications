@@ -83,6 +83,16 @@ ARM_STYLE = {
                   label="FluidServe (prefix-aware)"),
     "fspfxb": dict(color="#bcbd22", ls="-.", marker="X",
                    label="FluidServe (prefix-aware, calibration fixed)"),
+    # EXP-73, the attribution ladder. Three ablations of the same v0.2 binary,
+    # each one flag away from `fspfx`. Registered here before the run for the
+    # reason written above this block: an arm missing from this table is dropped
+    # from every figure without a message.
+    "fspnopend": dict(color="#9467bd", ls="--", marker="v",
+                      label="FluidServe, holding off"),
+    "fspnoaff": dict(color="#e377c2", ls=":", marker="^",
+                     label="FluidServe, class preference off"),
+    "fspslos": dict(color="#7f7f7f", ls="-.", marker="*",
+                    label="FluidServe, both off"),
 }
 PAPER_STYLE = {
     "font.family": "serif",
