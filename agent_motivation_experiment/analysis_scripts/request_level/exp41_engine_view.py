@@ -52,9 +52,14 @@ from exp22_fluidserve import (  # noqa: E402
 )
 
 # Same dict for EXP-41 and EXP-44; an arm whose glob matches nothing is skipped.
-ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe",
+# EXP-71. fspfx is the deployed default since v0.2 (prefix-aware prefill
+# charging); the arm named `fluidserve` is its prefix-off ablation. llm-d is
+# brown because orange is the deep-research class colour. An arm missing from
+# this table is dropped from the figure without a message.
+ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe (prefix off)",
         "fsa": "FluidServe + margin", "polyserve": "PolyServe",
-        "loadbalance": "Llumnix"}
+        "loadbalance": "Llumnix",
+        "fspfx": "FluidServe v0.2", "llmdslo": "llm-d"}
 # One colour per engine, held across every panel and both figures.
 ENG_C = {8000: "#1f77b4", 8001: "#ff7f0e", 8002: "#2ca02c", 8003: "#d62728"}
 WIN = 60.0  # seconds per point on the engine series

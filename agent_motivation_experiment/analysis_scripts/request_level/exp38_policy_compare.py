@@ -127,6 +127,10 @@ def main():
     ap.add_argument("--runs", nargs="+", default=["results/*exp38r1*"])
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--title", default="EXP-38")
+    ap.add_argument("--tag", default=None,
+                    help="Force every run into one condition cell under this "
+                         "name, for arms whose directories differ in something "
+                         "other than the rate.")
     a = ap.parse_args()
     os.makedirs(a.out_dir, exist_ok=True)
 
@@ -138,7 +142,17 @@ def main():
             # variant. Without this branch every hour-long run was skipped and
             # the side-by-side figure existed only for sweeps.
             m = re.search(r"_rpm_(\d+)", os.path.basename(d))
-            key = int(m.group(1)) if m else os.path.basename(d).rsplit("_", 1)[-1]
+            # The fallback keys a dynamic-trace run by the last token of its
+            # directory name, which is the variant. That is right when the arms
+            # share a driver and therefore a variant, and wrong when they do
+            # not: EXP-71 compares `_fspfx_fullb` against `_llmdslo_full` and
+            # got two one-column figures instead of one two-column figure,
+            # which is the whole point of this script. --tag forces the runs
+            # into one cell and names the file.
+            if a.tag:
+                key = a.tag
+            else:
+                key = int(m.group(1)) if m else os.path.basename(d).rsplit("_", 1)[-1]
             cells.setdefault(key, {})[arm_of(d)] = d
 
     for rpm in sorted(cells, key=str):

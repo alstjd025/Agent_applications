@@ -15,9 +15,14 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from exp22_fluidserve import PAPER_STYLE, CLASSES, load_run
 
+# EXP-71. fspfx is the deployed default since v0.2 (prefix-aware prefill
+# charging); the arm named `fluidserve` is its prefix-off ablation. llm-d is
+# brown because orange is the deep-research class colour. An arm missing from
+# this table is dropped from the figure without a message.
 ARMS = {"fluidserve": ("FluidServe", "#1f77b4"), "polyserve": ("PolyServe", "#d62728"),
         "slo": ("Llumnix SLO", "#2ca02c"), "loadbalance": ("Llumnix", "#9467bd"),
-        "llmdslo": ("llm-d", "#8c564b")}
+        "llmdslo": ("llm-d", "#8c564b"),
+        "fspfx": ("FluidServe v0.2", "#17becf")}
 R = re.compile(r"_(fluidserve|polyserve|slo|loadbalance|llmdslo)_m1f?_rpm_(\d+)$")
 
 

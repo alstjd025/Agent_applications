@@ -54,12 +54,18 @@ from exp41_engine_view import title_slug  # noqa: E402
 # (fluidserve vs fluidserve+A). Colours are the fixed policy ones where a fixed
 # policy is meant; the candidate-A variant takes the same colour it has in
 # exp42_figures.py so it means the same thing across experiments.
+# EXP-71. fspfx is the deployed default since v0.2 (prefix-aware prefill
+# charging); the arm named `fluidserve` is its prefix-off ablation. llm-d is
+# brown because orange is the deep-research class colour. An arm missing from
+# this table is dropped from the figure without a message.
 ARMS = {"slo": ("Llumnix SLO", "#2ca02c", ":"),
         "fluidserve": ("FluidServe", "#1f77b4", "-"),
         # Dashed, not solid. Panels E and F encode the CLASS in the colour and
         # the POLICY in the line style, so two solid arms make those panels
         # unreadable however different their colours are elsewhere.
-        "fsa": ("FluidServe + forced-placement margin", "#ff7f0e", "-.")}
+        "fsa": ("FluidServe + forced-placement margin", "#ff7f0e", "-."),
+        "fspfx": ("FluidServe v0.2", "#17becf", "-"),
+        "llmdslo": ("llm-d", "#8c564b", "-")}
 WIN, STEP = 90.0, 30.0
 
 
