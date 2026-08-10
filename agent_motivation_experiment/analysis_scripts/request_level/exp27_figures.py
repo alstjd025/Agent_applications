@@ -65,7 +65,13 @@ ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
          # they could share its hue, but this sweep exists to separate them from
          # the control, so each gets its own.
          "fspnopend": "#9467bd", "fspnoaff": "#e377c2", "fspslos": "#7f7f7f",
-         "vllmcache": "#b56349"}
+         # EXP-77. Deep purple, and the colour it is deliberately not: this arm
+         # was first given a terracotta (#b56349), which sits in the same family
+         # as llm-d's brown (#8c564b). Those two curves carry the comparison the
+         # arm exists for -- routing by prefix affinity against routing by a
+         # per-request latency prediction -- so they are the two that must be
+         # separable at a glance, and they were the two hardest to tell apart.
+         "vllmcache": "#7b3294"}
 ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "fluidserve": "FluidServe (prefix acct. off)", "fluidserveflat": "FluidServe (v20 off)",
          "slofifo": "Llumnix SLO + FIFO", "sloqoserve": "Llumnix SLO + QoServe",

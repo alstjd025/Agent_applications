@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# The standard rate-sweep figure set for the FOUR control planes on the workload
+# The standard rate-sweep figure set for the FIVE control planes on the workload
 # as it has stood since the 2026-08-08 load-generator fix.
+#
+# It was four until 2026-08-10, when EXP-77 added the vLLM router's default
+# cache_aware policy. The four existing curves are unchanged by that; nothing in
+# their globs moved.
 #
 # The name carries the date rather than saying "post-fix", because this project
 # has two boundaries -- the 2026-08-08 workload fix and the 2026-08-09 hour-trace
@@ -29,6 +33,16 @@
 #   llm-d            llmdslo   EXP-68s/68r    (35-70, two repeats) + EXP-70 (10-25, one)
 #   Llumnix SLO      slo       EXP-72 (all eight rates, ONE repeat)
 #   PolyServe        polyserve EXP-72 (all eight rates, ONE repeat)
+#   vLLM router      vllmcache EXP-77 (all eight rates; repeat 2 was still running
+#                               when this arm was first drawn -- re-run this script
+#                               once EXP-77 finishes and the second repeat lands)
+#
+# EXP-73's fspfx conditions at 25, 35 and 45 are deliberately NOT in the
+# FluidServe glob. They are the control arm of an ablation ladder and are the
+# same configuration, so they are legitimate repeats -- but including them would
+# give one arm four repeats at three rates while every other arm has one or two,
+# and the figure would then be drawn from a different number of runs per point
+# per arm with nothing on the image saying so.
 #
 # Two things that have to be said next to these figures rather than discovered:
 #
@@ -53,10 +67,11 @@ FS='results/*exp68s*_fspfx_m1_rpm_* results/*exp68r*_fspfx_m1_rpm_* results/*exp
 LD='results/*exp68s*_llmdslo_m1f_rpm_* results/*exp68r*_llmdslo_m1f_rpm_* results/*exp70*_llmdslo_m1f_rpm_*'
 SL='results/*exp72r1_slo_m1f_rpm_*'
 PS='results/*exp72r1_polyserve_m1_rpm_*'
+VC='results/*exp77r*_vllmcache_m1_rpm_*'
 
 echo "=== 조건 수 (glob마다)"
 tot=0
-for pair in "FluidServe v0.2|$FS" "llm-d|$LD" "Llumnix SLO|$SL" "PolyServe|$PS"; do
+for pair in "FluidServe v0.2|$FS" "llm-d|$LD" "Llumnix SLO|$SL" "PolyServe|$PS" "vLLM router|$VC"; do
   name=${pair%%|*}; g=${pair#*|}
   n=$(ls -d $g 2>/dev/null | grep -vc PRERUN)
   printf "  %-16s %2d\n" "$name" "$n"
@@ -66,20 +81,24 @@ echo "  합계 $tot"
 # The pre-fix sweeps must not be inside any of the globs above. Counting them
 # separately is the check: if this number changes the totals, a glob widened.
 echo "  (같은 디스크에 수정 전 조건 $(ls -d results/*exp5[347]*_rpm_* 2>/dev/null | wc -l)개가 있고 위 glob에 걸리지 않아야 한다)"
-[ "$tot" -ge 40 ] || { echo "ABORT: 조건이 40개 미만이다"; exit 1; }
+[ "$tot" -ge 48 ] || { echo "ABORT: 조건이 48개 미만이다 (다섯 arm × 8 rate 이상이어야 한다)"; exit 1; }
 
 # The title and the note are in English because the serif font these figures are
 # drawn in carries no Hangul, so Korean text renders as empty boxes. matplotlib
 # says so as a UserWarning and still writes the file.
 # Kept to two lines. A note long enough to wrap six times pushes the axes into
 # the lower two thirds of the canvas, and the detail belongs in the experiment
-# file rather than on the image.
-NOTE="Two repeats only for FluidServe v0.2 and llm-d at 35-70 req/s; every other point is one run, and all four crossings of the 90% rule fall in that region. The arms come from two sessions a day and a half apart -- FluidServe v0.2 and llm-d from EXP-68/69/70 on 08-08, PolyServe and Llumnix SLO from EXP-72 on 08-09/10 -- and session-to-session movement on this workload has been measured at up to 4.6 points, which is far smaller than the differences read here. Llumnix SLO and llm-d take the m1f config; the agent class is scored end-to-end at 30 s regardless."
+# file rather than on the image. THIS HAPPENED AGAIN on 2026-08-10, when the
+# fifth arm was added and the note grew to eleven lines: it covered the legend
+# and pushed the axes below the midline. Anything longer than the two lines
+# below goes in README.md in the output directory, which is where a reader who
+# needs the provenance will look anyway.
+NOTE="A point with no error bar is ONE run, not a precise one, and all five crossings of the 90% rule fall in that region. Llumnix SLO and llm-d take the m1f config; the agent class is scored end-to-end at 30 s either way. Provenance per arm and per rate: README.md beside this figure."
 
 echo
 echo "=== 달성률·goodput·처리량 (요청 단위, 두 분모)"
-python3 "$R/exp27_figures.py" --runs $FS $LD $SL $PS --out-dir "$OUT" \
-  --title "Four control planes, static arrival-rate sweep (post-fix workload)" --note "$NOTE" \
+python3 "$R/exp27_figures.py" --runs $FS $LD $SL $PS $VC --out-dir "$OUT" \
+  --title "Five control planes, static arrival-rate sweep (post-fix workload)" --note "$NOTE" \
   && echo "  ok" || echo "  FAILED"
 
 echo
@@ -92,13 +111,14 @@ for rpm in 600 1200 1500 2100 2700 4200; do
            "results/*exp70*_llmdslo_m1f_rpm_$rpm" \
            "results/*exp6[89]*_fspfx_m1_rpm_$rpm" \
            "results/*exp70*_fspfx_m1_rpm_$rpm" \
+           "results/*exp77r*_vllmcache_m1_rpm_$rpm" \
     --out-dir "$OUT" --title "static $((rpm/60)) req/s" >/dev/null 2>&1 \
     && echo "  $((rpm/60)) req/s ok" || echo "  $((rpm/60)) req/s FAILED"
 done
 
 echo
 echo "=== 조건 하나짜리 여섯 패널 (arm마다)"
-for pair in "fspfx|$FS" "llmdslo|$LD" "slo|$SL" "polyserve|$PS"; do
+for pair in "fspfx|$FS" "llmdslo|$LD" "slo|$SL" "polyserve|$PS" "vllmcache|$VC"; do
   arm=${pair%%|*}; g=${pair#*|}
   for d in $g; do
     [ -d "$d" ] || continue
