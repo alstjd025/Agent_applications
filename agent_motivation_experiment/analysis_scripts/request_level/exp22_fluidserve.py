@@ -93,6 +93,11 @@ ARM_STYLE = {
                      label="FluidServe, class preference off"),
     "fspslos": dict(color="#7f7f7f", ls="-.", marker="*",
                     label="FluidServe, both off"),
+    # The vLLM router's default cache_aware policy. Registered before the arm
+    # runs, for the reason in the block above: an arm missing from this table is
+    # dropped from every figure without a message.
+    "vllmcache": dict(color="#b56349", ls="-", marker="h",
+                      label="vLLM router (cache-aware)"),
 }
 PAPER_STYLE = {
     "font.family": "serif",

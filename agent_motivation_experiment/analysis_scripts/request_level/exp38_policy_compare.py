@@ -58,12 +58,13 @@ ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
              # figures are drawn rather than after, because the check below
              # aborts on an unregistered arm and the abort is the point: an arm
              # missing here used to be dropped from the figure in silence.
-             "fspnopend", "fspnoaff", "fspslos"]
+             "fspnopend", "fspnoaff", "fspslos", "vllmcache"]
 ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
              "loadbalance": "Llumnix", "llmdslo": "llm-d",
              "fspnopend": "FluidServe\n(holding off)",
              "fspnoaff": "FluidServe\n(class pref. off)",
              "fspslos": "FluidServe\n(both off)",
+             "vllmcache": "vLLM router\n(cache-aware)",
              # From v0.2 onward `fspfx` is the deployed default and is the arm the
              # paper calls FluidServe, while `fluidserve` is the ablation with
              # prefix accounting switched off -- the four drivers pin FS_PREFIX=false

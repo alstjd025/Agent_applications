@@ -217,6 +217,12 @@ set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
     # the same pair. That is the point of having it -- it separates what SLO
     # awareness buys from what per-class differentiation buys.
     slo)         policy=slo ;;
+    # The vLLM router's default cache_aware policy, ported as a baseline. All
+    # five constants are that package's defaults and are passed explicitly rather
+    # than relied on, because the SGLang gateway it was forked from ships
+    # cache_threshold 0.7 against vllm-router's 0.3 and the two are different
+    # routers. Plan and judgement rule: ms_dev/notes/vllm-router-baseline.md.
+    vllmcache)   policy=vllm-cache ;;
     loadbalance) policy=load-balance ;;
     *) echo "[exp27] unknown arm: $1" >&2; return 1 ;;
   esac
