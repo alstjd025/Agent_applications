@@ -6,7 +6,8 @@
 Two panels over the SAME four-day window of the Azure LLM Inference 2024 traces.
 
   (a) arrival rate, divided by the window's own peak
-  (b) the composition of those arrivals, stacked to 100%, in 10-minute bins
+  (b) how far the composition of those arrivals is from the window's own average
+      composition, in 10-minute bins
 
 This exists because the motivation makes a two-part claim -- the offered load
 varies AND what it is made of varies -- and `azure_trace_shape.pdf` only shows
@@ -42,19 +43,33 @@ cross-correlation is maximised with the share 1.5 hours AHEAD. The per-day
 maximum of the rate is a single spiky minute and is not a stable statistic. The
 claim that survives both is the one above -- they are only moderately related.
 
-WHY PANEL (b) IS STACKED TO 100% AND NOT A SINGLE SHARE LINE. A single line
-labelled "code requests" does not say what the rest is, and the rest is the whole
-point: the panel is about COMPOSITION, so both components have to be on it. The
-Azure 2024 release is exactly two traces, conversation and code, so the two bands
-are the entire distribution and the moving boundary between them is the claim.
+WHAT PANEL (b) PLOTS, AND WHY IT IS NOT A COMPOSITION BREAKDOWN. The quantity is
+the total-variation distance between the composition in that bin and the mean
+composition of the whole window: 0.5 * sum over classes of |s_i - mean s_i|. It
+is 0 when the traffic is mixed exactly as it is on average and rises as it
+departs, and it is bounded by 1 whatever the number of classes.
 
-AND WHY NOT A MIXEDNESS INDEX. With two classes one share determines the whole
-distribution, so an index of how mixed the traffic is -- the effective number of
-classes 1/sum(s^2), which this project already uses for classes across instances
--- adds nothing the share does not carry and LOSES the direction: it reads 20%
-code and 80% code as the same 1.47. A partition sized for one is wrong for the
-other, so direction is exactly what must survive. The index is printed below for
-reference and is not drawn.
+Three reasons for this rather than the shares themselves.
+
+  1. IT IS WHAT A FIXED PARTITION IS WRONG BY. A deployment that sizes a static
+     class partition for the average composition is off by exactly this amount at
+     each moment, so the y axis is the error such a design carries rather than a
+     property of the trace that has to be argued into relevance.
+  2. IT DOES NOT DEPEND ON THE NUMBER OF CLASSES. Azure publishes two request
+     types; our workload has three. Drawing Azure's two-way split invites the
+     reader to map it onto our three classes, which is exactly the mapping that
+     does not exist -- there is no deep-research analogue in that release. A
+     distance is comparable across both.
+  3. THE CLAIM IS THAT THE MIX MOVES, not that it moves toward code. An earlier
+     version of this file argued the opposite -- that an index loses the
+     direction and the direction is what matters for sizing a partition. That
+     objection is about a different claim. Direction matters when asking WHICH
+     partition to hold; this figure is establishing that NO fixed one is right,
+     and for that the distance is the whole content.
+
+The shares themselves are not lost: they are printed by this script and recorded
+in the README, so a sentence needing "code runs from 3.9% to 68.0% of arrivals"
+still has its source.
 
 BINNING. Panel (b) is 10-minute bins, which is the alignment
 `analyze_mix_over_time.py` and the trace generator both use; at one-minute
@@ -89,8 +104,11 @@ CONV = "traces/azure/plots/_minute_conv2024.csv"
 CODE = "traces/azure/plots/_minute_code2024.csv"
 FIG_H = 2.45
 C_RATE = "#1f77b4"
-C_CONV = "#7fb3d5"     # conversation, the lower band
-C_CODE = "#d62728"     # code, the upper band
+# Deliberately NOT one of the arm colours in paper_style.ARM_COLOR. Those are
+# bound to control planes, and this figure is a property of the workload; reusing
+# PolyServe's red here made the panel read as if a policy were being shown, quite
+# apart from being too saturated to sit next to panel (a).
+C_MIX = "#55606e"
 BIN = 10          # minutes per bin in panel (b)
 
 
@@ -141,8 +159,13 @@ def main():
     print(f"  correlation between binned rate and code share: {r:+.3f}")
     print(f"  effective number of classes 1/sum(s^2): min {neff.min():.2f}  "
           f"median {np.median(neff):.2f}  max {neff.max():.2f}  (2 classes, so 1.00-2.00)")
-    tv = np.abs(f - f.mean()).mean()
-    print(f"  mean total-variation distance from the window's mean composition: {tv:.3f}")
+    # Total variation between each bin's composition and the window mean. With
+    # two classes 0.5*(|d| + |-d|) reduces to |d|, and the expression below is
+    # the general one so a three-class source needs no change here.
+    comp = np.column_stack([1.0 - f, f])
+    tv = 0.5 * np.abs(comp - comp.mean(axis=0)).sum(axis=1)
+    print(f"  distance from the mean composition: median {np.median(tv):.3f}  "
+          f"p95 {np.percentile(tv,95):.3f}  max {tv.max():.3f}   (0 = at the average, 1 = disjoint)")
 
     with plt.rc_context(STYLE):
         fig, ax = plt.subplots(2, 1, figsize=(COL_W, FIG_H), sharex=True)
@@ -158,30 +181,15 @@ def main():
         ax[0].set_ylim(0, 1.12)
         ax[0].set_yticks([0, 0.5, 1.0])
 
-        ax[1].fill_between(hb, 0, 100 - share, color=C_CONV, lw=0,
-                           )
-        ax[1].fill_between(hb, 100 - share, 100, color=C_CODE, lw=0)
-        ax[1].plot(hb, 100 - share, color="white", lw=0.5)
-        # The band the boundary moves through, which is the claim, rather than
-        # the instants at which the extremes occur.
-        for v in (100 - share.max(), 100 - share.min()):
-            ax[1].axhline(v, color="#333333", lw=0.6, ls="--")
-        ax[1].annotate(f"code {share.min():.0f}% – {share.max():.0f}% of arrivals",
-                       (0.5, 0.06), xycoords="axes fraction", ha="center",
-                       fontsize=7, color="#222222")
-        ax[1].set_ylabel("Share of\narrivals (%)")
-        ax[1].set_ylim(0, 100)
-        ax[1].set_yticks([0, 50, 100])
-        # Named inside each band rather than in a legend. A legend above the
-        # axes overlapped the upper band and read as text drawn on the plot; a
-        # two-band stack is the case where direct labelling is unambiguous, and
-        # it removes the mapping step between a swatch and a band.
-        # The positions are chosen where BOTH bands are thick -- around hour 14
-        # code is at its widest, so neither label lands in a sliver.
-        ax[1].text(14, 68, "code", color="white", fontsize=7.5, ha="center",
-                   va="center", weight="bold")
-        ax[1].text(30, 45, "conversation", color="#0b3d5c", fontsize=7.5,
-                   ha="center", va="center", weight="bold")
+        ax[1].plot(hb, tv, color=C_MIX, lw=0.6)
+        ax[1].fill_between(hb, tv, color=C_MIX, alpha=0.18, lw=0)
+        ax[1].axhline(tv.max(), color="#333333", lw=0.6, ls="--")
+        ax[1].annotate(f"up to {tv.max():.2f} away from the mean mix",
+                       (0.5, 0.63), xycoords="axes fraction", ha="center",
+                       fontsize=7, color="#333333")
+        ax[1].set_ylabel("Mix distance\nfrom average")
+        ax[1].set_ylim(0, max(0.5, tv.max() * 1.25))
+        ax[1].set_yticks([0.0, 0.2, 0.4])
 
         for a in ax:
             a.grid(axis="both", **GRID)
