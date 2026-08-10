@@ -991,6 +991,35 @@ def invoke_with_tracking(
             state["is_rejected"] = True
             state["rejection_reason"] = rejection_reason
             state["last_call_error_msg"] = error_msg
+        # Client-side connection exhaustion. NOT a server fault, and the reason it
+        # gets its own branch before the fallback below is that the fallback opens
+        # a SECOND connection: that is what turns a few failures into a collapse.
+        #
+        # Measured in EXP-54. A load-balancing arm that rejects nothing saturated
+        # the fleet at minute 40, long-queued streams were cut, and because
+        # "cannot assign requested address" was in none of the lists here, every
+        # one of them fell through to the non-streaming retry and opened another
+        # socket. About 28,000 ephemeral ports went, 62,114 failures followed, and
+        # because a failure returns instantly the client's call rate read 170/s --
+        # the rate at which it was spinning, not the trace's arrival rate. The
+        # other three arms had zero of these errors, so the defect only appears on
+        # an arm that never rejects, which is exactly the baseline shape.
+        #
+        # Marked is_error rather than is_server_terminated on purpose. A
+        # server-terminated request has an unknown outcome and `attain()` drops it
+        # from BOTH denominators; a client that ran out of sockets is a broken
+        # measurement and must stay visible. is_error keeps it in the offered
+        # denominator as a violation and out of `cutoff`, since cutoff is
+        # is_server_terminated AND NOT errored.
+        elif any(kw in err_str for kw in ["cannot assign requested address",
+                                          "max retries exceeded",
+                                          "too many open files",
+                                          "address already in use"]):
+            is_error = True
+            error_msg = (f"Call {call_index}: client connection exhausted "
+                         f"({type(e).__name__}) -- this run measured the load "
+                         f"generator, not the policy")
+            state["last_call_error_msg"] = error_msg
         # Detect server termination (connection reset, broken pipe, etc.)
         elif any(kw in err_str for kw in ["connectionreset", "brokenpipe", "connectionaborted",
                                            "connection refused", "eof occurred", "server disconnected"]):
