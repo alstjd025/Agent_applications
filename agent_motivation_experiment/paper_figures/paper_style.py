@@ -63,6 +63,10 @@ ARM_COLOR = {
     # that one colour means one policy across the whole paper, and v0.2 is not
     # a different policy from the one those figures already call FluidServe.
     "llmd": "#8c564b",
+    # The vLLM router's default cache-aware policy, as `exp22_fluidserve.py`
+    # assigns it. Distinct from `loadbalance`'s #9467bd, which is a different
+    # purple; the two never appear on the same figure.
+    "vllmrouter": "#7b3294",
 }
 # One marker per arm, reused (dotted, faded) for that arm's offered curve so the
 # two denominators of one policy read as the same policy.

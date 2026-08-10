@@ -16,7 +16,7 @@ things a policy actually chooses between: how well it serves what it takes, and
 how much it takes. Read alone, panel (b)'s left axis would reward refusing
 everything, which is why the rejection rate is on the same panel and the useful
 output is on the panel beside it. All three are needed and none of them ranks
-the four arms on its own.
+the five arms on its own.
 
 THE ADMITTED PANEL IS WHERE WE TIE, NOT WHERE WE WIN. At 35-70 req/s FluidServe
 holds 88.4-92.9% of admitted requests inside their rule and llm-d holds
@@ -27,6 +27,7 @@ two policies is entirely in the other two quantities:
     FluidServe      56.1%          88.4                13,053
     llm-d           80.4%          92.1                 7,347
     Llumnix SLO     81.7%           7.8                   843
+    vLLM router      0.0%           2.5                   600
     PolyServe        0.0%           1.2                   479
 
 FluidServe and llm-d reach the same quality of service on what they accept, and
@@ -34,30 +35,42 @@ FluidServe accepts 2.2x more of the arrivals (43.9% against 19.6%) and turns
 that into 1.8x the useful tokens.
 
 THE REJECTION AXIS DOES NOT RANK THE ARMS EITHER, AND THE FIGURE HAS TO ADMIT
-IT. PolyServe rejects nothing at any rate, so it is best on that axis and worst
-on both others: 1.2% of arrivals meet their rule at 70 req/s and it produces 479
-useful tokens per second against FluidServe's 13,053. "Rejects less" is only a
-virtue at equal attainment, which is why the two arms it is claimed against are
-llm-d and Llumnix SLO, both of which reject about 80%.
+IT. PolyServe and the vLLM router have no admission control, so they sit at zero
+on that axis at every rate and are the best two on it and the worst two on both
+others: at 70 req/s they hold 1.2% and 2.5% of arrivals inside their rule and
+produce 479 and 600 useful tokens per second against FluidServe's 13,053.
+"Rejects less" is only a virtue at equal attainment, which is why the two arms it
+is claimed against are llm-d and Llumnix SLO, both of which reject about 80%.
 
 Llumnix SLO rejects as much as llm-d and gets 7.8% attainment on what is left.
 It is the case that shows rejecting is not itself the mechanism.
 
-WHY THE REJECTION LINES ARE DASHED AND CARRY NO MARKERS. Eight lines share one
+⚠ AND AN ARM THAT NEVER REJECTS STILL LOSES REQUESTS -- IT JUST LOSES THEM WHERE
+THIS FIGURE CANNOT SHOW THEM. A policy with no admission control leaves requests
+unfinished when the measurement window closes, and those have no outcome, so they
+leave BOTH denominators. At 35 / 45 / 70 req/s that share is 21.8 / 39.6 / 61.6%
+for the vLLM router and 37.9 / 35.9 / 35.7% for PolyServe, against 1.9 / 1.7 /
+1.3% for FluidServe. Reading the rejection axis as "how much work was turned
+away" therefore understates those two arms, and the goodput panel is where that
+shows up.
+
+WHY THE REJECTION LINES ARE DASHED AND CARRY NO MARKERS. Ten lines share one
 panel. Colour identifies the arm and is the same in both panels; within panel
 (b) the line style says which axis a line belongs to. Markers are left to the
 attainment lines so that the two families separate at a glance where they cross.
 
 DATA. The post-2026-08-08 static sweep, eight rates (10, 15, 20, 25, 35, 45, 55,
-70 req/s), same runs as `fig_intro_capacity.py`: FluidServe and llm-d from
-EXP-68/69/70, PolyServe and Llumnix SLO from EXP-72. FluidServe and llm-d have
-two repeats at 35-70 and one at 10-25; PolyServe and Llumnix SLO have one repeat
-at every rate. No error bars are drawn and none of these points is
-noise-bounded; say so in the caption.
+70 req/s), the same runs as `fig_intro_capacity.py`, whose `ARMS` table this
+imports rather than copying: FluidServe and llm-d from EXP-68/69/70, PolyServe
+and Llumnix SLO from EXP-72, the vLLM router from EXP-77. FluidServe and llm-d
+have two repeats at 35-70 and one at 10-25; the other three have one repeat at
+every rate, and EXP-77's second repeat had not finished when this was drawn. No
+error bars are drawn and none of these points is noise-bounded; say so in the
+caption.
 
 swe is configured two ways and scored one way: llm-d and Llumnix SLO cannot
-express an end-to-end budget and take `m1f`, FluidServe and PolyServe take `m1`,
-and all four are judged against the same 30 s end-to-end rule.
+express an end-to-end budget and take `m1f`, FluidServe, PolyServe and the vLLM
+router take `m1`, and all five are judged against the same 30 s end-to-end rule.
 
     python3 paper_figures/fig_intro_reject_goodput.py
 """
@@ -202,10 +215,14 @@ def main():
             ax.grid(axis="y", **ps.GRID)
             ax.set_axisbelow(True)
 
+        # ncol = however many arms there are, always one row. At a fixed
+        # ncol=4 the fifth arm wrapped to a second row and that row was drawn
+        # off the top of the canvas; a legend does not shrink the axes, so
+        # nothing in the output reported the loss.
         fig.legend(handles, [n for n, _, _, _ in arms], loc="lower center",
-                   bbox_to_anchor=(0.5, 0.895), ncol=4, fontsize=7,
-                   frameon=False, handlelength=1.2, columnspacing=0.7,
-                   handletextpad=0.3, borderaxespad=0.0)
+                   bbox_to_anchor=(0.5, 0.895), ncol=len(arms), fontsize=6.5,
+                   frameon=False, handlelength=1.0, columnspacing=0.4,
+                   handletextpad=0.22, borderaxespad=0.0)
         fig.tight_layout(rect=(0, 0, 1, 0.895), w_pad=0.6, pad=0.3)
         ps.save(fig, os.path.join(HERE, "intro_reject_goodput.pdf"))
     return 0
