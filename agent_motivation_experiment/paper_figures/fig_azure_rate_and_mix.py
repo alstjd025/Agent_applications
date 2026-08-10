@@ -5,7 +5,8 @@
 
 Two panels over the SAME four-day window of the Azure LLM Inference 2024 traces.
 
-  (a) arrival rate, divided by the window's own peak
+  (a) arrival rate, normalized -- divided by the window's own peak, so the
+      upper dashed rule is 1.0 by construction
   (b) what share of those arrivals is off the window's average composition, in
       10-minute bins
 
@@ -45,6 +46,14 @@ claim that survives both is the one above -- they are only moderately related.
 
 WHAT PANEL (b) PLOTS. The total-variation distance between the composition in
 that bin and the mean composition of the whole window, expressed as a percentage.
+
+THE AXIS IS NOT LABELLED "VARIANCE", and the near-miss is worth stating because
+the source statistic is called total VARIATION. This is not a variance: it is not
+a second moment, and its units are a share of arrivals rather than the square of
+one. Labelling it variance would read as a contraction of "total variation" and
+would stop any reader who knows the difference, asking the variance of what over
+what. "Deviation" is the ordinary word for a departure from a reference and needs
+no such question.
 
 Total variation has one plain reading and it is the reason this quantity is worth
 drawing: it is **the share of the arrivals that would have to change class for
@@ -186,7 +195,7 @@ def main():
         ax[0].annotate(f"peak / trough = {peak/total.min():.1f}$\\times$",
                        (0.5, 0.58), xycoords="axes fraction", ha="center",
                        fontsize=7, color="#333333")
-        ax[0].set_ylabel("Arrival rate\n/ peak")
+        ax[0].set_ylabel("Arrival rate\n(normalized)")
         ax[0].set_ylim(0, 1.12)
         ax[0].set_yticks([0, 0.5, 1.0])
 
@@ -196,7 +205,7 @@ def main():
         ax[1].annotate(f"up to {tv.max():.0f}% of arrivals",
                        (0.5, 0.63), xycoords="axes fraction", ha="center",
                        fontsize=7, color="#333333")
-        ax[1].set_ylabel("Arrivals off the\naverage mix (%)")
+        ax[1].set_ylabel("Request mixture\ndeviation (%)")
         ax[1].set_ylim(0, max(50.0, tv.max() * 1.25))
         ax[1].set_yticks([0, 20, 40])
 
