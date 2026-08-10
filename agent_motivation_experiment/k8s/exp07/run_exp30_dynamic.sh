@@ -172,6 +172,20 @@ set_arm() {
     fsg14)       policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_GATE_SLACK=1.4 ;;
     polyserve)   policy=polyserve ;;
     slo)         policy=slo ;;
+    # EXP-77. The vLLM router's default cache_aware policy. It reads the prompt
+    # prefix and the queue depth and nothing else: no budget, no admission test,
+    # so it always returns an instance and its rejection rate is zero by
+    # construction. It therefore takes the STANDARD workload config rather than
+    # the "fair" one -- the fair config exists because the SLO filter reads
+    # tbt_ms as a literal per-token target, and this policy never reads the SLO
+    # fields at all, so the two configs are the same input to it. Keeping it on
+    # the standard config makes it directly comparable to the fspfx arm.
+    #
+    # The five constants are the compile defaults, which are vllm-router
+    # 0.1.15's own values; set_scheduler_profiling.py reads the start-up line
+    # back and refuses the condition if they differ or if localaccount is not
+    # true. Plan and judgement rule: ms_dev/notes/vllm-router-baseline.md.
+    vllmcache)   policy=vllm-cache ;;
     loadbalance) policy=load-balance ;;
     *) echo "[exp30] unknown arm: $1" >&2; return 1 ;;
   esac
