@@ -169,6 +169,8 @@ def crossing(pts, level=LEVEL):
 # figure did before and is the reason it did not match the other figures.
 BAR_W = 2.90
 BAR_H = 1.85
+# The combined figure: bars and curves side by side in ONE COLUMN.
+PAIR_H = 1.75
 # Tick labels only; the legend of the curve figure has room for the full name.
 TICK_BREAK = {"Llumnix SLO": "Llumnix\nSLO"}
 
@@ -176,77 +178,149 @@ TICK_BREAK = {"Llumnix SLO": "Llumnix\nSLO"}
 def fig_bars(data, caps, out):
     with plt.rc_context(ps.STYLE):
         fig, ax = plt.subplots(figsize=(BAR_W, BAR_H))
-        names = [n for n, _, _, _ in ARMS]
-        for i, (name, col, _, _) in enumerate(ARMS):
-            ax.bar(i, caps[name], color=col, width=0.40,
-                   edgecolor="white", linewidth=0.4)
-            ax.annotate(f"{caps[name]:.1f}", (i, caps[name]), ha="center",
-                        va="bottom", fontsize=8, color=col, weight="bold",
-                        xytext=(0, 1.5), textcoords="offset points")
-        # The best-over-worst ratio is NOT drawn on the figure. It is still
-        # printed when the script runs, and it belongs in the caption, where the
-        # two arms it is between can be named -- with four bars a bare "1.78x"
-        # floating above them does not say of what.
-        ax.set_xticks(range(len(names)))
-        # 8 pt, the size everything else in this paper is set at. This axis was
-        # at 7, which is the only place any paper figure departs from it and is
-        # visible beside the others. 2.60 in leaves about 0.51 in per tick and
-        # "Llumnix SLO" does not fit on one line at 8 pt, so that one label is
-        # broken in two rather than the whole row being set smaller.
-        ax.set_xticklabels([TICK_BREAK.get(n, n) for n in names], fontsize=8)
-        ax.set_ylabel("Maximum capacity (req/s)")
-        # 1.12 rather than 1.22: the headroom existed for the ratio annotation,
-        # and with that gone it is empty canvas above the tallest bar.
-        ax.set_ylim(0, max(caps.values()) * 1.12)
-        ax.grid(axis="y", **ps.GRID)
-        ax.set_axisbelow(True)
+        draw_bars(ax, caps)
         fig.tight_layout(rect=(0, 0, 1, 1))
+        ps.save(fig, out)
+
+
+def draw_bars(ax, caps, tick_fontsize=8, names_on_axis=True, ylabel=None):
+    """The bar panel, on an axes handed in, so the standalone figure and the
+    combined one cannot drift apart.
+
+    `names_on_axis=False` drops the arm names from the x axis. That is only
+    legitimate where a legend on the same figure names the same four arms in the
+    same colours and the same left-to-right order, which is the case in the
+    one-column pair; a bar chart whose bars are identified nowhere is not.
+    """
+    names = [n for n, _, _, _ in ARMS]
+    for i, (name, col, _, _) in enumerate(ARMS):
+        ax.bar(i, caps[name], color=col, width=0.40,
+               edgecolor="white", linewidth=0.4)
+        ax.annotate(f"{caps[name]:.1f}", (i, caps[name]), ha="center",
+                    va="bottom", fontsize=8, color=col, weight="bold",
+                    xytext=(0, 1.5), textcoords="offset points")
+    ax.set_xticks(range(len(names)))
+    if names_on_axis:
+        ax.set_xticklabels([TICK_BREAK.get(n, n) for n in names],
+                           fontsize=tick_fontsize)
+    else:
+        ax.set_xticklabels([])
+        ax.tick_params(axis="x", length=0)
+    ax.set_ylabel(ylabel or "Maximum capacity (req/s)")
+    ax.set_ylim(0, max(caps.values()) * 1.12)
+    ax.grid(axis="y", **ps.GRID)
+    ax.set_axisbelow(True)
+
+
+def draw_curves(ax, data, caps, label_gap=0.09, row_step=7.5,
+                crossing_labels=True):
+    """The curve panel. Returns the legend handles in ARMS order.
+
+    `crossing_labels=False` keeps the dashed drop lines but not the numbers on
+    them. Only for a figure where the bar panel prints the same four numbers:
+    the drop line still shows that the bar's value is where the curve meets the
+    rule, and four stacked labels do not fit in a 1.8 in panel.
+    """
+    crossings, handles = [], []
+    for name, col, mk, _ in ARMS:
+        pts = data[name]
+        x = sorted(pts)
+        y = [float(np.mean(pts[k])) for k in x]
+        h, = ax.plot(x, y, color=col, marker=mk, label=name)
+        handles.append(h)
+        c = caps[name]
+        # Drop the crossing to the axis so the bar's number is visibly the x
+        # coordinate where the curve meets the rule, not a separate claim.
+        ax.plot([c, c], [0, LEVEL], color=col, ls="--", lw=0.7)
+        crossings.append((c, name, col))
+    ax.set_xlim(5, 73)
+    ax.set_ylim(0, 105)
+    # The crossing labels are placed after all the curves are drawn, because
+    # with four arms three of them land within 5 req/s of each other and collide
+    # into an unreadable run of digits. Stack them instead: sort by x, and step
+    # the y position for any label whose neighbour is closer than `gap` on the x
+    # axis. Alternating heights would still collide when three cluster, so this
+    # counts the run.
+    crossings.sort()
+    gap = label_gap * (ax.get_xlim()[1] - ax.get_xlim()[0])
+    row = 0
+    for i, (c, name, col) in enumerate(crossings if crossing_labels else []):
+        if i and c - crossings[i - 1][0] < gap:
+            row += 1
+        else:
+            row = 0
+        # `row_step` is in data units and the panel is 105 units tall, so how
+        # many POINTS one step is worth depends on how tall the axes are: 7.5
+        # units is 10 pt in the tall standalone figure and 6.4 pt in the short
+        # combined one, where an 8 pt label then overlaps the row below it.
+        # The caller sets it from its own panel height.
+        ax.annotate(f"{c:.1f}", (c, 2 + row_step * row), color=col, fontsize=8,
+                    weight="bold", ha="center", va="bottom",
+                    bbox=dict(fc="white", ec="none", pad=0.6))
+    ax.axhline(LEVEL, color="#333333", lw=0.7, ls=":")
+    ax.set_xlabel("Offered rate (req/s)")
+    ax.set_ylabel("SLO attainment (%)")
+    ax.grid(axis="y", **ps.GRID)
+    ax.set_axisbelow(True)
+    return handles
+
+
+def fig_pair(data, caps, out):
+    """Both panels in one file: the capacity number on the left, the measurement
+    it comes from on the right. ONE COLUMN, `width=\\columnwidth`.
+
+    3.335 in split 1 : 1.45 leaves the bars about 1.1 in of drawing area and the
+    curves about 1.8. Three things are dropped to fit, each because the same
+    information is already on the figure:
+
+      - THE ARM NAMES ON THE BAR AXIS. The legend above names the four arms in
+        the same colours and the same left-to-right order the bars are in.
+        Four names at 8 pt need about 2.0 in and there is 1.1.
+      - THE CROSSING NUMBERS ON THE CURVES. The bars print the same four values.
+        The dashed drop lines stay, so the reader can still see that each bar's
+        height is the rate at which that curve meets the rule.
+      - THE SENTENCE ON THE RULE LINE. "90% of arriving requests meet their
+        rule" is 2.2 in at 7 pt. Shortened to "90%" against the line; the
+        caption has to carry what the rule is and that rejections count as
+        misses.
+
+    The curve panel is the wider of the two because it carries thirty-two
+    points, eight x ticks and a rule line against the bars' four values.
+    """
+    with plt.rc_context(ps.STYLE):
+        fig, (ax_b, ax_c) = plt.subplots(
+            1, 2, figsize=(ps.COL_W, PAIR_H),
+            gridspec_kw=dict(width_ratios=[1.0, 1.45]))
+        # "Maximum capacity (req/s)" rotated is 1.15 in and the panel is about
+        # 1.0 in tall here, so it would be clipped. The word the axis cannot
+        # afford is the one the caption can carry.
+        draw_bars(ax_b, caps, names_on_axis=False, ylabel="Capacity (req/s)")
+        handles = draw_curves(ax_c, data, caps, crossing_labels=False)
+        # Right end of the rule line, not the left: past 25 req/s every curve
+        # is below 90%, so that corner is the only empty stretch of the line.
+        ax_c.annotate("90%", (72, LEVEL), ha="right", va="bottom", fontsize=7,
+                      color="#333333")
+        ax_c.set_xticks([10, 30, 50, 70])
+        # Spanning BOTH panels, not just the curve one: with the names gone from
+        # the bar axis this legend is the only thing identifying the bars, so it
+        # has to sit over them too.
+        fig.legend(handles, [n for n, _, _, _ in ARMS], loc="lower center",
+                   bbox_to_anchor=(0.5, 0.885), ncol=4, fontsize=7,
+                   frameon=False, handlelength=1.2, columnspacing=0.7,
+                   handletextpad=0.3, borderaxespad=0.0)
+        fig.tight_layout(rect=(0, 0, 1, 0.885), w_pad=0.8, pad=0.3)
         ps.save(fig, out)
 
 
 def fig_curves(data, caps, out):
     with plt.rc_context(ps.STYLE):
         fig, ax = plt.subplots(figsize=(ps.COL_W, 2.20))
-        crossings = []
-        for name, col, mk, _ in ARMS:
-            pts = data[name]
-            x = sorted(pts)
-            y = [float(np.mean(pts[k])) for k in x]
-            ax.plot(x, y, color=col, marker=mk, label=name)
-            c = caps[name]
-            # Drop the crossing to the axis so the bar's number is visibly the
-            # x coordinate where the curve meets the rule, not a separate claim.
-            ax.plot([c, c], [0, LEVEL], color=col, ls="--", lw=0.7)
-            crossings.append((c, name, col))
-        # The crossing labels are placed after all the curves are drawn, because
-        # with four arms three of them land within 5 req/s of each other and
-        # collide into an unreadable run of digits. Stack them instead: sort by
-        # x, and step the y position for any label whose neighbour is closer
-        # than `gap` on the x axis. Alternating heights would still collide when
-        # three cluster, so this counts the run.
-        crossings.sort()
-        gap = 0.09 * (ax.get_xlim()[1] - ax.get_xlim()[0])
-        row = 0
-        for i, (c, name, col) in enumerate(crossings):
-            if i and c - crossings[i - 1][0] < gap:
-                row += 1
-            else:
-                row = 0
-            ax.annotate(f"{c:.1f}", (c, 2 + 7.5 * row), color=col, fontsize=8,
-                        weight="bold", ha="center", va="bottom",
-                        bbox=dict(fc="white", ec="none", pad=0.6))
-        ax.axhline(LEVEL, color="#333333", lw=0.7, ls=":")
+        draw_curves(ax, data, caps)
         ax.annotate("90% of arriving requests meet their rule", (71, LEVEL),
                     ha="right", va="bottom", fontsize=7, color="#333333")
-        ax.set_xlabel("offered rate (requests/s)")
-        ax.set_ylabel("SLO attainment (%)")
-        ax.set_xlim(5, 73)
-        ax.set_ylim(0, 105)
-        ax.grid(axis="y", **ps.GRID)
-        ax.set_axisbelow(True)
-        # Left of centre, not lower left: the crossing labels sit just above
-        # the x axis at the two dashed rules, and a lower-left legend lands on
-        # top of the lower of them.
+        # Left of centre, not lower left: the crossing labels sit just above the
+        # x axis at the dashed rules, and a lower-left legend lands on top of
+        # the lower of them.
         ax.legend(loc="center left", handlelength=1.4)
         fig.tight_layout(rect=(0, 0, 1, 1))
         ps.save(fig, out)
@@ -285,6 +359,7 @@ def main():
               + f"   {b2}/{w2} = {v[b2] / v[w2]:.2f}x")
 
     fig_bars(data, caps, os.path.join(HERE, "intro_capacity.pdf"))
+    fig_pair(data, caps, os.path.join(HERE, "intro_capacity_pair.pdf"))
     fig_curves(data, caps, os.path.join(HERE, "intro_capacity_curves.pdf"))
 
 
