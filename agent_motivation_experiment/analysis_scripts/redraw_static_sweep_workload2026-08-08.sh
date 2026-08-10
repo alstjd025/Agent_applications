@@ -33,9 +33,8 @@
 #   llm-d            llmdslo   EXP-68s/68r    (35-70, two repeats) + EXP-70 (10-25, one)
 #   Llumnix SLO      slo       EXP-72 (all eight rates, ONE repeat)
 #   PolyServe        polyserve EXP-72 (all eight rates, ONE repeat)
-#   vLLM router      vllmcache EXP-77 (all eight rates; repeat 2 was still running
-#                               when this arm was first drawn -- re-run this script
-#                               once EXP-77 finishes and the second repeat lands)
+#   vLLM router      vllmcache EXP-77 (all eight rates, TWO repeats -- the only arm
+#                               here with a repeat at every rate)
 #
 # EXP-73's fspfx conditions at 25, 35 and 45 are deliberately NOT in the
 # FluidServe glob. They are the control arm of an ablation ladder and are the
@@ -93,7 +92,7 @@ echo "  (같은 디스크에 수정 전 조건 $(ls -d results/*exp5[347]*_rpm_*
 # and pushed the axes below the midline. Anything longer than the two lines
 # below goes in README.md in the output directory, which is where a reader who
 # needs the provenance will look anyway.
-NOTE="A point with no error bar is ONE run, not a precise one, and all five crossings of the 90% rule fall in that region. Llumnix SLO and llm-d take the m1f config; the agent class is scored end-to-end at 30 s either way. Provenance per arm and per rate: README.md beside this figure."
+NOTE="A point with no error bar is ONE run, not a precise one. The vLLM router has two repeats at every rate (EXP-77); the other four have two only at 35-70 req/s, so four of the five 90% crossings sit on unrepeated points. Llumnix SLO and llm-d take the m1f config; the agent class is scored end-to-end at 30 s either way. Provenance per arm and per rate: README.md beside this figure."
 
 echo
 echo "=== 달성률·goodput·처리량 (요청 단위, 두 분모)"
