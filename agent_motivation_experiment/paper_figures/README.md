@@ -877,9 +877,12 @@ total variation에는 평범한 읽는 법이 하나 있고 그것이 이 값을
 4. **(b)의 값은 이 나흘 창의 평균 구성을 기준으로 한 것이다.** 다른 창을 잡으면 기준이 바뀌고
    값도 바뀐다. `traces/azure/mix_over_time.txt`의 168시간 통계와 같은 수가 아니다.
 
-**색.** (b)는 `paper_style.ARM_COLOR`의 어느 색도 쓰지 않는다. 그 색들은 컨트롤플레인에
-묶여 있는데 이 그림은 워크로드의 성질이라, PolyServe의 빨강을 쓰면 정책을 그린 것처럼
-읽힌다(그리고 (a) 옆에 놓기에 너무 진하다).
+**색.** (b)는 채도를 낮춘 테라코타 `#b56349`이고, **가까운 두 색을 일부러 피한 것**이다.
+`paper_style.ARM_COLOR`가 `#d62728`을 PolyServe에, `#ff7f0e`를 ablation arm 하나에 묶어
+두었고 `exp27_figures`는 주황을 **deepresearch 클래스**에 쓴다. 둘 중 아무거나 쓰면 이 패널이
+정책이나 클래스를 그린 것처럼 읽히는데 **이 그림은 워크로드의 성질이다.** 그리고 채도를 낮춘
+이유는 (a)의 파랑 옆에 놓기 위해서다 — 처음에 PolyServe의 빨강을 그대로 썼더니 아래 패널이
+위 패널에서 눈을 빼앗았다.
 
 **다시 만들려면**: `python3 paper_figures/fig_azure_rate_and_mix.py`
 (창은 `traces/dynamic/canonical/dyn60_azure4d.plan.json`에서 읽으므로 trace를 다시 만들면

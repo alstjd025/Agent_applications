@@ -121,11 +121,14 @@ CONV = "traces/azure/plots/_minute_conv2024.csv"
 CODE = "traces/azure/plots/_minute_code2024.csv"
 FIG_H = 2.45
 C_RATE = "#1f77b4"
-# Deliberately NOT one of the arm colours in paper_style.ARM_COLOR. Those are
-# bound to control planes, and this figure is a property of the workload; reusing
-# PolyServe's red here made the panel read as if a policy were being shown, quite
-# apart from being too saturated to sit next to panel (a).
-C_MIX = "#55606e"
+# A muted terracotta, and the two nearby colours it deliberately is not.
+# paper_style.ARM_COLOR binds #d62728 to PolyServe and #ff7f0e to an ablation arm,
+# and exp27_figures uses orange for the deep-research CLASS, so either of those
+# read here as if a policy or a class were being shown. This figure is a property
+# of the workload. Desaturated so it sits beside panel (a)'s blue rather than
+# competing with it: the first attempt used PolyServe's red straight and the
+# panel drew the eye away from the one above it.
+C_MIX = "#b56349"
 BIN = 10          # minutes per bin in panel (b)
 
 
@@ -200,7 +203,7 @@ def main():
         ax[0].set_yticks([0, 0.5, 1.0])
 
         ax[1].plot(hb, tv, color=C_MIX, lw=0.6)
-        ax[1].fill_between(hb, tv, color=C_MIX, alpha=0.18, lw=0)
+        ax[1].fill_between(hb, tv, color=C_MIX, alpha=0.20, lw=0)
         ax[1].axhline(tv.max(), color="#333333", lw=0.6, ls="--")
         ax[1].annotate(f"up to {tv.max():.0f}% of arrivals",
                        (0.5, 0.63), xycoords="axes fraction", ha="center",
