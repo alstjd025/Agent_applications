@@ -6,8 +6,8 @@
 Two panels over the SAME four-day window of the Azure LLM Inference 2024 traces.
 
   (a) arrival rate, divided by the window's own peak
-  (b) how far the composition of those arrivals is from the window's own average
-      composition, in 10-minute bins
+  (b) what share of those arrivals is off the window's average composition, in
+      10-minute bins
 
 This exists because the motivation makes a two-part claim -- the offered load
 varies AND what it is made of varies -- and `azure_trace_shape.pdf` only shows
@@ -43,29 +43,37 @@ cross-correlation is maximised with the share 1.5 hours AHEAD. The per-day
 maximum of the rate is a single spiky minute and is not a stable statistic. The
 claim that survives both is the one above -- they are only moderately related.
 
-WHAT PANEL (b) PLOTS, AND WHY IT IS NOT A COMPOSITION BREAKDOWN. The quantity is
-the total-variation distance between the composition in that bin and the mean
-composition of the whole window: 0.5 * sum over classes of |s_i - mean s_i|. It
-is 0 when the traffic is mixed exactly as it is on average and rises as it
-departs, and it is bounded by 1 whatever the number of classes.
+WHAT PANEL (b) PLOTS. The total-variation distance between the composition in
+that bin and the mean composition of the whole window, expressed as a percentage.
 
-Three reasons for this rather than the shares themselves.
+Total variation has one plain reading and it is the reason this quantity is worth
+drawing: it is **the share of the arrivals that would have to change class for
+the current mix to equal the average mix**. Equivalently, summed over classes, it
+is the excess share of the classes that are over-represented right now. So a
+reading of 40% means two in five arrivals are of a class the average composition
+does not have room for -- and that is the same two in five a partition sized for
+the average would put in the wrong place.
 
-  1. IT IS WHAT A FIXED PARTITION IS WRONG BY. A deployment that sizes a static
-     class partition for the average composition is off by exactly this amount at
-     each moment, so the y axis is the error such a design carries rather than a
-     property of the trace that has to be argued into relevance.
-  2. IT DOES NOT DEPEND ON THE NUMBER OF CLASSES. Azure publishes two request
+The average is used as the reference because it is the natural fixed choice: a
+deployment that must pick one composition and hold it picks the typical one. The
+panel is therefore the error such a choice carries, moment by moment, rather than
+a property of the trace that has to be argued into relevance. (It is not claimed
+to be the error-minimising fixed choice; that would be a different statistic and
+is not needed for the point.)
+
+WHY NOT A COMPOSITION BREAKDOWN. Two further reasons.
+
+  1. IT DOES NOT DEPEND ON THE NUMBER OF CLASSES. Azure publishes two request
      types; our workload has three. Drawing Azure's two-way split invites the
      reader to map it onto our three classes, which is exactly the mapping that
      does not exist -- there is no deep-research analogue in that release. A
-     distance is comparable across both.
-  3. THE CLAIM IS THAT THE MIX MOVES, not that it moves toward code. An earlier
+     share-to-reassign is comparable across both.
+  2. THE CLAIM IS THAT THE MIX MOVES, not that it moves toward code. An earlier
      version of this file argued the opposite -- that an index loses the
      direction and the direction is what matters for sizing a partition. That
      objection is about a different claim. Direction matters when asking WHICH
      partition to hold; this figure is establishing that NO fixed one is right,
-     and for that the distance is the whole content.
+     and for that the share-to-reassign is the whole content.
 
 The shares themselves are not lost: they are printed by this script and recorded
 in the README, so a sentence needing "code runs from 3.9% to 68.0% of arrivals"
@@ -163,9 +171,10 @@ def main():
     # two classes 0.5*(|d| + |-d|) reduces to |d|, and the expression below is
     # the general one so a three-class source needs no change here.
     comp = np.column_stack([1.0 - f, f])
-    tv = 0.5 * np.abs(comp - comp.mean(axis=0)).sum(axis=1)
-    print(f"  distance from the mean composition: median {np.median(tv):.3f}  "
-          f"p95 {np.percentile(tv,95):.3f}  max {tv.max():.3f}   (0 = at the average, 1 = disjoint)")
+    tv = 100.0 * 0.5 * np.abs(comp - comp.mean(axis=0)).sum(axis=1)
+    print(f"  arrivals off the average mix: median {np.median(tv):.1f}%  "
+          f"p95 {np.percentile(tv,95):.1f}%  max {tv.max():.1f}%"
+          f"   (the share that would have to change class to match the average)")
 
     with plt.rc_context(STYLE):
         fig, ax = plt.subplots(2, 1, figsize=(COL_W, FIG_H), sharex=True)
@@ -184,12 +193,12 @@ def main():
         ax[1].plot(hb, tv, color=C_MIX, lw=0.6)
         ax[1].fill_between(hb, tv, color=C_MIX, alpha=0.18, lw=0)
         ax[1].axhline(tv.max(), color="#333333", lw=0.6, ls="--")
-        ax[1].annotate(f"up to {tv.max():.2f} away from the mean mix",
+        ax[1].annotate(f"up to {tv.max():.0f}% of arrivals",
                        (0.5, 0.63), xycoords="axes fraction", ha="center",
                        fontsize=7, color="#333333")
-        ax[1].set_ylabel("Mix distance\nfrom average")
-        ax[1].set_ylim(0, max(0.5, tv.max() * 1.25))
-        ax[1].set_yticks([0.0, 0.2, 0.4])
+        ax[1].set_ylabel("Arrivals off the\naverage mix (%)")
+        ax[1].set_ylim(0, max(50.0, tv.max() * 1.25))
+        ax[1].set_yticks([0, 20, 40])
 
         for a in ax:
             a.grid(axis="both", **GRID)
