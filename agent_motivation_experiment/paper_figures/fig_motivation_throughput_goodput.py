@@ -113,12 +113,14 @@ ARMS = CAP.ARMS
 OURS = "FluidServe"
 
 FIG_H = 1.62
-TITLES = [r"$\mathbf{(a)\ Throughput}$",
-          r"$\mathbf{(b)\ Goodput\ Tokens}$",
-          r"$\mathbf{(c)\ Request\ SLO}$"]
-# Mathtext, because the panel title is the second line of the x label and one
-# Text artist carries one weight; dejavuserif so it matches the rest.
-MATH_SERIF = {"mathtext.fontset": "dejavuserif"}
+# Plain text at the ordinary weight. These were set bold through mathtext, which
+# was the only way to bold one line of a two-line x label; with the bold gone the
+# mathtext goes too, and with it the layout allowance underneath -- mathtext
+# reports a box taller than the glyphs it draws, which is why `rect`'s bottom
+# used to sit below the canvas at -0.03.
+TITLES = ["(a) Throughput",
+          "(b) Goodput Tokens",
+          "(c) Request SLO"]
 
 
 def collect():
@@ -162,7 +164,7 @@ def report(data, arms):
 
 
 def build(data, arms, out):
-    with plt.rc_context({**STYLE, **MATH_SERIF}):
+    with plt.rc_context(STYLE):
         fig, ax = plt.subplots(1, 3, figsize=(TEXT_W, FIG_H))
         handles, labels = [], []
         adm_key = None
@@ -235,7 +237,90 @@ def build(data, arms, out):
         # back the margin above the legend and below the x label. `rect`'s
         # bottom is BELOW the canvas because the bold titles are mathtext and
         # mathtext reports a box taller than the glyphs it draws.
-        fig.tight_layout(rect=(0, -0.030, 1, 0.872), w_pad=3.0, pad=0.25)
+        fig.tight_layout(rect=(0, 0, 1, 0.872), w_pad=3.0, pad=0.25)
+        save(fig, out)
+
+
+# Panel titles for the admitted/rejection variant.
+TITLES_AR = ["(a) Throughput",
+             "(b) Request SLO (admitted)",
+             "(c) Rejection rate"]
+
+
+def build_admit_reject(data, arms, out):
+    """Throughput, attainment among ADMITTED requests, and rejection rate.
+
+    The same first panel as the goodput version and a different pair after it.
+    Where that figure asks "how much of the output was worth anything", this one
+    asks "how well did each policy serve what it chose to take, and how much did
+    it choose to take" -- and answers the second question directly instead of
+    leaving it to be inferred from the gap between two attainment curves.
+
+    (b) IS THE DENOMINATOR THAT REWARDS REFUSING WORK, WHICH IS EXACTLY WHY (c)
+    IS BESIDE IT. Read alone, (b) would hand the best score to a policy that
+    accepted almost nothing. The two panels are only interpretable together, and
+    the caption has to say so.
+
+    THE TWO ARMS WITHOUT ADMISSION CONTROL ARE DRAWN AS THEY ARE. PolyServe and
+    the vLLM router never reject, so in (b) their admitted curve IS their offered
+    curve -- no second line, nothing hidden -- and in (c) they lie flat on zero.
+    ⚠ AND THEY ARE ABSENT FROM (c) ENTIRELY. Their two rejection curves are
+    0.0% at every rate, so they lie on the x axis and on each other and only the
+    one drawn last would show its colour. A single flat line that stands for two
+    policies is worse than no line, so neither is drawn. THE CAPTION MUST THEN
+    SAY that PolyServe and the vLLM router reject nothing at any rate -- absence
+    from that panel is a property of the policy, not missing data. Panel (c)
+    therefore has two curves where the legend has four.
+    """
+    with plt.rc_context(STYLE):
+        fig, ax = plt.subplots(1, 3, figsize=(TEXT_W, FIG_H))
+        handles, labels = [], []
+
+        for name, col, _, _ in arms:
+            x = sorted(data[name])
+            mk = dict(marker="o", ms=2.8, mec="white", mew=0.4)
+            h, = ax[0].plot(x, [data[name][k][0] for k in x], color=col,
+                            lw=1.2, **mk)
+            ax[1].plot(x, [data[name][k][3] for k in x], color=col, lw=1.2, **mk)
+            rej = [data[name][k][4] for k in x]
+            # An arm that never rejects is NOT drawn in (c). PolyServe and the
+            # vLLM router are at 0.0% at every rate, so their two lines lie on
+            # the axis and on each other, and only the one drawn last shows its
+            # colour -- a reader sees one flat line and cannot tell whether the
+            # other arm is at zero or missing. Leaving them out makes the panel
+            # say only what it can say, and THE CAPTION HAS TO SUPPLY THE REST:
+            # the two arms absent from (c) reject nothing at any rate, which is
+            # a property of having no admission control, not missing data.
+            if max(rej) > 0:
+                ax[2].plot(x, rej, color=col, lw=1.2, **mk)
+            handles.append(h)
+            labels.append(name)
+
+        for i in (0, 1, 2):
+            ax[i].set_xlabel(f"Offered rate (req/s)\n{TITLES_AR[i]}",
+                             labelpad=1.5, linespacing=1.6)
+            ax[i].set_xlim(7, 73)
+            ax[i].set_xticks([10, 20, 30, 40, 50, 60, 70])
+            ax[i].grid(axis="both", **GRID)
+            ax[i].set_axisbelow(True)
+        ax[0].set_ylim(0, 16000)
+        ax[0].set_yticks([0, 5000, 10000, 15000])
+        ax[0].yaxis.set_major_formatter(kfmt())
+        ax[0].set_ylabel("Tokens/s")
+        # (b) and (c) are both percentages of the arrivals and are read against
+        # each other, so they get one scale: at any rate the two readings for a
+        # policy are "of what it took, this fraction was on time" and "it took
+        # this much less than everything".
+        for i in (1, 2):
+            ax[i].set_ylim(0, 105)
+            ax[i].set_yticks([0, 25, 50, 75, 100])
+        ax[1].set_ylabel("SLO attainment (%)")
+        ax[2].set_ylabel("Rejection rate (%)")
+
+        fig.legend(handles, labels, loc="lower center", ncol=len(labels),
+                   bbox_to_anchor=(0.5, 0.866), frameon=False,
+                   columnspacing=1.4, handlelength=1.8, handletextpad=0.4)
+        fig.tight_layout(rect=(0, 0, 1, 0.872), w_pad=3.0, pad=0.25)
         save(fig, out)
 
 
@@ -256,6 +341,10 @@ def main():
     # which curve is ours.
     build(data, present,
           os.path.join(HERE, "motivation_throughput_vs_goodput_withfs.pdf"))
+    # Throughput / admitted attainment / rejection rate, baselines only. Our
+    # system is absent from all three panels for the same reason as above.
+    build_admit_reject(data, [a for a in present if a[0] != OURS],
+                       os.path.join(HERE, "motivation_admitted_reject.pdf"))
     return 0
 
 
