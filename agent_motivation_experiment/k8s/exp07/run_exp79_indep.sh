@@ -111,6 +111,53 @@ set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
     # separate "knowing which instance holds the prefix" from "being corrected
     # when that belief is wrong".
     fspfx)       policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_PREFIX=true ;;
+    # EXP-78. The admission axis, which every earlier ablation left alone.
+    #
+    # The paper's central sentence is that routing and admission control are one
+    # decision, and until now no arm has had admission turned off, so the size of
+    # its contribution is unmeasured while the claim rests on it. EXP-77 made the
+    # question concrete rather than rhetorical: the vLLM router completes almost
+    # the same number of requests we do in the same eight minutes (12.4k against
+    # 13.0k, the fleet's capacity) and 315 to 984 of them meet their budgets
+    # against our 11,774 to 12,495. The first thing a reader asks is whether that
+    # gap is simply rejection, and whether any policy that rejects would show it.
+    #
+    # fsnoshed  removes ONLY the rejection. The request that cannot meet its own
+    #           budget on the best instance available is placed there anyway
+    #           instead of being refused. Holding, class preference and
+    #           prefix-aware prefill accounting all stay on, so the difference
+    #           from fspfx is admission and nothing else.
+    # fsroute   removes rejection AND holding, which is FluidServe as pure
+    #           routing -- set_scheduler_profiling.py's own header calls that
+    #           combination exactly that. It is the arm that can be put beside
+    #           the vLLM router and PolyServe on equal terms, all three refusing
+    #           nothing, differing only in how they choose a destination.
+    #
+    # Both keep FS_PREFIX=true and the same three pinned settings as fspfx, so
+    # the ladder subtracts cleanly against the control re-run in this session.
+    #
+    # SCORING. With rejection off these arms produce unfinished-at-the-window's
+    # end requests instead of rejections, and attain() drops those from BOTH
+    # denominators because their outcome is unknown -- which flatters exactly the
+    # arms that stop refusing. The headline for this experiment is therefore the
+    # aggregation that counts every arrival, scoring a rejection AND an
+    # unfinished request as a miss. That is fixed here, before the run.
+    fsnoshed)    policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_PREFIX=true FS_SHED=false ;;
+    # EXP-79. The independent-combination arm: routing by the flux model and
+    # shedding by the flux model, with the two not sharing an answer. The shed
+    # test reads the mean over candidates instead of the placement about to be
+    # made, so the refusal carries no information about where the request would
+    # have gone. Everything else matches fspfx, including prefix accounting and
+    # the three pinned settings, so the ladder subtracts against EXP-73's control.
+    #
+    # FS_SHED_SIGNAL_SCALE is set by the chain from the calibration pass. It
+    # multiplies the budget the fleet test compares against so the arm's
+    # rejection rate can be brought within five points of the control's; without
+    # that the two arms would differ in how much they refuse as well as in how
+    # they decide, and the result could be answered with "you refused a better
+    # amount".
+    fsindep)     policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_PREFIX=true FS_SHED_SIGNAL="fleet:${FS_INDEP_SCALE:-1.0}" ;;
+    fsroute)     policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_PREFIX=true FS_SHED=false FS_PEND=false ;;
     fspfx-nocal) policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_PREFIX=true FS_PREFIX_CALIBRATION=false ;;
     # EXP-42. Both are the FluidServe policy from the SAME binary; they differ
     # only in whether the forced-placement test applies the allowance margin

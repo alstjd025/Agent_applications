@@ -76,7 +76,10 @@ ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
          # fspfx with pieces removed, so they take shades of its cyan family
          # rather than new hues -- the figure they appear on compares them
          # against fspfx, not against the baselines.
-         "fsnoshed": "#0e7c86", "fsroute": "#6bbfc6"}
+         "fsnoshed": "#0e7c86", "fsroute": "#6bbfc6",
+         # EXP-79, the independent-combination arm. Same control plane as
+         # fspfx with the shed test decoupled, so it stays in the cyan family.
+         "fsindep": "#1a5c7a"}
 ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "fluidserve": "FluidServe (prefix acct. off)", "fluidserveflat": "FluidServe (v20 off)",
          "slofifo": "Llumnix SLO + FIFO", "sloqoserve": "Llumnix SLO + QoServe",
@@ -89,14 +92,15 @@ ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "fspslos": "FluidServe, both off",
          "vllmcache": "vLLM router (cache-aware)",
          "fsnoshed": "FluidServe, rejection off",
-         "fsroute": "FluidServe, rejection and holding off"}
+         "fsroute": "FluidServe, rejection and holding off",
+         "fsindep": "FluidServe, rejection decided independently"}
 # Line style per arm for the latency CDFs, where colour already encodes class.
 ARM_LS = {"fluidserve": "-", "slo": "--", "polyserve": ":",
           "fluidservefifo": "-", "fluidserveqoserve": "--",
           "slofifo": "-.", "sloqoserve": ":",
           "llmdslo": "-", "fspfx": "--", "fspfxb": "-.",
           "fspnopend": "--", "fspnoaff": ":", "fspslos": "-.",
-          "vllmcache": "-", "fsnoshed": "--", "fsroute": ":"}
+          "vllmcache": "-", "fsnoshed": "--", "fsroute": ":", "fsindep": "-."}
 MIX_TITLE = {
     "m1": "m1 balanced\n31/37/31% of input tokens",
     "m2": "m2 chat-heavy\n64/19/16%",

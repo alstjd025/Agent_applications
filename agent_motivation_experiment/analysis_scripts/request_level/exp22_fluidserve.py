@@ -100,6 +100,8 @@ ARM_STYLE = {
                      label="FluidServe, rejection off"),
     "fsroute": dict(color="#6bbfc6", ls=":", marker="X",
                     label="FluidServe, routing only"),
+    "fsindep": dict(color="#1a5c7a", ls="-.", marker="*",
+                    label="FluidServe, independent shed"),
     "vllmcache": dict(color="#7b3294", ls="-", marker="h",
                       label="vLLM router (cache-aware)"),
 }
