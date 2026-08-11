@@ -184,15 +184,16 @@ def main():
                  "KV sits at 28-32% in the lower panel and its token throughput is the lowest of the five.",
                  fontsize=7.5, color="#8c564b", va="bottom")
         fig.text(0.012, 0.008,
-                 "PolyServe FALLS after 35 req/s and the run is not improving. Its bottleneck engine is the chat engine throughout; from 45 req/s\n"
-                 "its batch is pinned at the 1,024-sequence cap while its KV occupancy falls 68% to 40% and its queue grows to 4,492. Preemption\n"
-                 "fires when KV runs out, so an engine no longer limited by KV evicts less often even as the run gets worse.",
+                 "PolyServe FALLS after 35 req/s and the run is not improving. Its bottleneck engine is the chat engine throughout, and its KV p90\n"
+                 "and p99 are 100% at EVERY rate -- it never stops hitting the ceiling. What changes is how long it stays there: the median goes\n"
+                 "99% to 31%. Preemption counts evictions, so an engine sitting at the ceiling evicts constantly and one that only spikes to it\n"
+                 "does not. The MEAN KV in the lower panel falls 68% to 40% and hides this; see engine_state_p90.png.",
                  fontsize=7.5, color="#d62728", va="bottom")
         fig.suptitle("Preemptions and KV occupancy against arrival rate, five control planes\n"
                      "post-fix workload; a point with no error bar is one run "
                      "(PolyServe and Llumnix SLO are one run throughout)",
                      fontsize=9)
-        fig.tight_layout(rect=(0, 0.15, 1, 0.94))
+        fig.tight_layout(rect=(0, 0.17, 1, 0.94))
         p = os.path.join(a.out_dir, "preemption_vs_rate.png")
         fig.savefig(p, dpi=200)
         print("\nwrote", p)
