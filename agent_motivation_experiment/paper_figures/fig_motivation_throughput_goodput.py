@@ -163,7 +163,7 @@ def report(data, arms):
                   f"{adm:9.1f} {rej:9.1f}")
 
 
-def build(data, arms, out):
+def build(data, arms, out, legend=True):
     with plt.rc_context(STYLE):
         fig, ax = plt.subplots(1, 3, figsize=(TEXT_W, FIG_H))
         handles, labels = [], []
@@ -230,24 +230,27 @@ def build(data, arms, out):
                          frameon=False, handlelength=1.6, handletextpad=0.35,
                          borderaxespad=0.0, borderpad=0.0)
 
-        fig.legend(handles, labels, loc="lower center", ncol=len(labels),
-                   bbox_to_anchor=(0.5, 0.866), frameon=False,
-                   columnspacing=1.4, handlelength=1.8, handletextpad=0.4)
-        # The canvas height is fixed, so the panels are made taller by taking
-        # back the margin above the legend and below the x label. `rect`'s
-        # bottom is BELOW the canvas because the bold titles are mathtext and
-        # mathtext reports a box taller than the glyphs it draws.
+        # With a single arm there is nothing for a policy legend to
+        # distinguish, so the caller turns it off -- but `rect` does NOT change.
+        # The legend row stays reserved and empty so that every three-panel
+        # motivation figure has axes of exactly the same size, whichever arms it
+        # carries. Reclaiming the row would make the single-arm version's panels
+        # taller than the ones it is meant to be compared against.
+        if legend:
+            fig.legend(handles, labels, loc="lower center", ncol=len(labels),
+                       bbox_to_anchor=(0.5, 0.866), frameon=False,
+                       columnspacing=1.4, handlelength=1.8, handletextpad=0.4)
         fig.tight_layout(rect=(0, 0, 1, 0.872), w_pad=3.0, pad=0.25)
         save(fig, out)
 
 
-# Panel titles for the admitted/rejection variant.
-TITLES_AR = ["(a) Throughput",
-             "(b) Request SLO (admitted)",
-             "(c) Rejection rate"]
+# (index into the tuple `collect` returns, panel title) for the two denominators
+# the throughput/attainment/rejection layout can be drawn on.
+DENOM = {"admitted": (3, "(b) Request SLO (admitted)"),
+         "offered": (2, "(b) Request SLO (offered)")}
 
 
-def build_admit_reject(data, arms, out):
+def build_admit_reject(data, arms, out, denom="admitted", legend=True):
     """Throughput, attainment among ADMITTED requests, and rejection rate.
 
     The same first panel as the goodput version and a different pair after it.
@@ -281,7 +284,8 @@ def build_admit_reject(data, arms, out):
             mk = dict(marker="o", ms=2.8, mec="white", mew=0.4)
             h, = ax[0].plot(x, [data[name][k][0] for k in x], color=col,
                             lw=1.2, **mk)
-            ax[1].plot(x, [data[name][k][3] for k in x], color=col, lw=1.2, **mk)
+            ax[1].plot(x, [data[name][k][DENOM[denom][0]] for k in x],
+                       color=col, lw=1.2, **mk)
             rej = [data[name][k][4] for k in x]
             # An arm that never rejects is NOT drawn in (c). PolyServe and the
             # vLLM router are at 0.0% at every rate, so their two lines lie on
@@ -296,8 +300,9 @@ def build_admit_reject(data, arms, out):
             handles.append(h)
             labels.append(name)
 
+        titles = ["(a) Throughput", DENOM[denom][1], "(c) Rejection rate"]
         for i in (0, 1, 2):
-            ax[i].set_xlabel(f"Offered rate (req/s)\n{TITLES_AR[i]}",
+            ax[i].set_xlabel(f"Offered rate (req/s)\n{titles[i]}",
                              labelpad=1.5, linespacing=1.6)
             ax[i].set_xlim(7, 73)
             ax[i].set_xticks([10, 20, 30, 40, 50, 60, 70])
@@ -317,9 +322,12 @@ def build_admit_reject(data, arms, out):
         ax[1].set_ylabel("SLO attainment (%)")
         ax[2].set_ylabel("Rejection rate (%)")
 
-        fig.legend(handles, labels, loc="lower center", ncol=len(labels),
-                   bbox_to_anchor=(0.5, 0.866), frameon=False,
-                   columnspacing=1.4, handlelength=1.8, handletextpad=0.4)
+        # `rect` is the same with and without the legend, so this figure's
+        # axes are identical in size to the four-arm version above.
+        if legend:
+            fig.legend(handles, labels, loc="lower center", ncol=len(labels),
+                       bbox_to_anchor=(0.5, 0.866), frameon=False,
+                       columnspacing=1.4, handlelength=1.8, handletextpad=0.4)
         fig.tight_layout(rect=(0, 0, 1, 0.872), w_pad=3.0, pad=0.25)
         save(fig, out)
 
@@ -341,10 +349,26 @@ def main():
     # which curve is ours.
     build(data, present,
           os.path.join(HERE, "motivation_throughput_vs_goodput_withfs.pdf"))
+    # FluidServe alone, no policy legend: one arm names itself in the caption.
+    # The panels are the same three, so this reads as the same measurement with
+    # the baselines lifted off rather than as a different figure.
+    build(data, [a for a in present if a[0] == OURS],
+          os.path.join(HERE, "motivation_throughput_vs_goodput_fsonly.pdf"),
+          legend=False)
     # Throughput / admitted attainment / rejection rate, baselines only. Our
     # system is absent from all three panels for the same reason as above.
     build_admit_reject(data, [a for a in present if a[0] != OURS],
                        os.path.join(HERE, "motivation_admitted_reject.pdf"))
+    # The same three panels for our system alone, same denominator, same axes
+    # size. ⚠ (b) is the ADMITTED denominator, which rewards refusing work, and
+    # with a single arm there is no baseline beside it to check that. What
+    # checks it is (c) in the same figure: at 70 req/s the 88.4% in (b) is
+    # scored on the 43.9% of arrivals that were accepted. The caption has to
+    # carry that pair; the offered number for the same point is 38.2%.
+    build_admit_reject(data, [a for a in present if a[0] == OURS],
+                       os.path.join(HERE,
+                                    "motivation_admitted_reject_fsonly.pdf"),
+                       denom="admitted", legend=False)
     return 0
 
 
