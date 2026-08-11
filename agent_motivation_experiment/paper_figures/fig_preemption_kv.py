@@ -84,21 +84,35 @@ ARMS = [a for a in CAP.ARMS if a[0] != OURS]
 
 PRE = "vllm:num_preemptions_total"
 KV = "vllm:kv_cache_usage_perc"
+QUEUE = "vllm:num_requests_waiting"
+BATCH = "vllm:num_requests_running"
+PCT = 90
 TITLES = ["(a) Preemptions", "(b) KV occupancy"]
 XTICKS = [10, 30, 50, 70]
 
 
 def series(run):
-    """(preemptions summed over engines, mean KV % over engines and samples).
+    """One condition: preemptions, and three engine gauges.
+
+    Returns (preemptions, KV mean %, KV p90 %, queue p90, batch p90).
 
     Read from the engine's own Prometheus series rather than from anything the
     load generator recorded, so nothing here depends on the client.
+
+    EVERY PERCENTILE IS TAKEN PER ENGINE FIRST AND THEN AVERAGED OVER THE FOUR,
+    not pooled across engines. Pooling would let one saturated engine and three
+    idle ones read as a fleet at the middle, which is exactly PolyServe's state.
+    The busiest-engine variant is in
+    `analysis_scripts/request_level/engine_state_p90.py`, and for PolyServe the
+    two differ a great deal -- queue p90 2,794 averaged against 7,640 on the
+    engine that holds the class carrying 77% of the requests.
     """
-    total, kvs, seen = 0.0, [], 0
+    total, seen = 0.0, 0
+    per = collections.defaultdict(list)
     for f in sorted(glob.glob(os.path.join(run, "server_metrics",
                                            "engine_*.jsonl"))):
         first = last = None
-        vals = []
+        vals = collections.defaultdict(list)
         with open(f) as fh:
             for line in fh:
                 try:
@@ -113,18 +127,31 @@ def series(run):
                             first = v
                         last = v
                     elif k.startswith(KV):
-                        vals.append(v)
+                        vals["kv"].append(v)
+                    elif k.startswith(QUEUE):
+                        vals["queue"].append(v)
+                    elif k.startswith(BATCH):
+                        vals["batch"].append(v)
         # A counter, so the condition's total is last minus first. Clamped at
         # zero because an engine restarted mid-condition would otherwise
         # contribute a negative count.
         if first is not None and last is not None:
             total += max(0.0, last - first)
             seen += 1
-        if vals:
-            kvs.append(float(np.mean(vals)))
+        for name, xs in vals.items():
+            if xs:
+                sc = 100.0 if name == "kv" else 1.0
+                per[name].append((sc * float(np.percentile(xs, PCT)),
+                                  sc * float(np.mean(xs))))
     if not seen:
         return None
-    return total, (100.0 * float(np.mean(kvs)) if kvs else np.nan)
+
+    def fleet(name, idx):
+        xs = per.get(name)
+        return float(np.mean([v[idx] for v in xs])) if xs else np.nan
+
+    return (total, fleet("kv", 1), fleet("kv", 0),
+            fleet("queue", 0), fleet("batch", 0))
 
 
 def collect():
@@ -185,6 +212,94 @@ def build(data, arms, out, width, height):
         ps.save(fig, out)
 
 
+# The 2x2 grid: (index into the tuple `series` returns, title, y label).
+GRID_PANELS = [
+    # "Counts", not "requests": `vllm:num_preemptions_total` counts preemption
+    # OCCURRENCES, and vLLM V1 returns an evicted request to the waiting queue,
+    # so one request preempted twice counts twice. The number is therefore at
+    # least the number of distinct requests evicted and usually more. (c) and (d)
+    # are gauges of requests waiting and running, where "requests" IS the unit.
+    # ⚠ THE AXIS NO LONGER SAYS "per condition", so the caption must: this is a
+    # total accumulated over one 8-minute condition, not a rate, and it is not
+    # comparable with a run of a different length.
+    (0, "(a) Preemptions", "Counts"),
+    (2, "(b) KV occupancy", "p90 (%)"),
+    (3, "(c) Waiting queue", "p90 (requests)"),
+    (4, "(d) Running batch", "p90 (requests)"),
+]
+GRID_H = 3.05
+
+
+def build_grid(data, arms, out):
+    """Four engine-layer quantities in a 2x2 grid, one column wide.
+
+    (b) IS THE 90TH PERCENTILE HERE AND THE MEAN IN THE TWO-PANEL FIGURE, and the
+    difference is not cosmetic. A preemption fires when the pool runs out, so
+    what predicts one is the top of the KV distribution rather than its centre.
+    On the mean, Llumnix SLO reads 70-76% at 35-70 req/s and looks like it has
+    room; on p90 it reads 98-100% and does not. The mean answers "how much memory
+    was in use over the run", which is a different question and is what the
+    two-panel figure asks.
+
+    THE QUEUE PANEL IS SYMLOG. Its values run from 0, which llm-d holds at every
+    rate, to 4,657, and a plain log axis would drop the zeros while a linear one
+    would flatten everything below about 200 -- which is all of llm-d and all of
+    Llumnix SLO -- onto the axis.
+    """
+    with plt.rc_context(ps.STYLE):
+        fig, axes = plt.subplots(2, 2, figsize=(ps.COL_W, GRID_H), sharex=True)
+        ax = axes.ravel()
+        handles, labels = [], []
+
+        for name, col, mk, _ in arms:
+            x = sorted(data[name])
+            for i, (key, _, _) in enumerate(GRID_PANELS):
+                y = np.array([np.mean([v[key] for v in data[name][r]])
+                              for r in x])
+                lo = y - np.array([min(v[key] for v in data[name][r])
+                                   for r in x])
+                hi = np.array([max(v[key] for v in data[name][r])
+                               for r in x]) - y
+                h = ax[i].errorbar(x, y, yerr=[lo, hi], color=col, marker=mk,
+                                   ms=2.6, lw=1.1, capsize=1.3,
+                                   mec="white", mew=0.4)
+                if i == 0:
+                    handles.append(h)
+                    labels.append(name)
+
+        for i, (_, title, ylab) in enumerate(GRID_PANELS):
+            ax[i].set_title(title, fontsize=8, pad=2)
+            ax[i].set_ylabel(ylab, labelpad=1.5)
+            ax[i].set_xlim(7, 73)
+            ax[i].set_xticks(XTICKS)
+            ax[i].grid(axis="both", **ps.GRID)
+            ax[i].set_axisbelow(True)
+            # Tick NUMBERS on all four, the axis NAME only on the bottom row:
+            # every panel has its own scale so a reader needs the values in each
+            # cell, while the x quantity is the same in all four.
+            ax[i].tick_params(labelbottom=True)
+        for i in (2, 3):
+            ax[i].set_xlabel("Offered rate (req/s)", labelpad=1.5)
+
+        ax[0].set_ylim(0, None)
+        ax[0].yaxis.set_major_formatter(ps.kfmt())
+        ax[1].set_ylim(0, 105)
+        ax[1].set_yticks([0, 25, 50, 75, 100])
+        ax[2].set_yscale("symlog", linthresh=1.0)
+        # Top just above the largest value (4,657) so the highest labelled
+        # decade is 10^3 and the curves are not pushed into the lower half of
+        # the panel by empty headroom.
+        ax[2].set_ylim(0, 8000)
+        ax[3].set_ylim(0, None)
+
+        fig.legend(handles, labels, loc="lower center", ncol=len(labels),
+                   bbox_to_anchor=(0.5, 0.935), frameon=False, fontsize=6.5,
+                   columnspacing=0.6, handlelength=1.2, handletextpad=0.3,
+                   borderaxespad=0.0)
+        fig.tight_layout(rect=(0, 0, 1, 0.94), w_pad=1.0, h_pad=0.9, pad=0.3)
+        ps.save(fig, out)
+
+
 def main():
     data = collect()
     arms = [a for a in ARMS if data[a[0]]]
@@ -192,16 +307,19 @@ def main():
     if missing:
         print(f"  NOT DRAWN: {', '.join(missing)} has no conditions")
 
-    print(f"{'arm':13s} {'rate':>5s} {'preempt':>9s} {'KV %':>7s} {'n':>2s}")
+    print(f"{'arm':13s} {'rate':>5s} {'preempt':>9s} {'KVmean':>7s} "
+          f"{'KVp90':>6s} {'Qp90':>7s} {'Bp90':>6s} {'n':>2s}")
     for name, _, _, _ in arms:
         for r in sorted(data[name]):
             v = data[name][r]
-            print(f"{name:13s} {r:5.0f} {np.mean([x[0] for x in v]):9,.0f} "
-                  f"{np.mean([x[1] for x in v]):7.1f} {len(v):2d}")
+            m = [np.mean([x[i] for x in v]) for i in range(5)]
+            print(f"{name:13s} {r:5.0f} {m[0]:9,.0f} {m[1]:7.1f} {m[2]:6.1f} "
+                  f"{m[3]:7,.0f} {m[4]:6,.0f} {len(v):2d}")
 
     build(data, arms, os.path.join(HERE, "preemption_kv.pdf"), ps.COL_W, 1.75)
     build(data, arms, os.path.join(HERE, "preemption_kv_wide.pdf"),
           ps.TEXT_W, 1.62)
+    build_grid(data, arms, os.path.join(HERE, "engine_state_2x2.pdf"))
     return 0
 
 
