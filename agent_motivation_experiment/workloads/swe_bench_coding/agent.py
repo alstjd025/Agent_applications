@@ -294,6 +294,11 @@ class LlumnixCompletionsLLM:
         # base_url already includes the /v1 suffix (added at the workload
         # call site), matching ChatOpenAI's convention.
         self.completions_url = base_url.rstrip("/") + "/completions"
+        # Set per call by invoke_with_tracking from the length-oracle table, or
+        # left at 0 when the table has no entry for this request -- in which case
+        # nothing is sent and the scheduler falls back to the class distribution,
+        # which is the control's behaviour.
+        self.length_hint = 0
         self.model = model
         self.seed = seed
         self.temperature = temperature
@@ -371,6 +376,17 @@ class LlumnixCompletionsLLM:
         prio = self._priority()
         if prio is not None:
             payload["priority"] = prio
+        # EXP-64. The declared output length rides in `user` as "len:<n>".
+        #
+        # `user` and not `max_tokens`: max_tokens would truncate generation and
+        # change the workload, which would make the hint an upper bound rather
+        # than information and put a confound between the two arms. vLLM accepts
+        # `user` and ignores it, so a request carrying the hint is byte-identical
+        # downstream to one that does not, and BOTH arms send it -- only the
+        # scheduler flag differs. That way a mistake in building the table cannot
+        # make the arms differ in what they sent.
+        if self.length_hint:
+            payload["user"] = f"len:{int(self.length_hint)}"
         return payload
 
     def _priority(self) -> Optional[int]:
@@ -597,6 +613,10 @@ class ChainState(TypedDict):
     tool_results: List[Optional[str]]  # pre-computed tool result per call
     log_level: str
     metrics_tracker: Optional[object]
+    # EXP-64. (task_id|call_index) -> output tokens that request produced in an
+    # earlier run of the same condition. None when the run carries no table, in
+    # which case nothing is sent and both arms behave as they always have.
+    length_oracle: Optional[dict]
     agent_logger: Optional[object]
     console_write: Optional[Callable]
     llm: Optional[Any]              # per-job ChatOpenAI instance
@@ -796,6 +816,41 @@ def sleep_with_abort_checks(state: ChainState, delay_s: float, call_index: int) 
         time.sleep(sleep_s)
 
 
+# EXP-64 coverage, counted rather than assumed: a table that misses most
+# requests turns the treatment arm back into its control with nothing in any log
+# to say so. run_experiment.py prints these at the end of a condition and the
+# experiment requires the hit share to be above 95%.
+_ORACLE_STATS = {"hit": 0, "miss": 0}
+
+# Loaded once per worker process from LENGTH_ORACLE_FILE. Absent means the run
+# sends no hint at all, which is what every arm before EXP-64 did.
+_LENGTH_ORACLE = None
+_ORACLE_PATH = os.environ.get("LENGTH_ORACLE_FILE", "")
+if _ORACLE_PATH:
+    try:
+        with open(_ORACLE_PATH) as _fh:
+            _LENGTH_ORACLE = json.load(_fh).get("table") or None
+        print(f"[oracle] loaded {len(_LENGTH_ORACLE or {}):,} entries from {_ORACLE_PATH}")
+    except Exception as _e:
+        # Loud, and NOT a silent fallback: a run that was supposed to carry the
+        # table and does not is the treatment arm degraded into its control.
+        raise SystemExit(f"[oracle] LENGTH_ORACLE_FILE={_ORACLE_PATH} could not be read: {_e}")
+
+    # Each worker is its own process, so each reports its own share and the
+    # runner log carries one line per worker. The authority is still the
+    # after-the-fact count against metrics.csv, which is reproducible from the
+    # artifacts; this exists so a table that is not being hit is visible while
+    # the condition is still running rather than an hour later.
+    import atexit
+
+    @atexit.register
+    def _report_oracle_coverage():
+        hit, miss = _ORACLE_STATS["hit"], _ORACLE_STATS["miss"]
+        if hit + miss:
+            print(f"[oracle] worker coverage {hit:,}/{hit+miss:,} "
+                  f"({100.0*hit/(hit+miss):.1f}%)")
+
+
 def invoke_with_tracking(
     messages: list,
     call_index: int,
@@ -821,6 +876,28 @@ def invoke_with_tracking(
     if llm is None:
         llm = make_llm()
         state["llm"] = llm
+
+    # EXP-64. Look this request's declared output length up in the table built
+    # from an earlier run of the same condition, keyed by the pair that
+    # identifies a request: (task_id, call_index).
+    #
+    # A miss leaves the hint at 0, which sends nothing and leaves the scheduler
+    # on the class distribution. That is the control's behaviour, so a sparse
+    # table degrades the treatment arm toward its control rather than toward a
+    # request that looks free -- and it does so silently, which is why the
+    # coverage is counted and printed rather than assumed.
+    llm.length_hint = 0
+    table = state.get("length_oracle")
+    if table:
+        tracker = state.get("metrics_tracker")
+        tid = getattr(tracker, "current_task_id", None) if tracker else None
+        if tid is not None:
+            n = table.get(f"{tid}|{call_index}")
+            if n:
+                llm.length_hint = int(n)
+                _ORACLE_STATS["hit"] += 1
+            else:
+                _ORACLE_STATS["miss"] += 1
 
     start_time = time.time()
     first_token_time = None
@@ -1528,6 +1605,7 @@ def create_chain_state(
         tool_results=tool_results,
         log_level=log_level,
         metrics_tracker=metrics_tracker,
+        length_oracle=_LENGTH_ORACLE,
         agent_logger=agent_logger,
         console_write=console_write or print,
         llm=llm,
