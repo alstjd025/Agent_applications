@@ -161,7 +161,13 @@ set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
     # field, and only this one reads it. A request whose hint is missing from the
     # table falls back to the class distribution, which is what fspfx does for
     # every request, so a sparse table degrades this arm toward its control --
-    # measured coverage is 99.3% at 25 req/s and 94.0% at 35 (EXP-64 section 7.5).
+    # measured coverage in the run that used it was 95.5% at 25 req/s, 99.2% at
+    # 35, 95.0% at 45 and 96.4% at 55, against the 95% bar the experiment set.
+    # An earlier comment here said 99.3% and 94.0%; those came from tables built
+    # from two preceding runs, before the tables were unioned over every run at
+    # the rate and a sixteen-minute collection run was added to cover the
+    # requests an eight-minute run leaves unfinished at its boundary.
+    # EXP-64 sections 7.8 and 7.9.
     fsoracle)    policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_PREFIX=true FS_ORACLE_LEN=true ;;
     fsindep)     policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_PREFIX=true FS_SHED_SIGNAL="fleet:${FS_INDEP_SCALE:-1.0}" ;;
     fsroute)     policy=fluidserve; export FS_CLASS_HARM=false FS_FORCE_MARGIN=false FS_OWN_BUDGET_GATE=false FS_PREFIX=true FS_SHED=false FS_PEND=false ;;
