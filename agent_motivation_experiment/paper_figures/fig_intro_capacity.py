@@ -11,7 +11,7 @@ counted as misses, so a policy cannot buy the number by refusing work. On the
 same four engines, the same request mix and the same rule:
 
       FluidServe v0.2   28.1 req/s
-      vLLM router       21.6
+      vLLM router       21.4
       Llumnix SLO       20.4
       llm-d             18.7
       PolyServe         15.8
@@ -29,11 +29,11 @@ the two agree. Eight rates per arm: 10, 15, 20, 25, 35, 45, 55, 70 req/s.
 
 **Robustness, and the part of it that does NOT hold.**
 
-      counted as saturated  PolyServe  llm-d  Llumnix SLO  vLLM router  FluidServe
-             95%               15.4     12.2      20.0         20.7        25.4
-             90%               15.8     18.7      20.4         21.6        28.1
-             80%               16.7     22.7      21.3         23.2        33.7
-             70%               17.5     25.8      22.1         24.9        39.2
+      counted as saturated  vLLM router  PolyServe  Llumnix SLO  llm-d  FluidServe
+             95%              20.6        15.4         20.0      12.2      25.4
+             90%              21.4        15.8         20.4      18.7      28.1
+             80%              22.9        16.7         21.3      22.7      33.7
+             70%              24.5        17.5         22.1      25.8      39.2
 
 FluidServe is first at every threshold, so "this policy sustains the highest
 rate" does not depend on where the line is drawn. **The ordering among the four
@@ -52,13 +52,13 @@ it directly and is the better choice where the ranking of baselines matters.
    vllm-project/production-stack, whose Helm default is `roundrobin`. Two
    different pieces of software carry the name, so the caption has to name this
    one. All five arms are on the post-2026-08-08 workload.
-2. **Repeats are uneven, and the crossings sit in the thin part.** FluidServe and
-   llm-d have two repeats at 35-70 req/s and one at 10-25 (EXP-68/69/70);
-   PolyServe and Llumnix SLO (EXP-72) and the vLLM router (EXP-77) have **one
-   repeat at every rate**, and EXP-77's second repeat had not finished when this
-   was drawn. Every one of the five crossings falls in a single-repeat region.
+2. **Repeats are uneven, and four of the five crossings sit in the thin part.**
+   The vLLM router has **two repeats at every rate** (EXP-77, complete
+   2026-08-11); FluidServe and llm-d have two at 35-70 req/s and one at 10-25
+   (EXP-68/69/70); PolyServe and Llumnix SLO have **one at every rate**
+   (EXP-72). Only the vLLM router's crossing falls in a two-repeat region.
 3. **The vLLM router's crossing is interpolated over a narrower gap than ours.**
-   21.6 sits between measured 20 (99.2%) and 25 (69.7%), a 5 req/s bracket; 28.1
+   21.4 sits between measured 20 (99.1%) and 25 (66.6%), a 5 req/s bracket; 28.1
    sits between 25 (95.7%) and 35 (77.6%), a 10 req/s bracket. Quote the bracket
    with the number.
 4. **Two arms have no admission control and lose requests another way.**
@@ -138,15 +138,14 @@ ARMS = [
     # default is `roundrobin`. Two different pieces of software carry the name
     # "vLLM router", so the short label on the axis cannot carry the
     # distinction and THE CAPTION HAS TO NAME WHICH ONE.
-    # PINNED TO REPEAT 1. The canonical selection script globs `exp77r*`, both
-    # repeats, which is right once EXP-77 has finished. It had not: repeat 2's
-    # 10 and 15 req/s conditions landed while these figures were being drawn and
-    # the rest were still to come, so that glob gave this arm two repeats at two
-    # rates and one at the other six -- an arm whose points are averaged over
-    # different numbers of runs, changing every time another condition lands.
-    # Widen this back to `exp77r*` when EXP-77 is complete, and redraw.
+    # Both repeats, as the canonical selection script has it. This was pinned to
+    # repeat 1 for a few hours on 2026-08-10 because repeat 2 was still landing
+    # and `exp77r*` was giving the arm two repeats at two rates and one at the
+    # other six -- points averaged over different numbers of runs, changing
+    # every time another condition finished. EXP-77 completed at 00:50 KST on
+    # 2026-08-11 with all eight rates in both repeats.
     ("vLLM", ps.ARM_COLOR["vllmrouter"], "h",
-     ["results/*exp77r1_vllmcache_m1_rpm_*"]),
+     ["results/*exp77r*_vllmcache_m1_rpm_*"]),
     ("PolyServe", ps.ARM_COLOR["polyserve"], "o",
      ["results/*exp72r1_polyserve_m1_rpm_*"]),
     ("Llumnix SLO", ps.ARM_COLOR["slo"], "^",
