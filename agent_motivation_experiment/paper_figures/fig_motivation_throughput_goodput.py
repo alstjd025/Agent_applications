@@ -91,6 +91,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 
+from matplotlib.ticker import FuncFormatter  # noqa: E402
 from paper_style import TEXT_W, STYLE, GRID, kfmt, save  # noqa: E402
 
 
@@ -332,6 +333,95 @@ def build_admit_reject(data, arms, out, denom="admitted", legend=True):
         save(fig, out)
 
 
+def build_one_arm_norm(data, arms, out):
+    """Two panels -- normalised throughput and attainment -- for one arm or two.
+
+    THE THROUGHPUT AXIS IS DIVIDED BY A CONSTANT, so it runs 0 to 1 and the two
+    panels can be read against each other as fractions of their own ceilings.
+    That is the whole reason to normalise: the claim is about the SHAPES --
+    output rises and then holds while the share of requests meeting their rule
+    falls away -- and with one axis in tokens per second and the other in
+    percent the eye has to do a conversion to see it.
+
+    ⚠ WITH MORE THAN ONE ARM THE DIVISOR IS SHARED: the largest throughput
+    reached by ANY arm at ANY rate, not each arm's own peak. Per-arm
+    normalisation would put every curve's maximum at 1.0 and make a panel whose
+    only purpose is comparison say nothing about which arm produced more. The
+    cost is that no curve except the highest one touches 1.0, which is correct.
+
+    ⚠ NORMALISING THROWS AWAY THE UNIT, so the divisor has to travel with the
+    figure. It is printed when the script runs and belongs in the caption; a
+    reader cannot recover tokens per second from this panel otherwise.
+    """
+    peak = max(float(max(v[0] for v in data[name].values()))
+               for name, _, _, _ in arms)
+    who = max(arms, key=lambda a: max(v[0] for v in data[a[0]].values()))[0]
+    print(f"  normalised by {peak:,.0f} tokens/s, the highest any arm reached "
+          f"({who})")
+
+    with plt.rc_context(STYLE):
+        # 1.42 in for one arm, 1.58 for two: the extra 0.16 is the legend row,
+        # and the axes boxes are the same size either way so the two versions
+        # can be compared. 1.42 is itself down from 1.72, about 20% off the
+        # panel height, which the y label of (a) broken over two lines allowed
+        # -- rotated, "Normalized throughput" on one line is about 1.15 in and
+        # was taller than the panel, so it was the floor on the whole figure.
+        # The width stays at the column: the canvas cannot narrow without
+        # leaving white space beside a figure meant to be set at \columnwidth.
+        #
+        # Panel titles are dropped for the same reason (the x label is one
+        # line), so the caption refers to these panels as left and right. 1.40
+        # is the floor: at that height the topmost ink lands 4 px from the
+        # canvas edge at 400 dpi.
+        legend = len(arms) > 1
+        fig, ax = plt.subplots(1, 2,
+                               figsize=(3.335, 1.58 if legend else 1.42))
+        mk = dict(marker="o", ms=2.8, mec="white", mew=0.4)
+        handles, labels = [], []
+        for name, col, _, _ in arms:
+            x = sorted(data[name])
+            h, = ax[0].plot(x, [data[name][k][0] / peak for k in x],
+                            color=col, lw=1.2, **mk)
+            ax[1].plot(x, [data[name][k][3] for k in x], color=col, lw=1.2,
+                       **mk)
+            handles.append(h)
+            labels.append(name)
+
+        for i in (0, 1):
+            ax[i].set_xlabel("Offered rate (req/s)", labelpad=1.5)
+            ax[i].set_xlim(7, 73)
+            ax[i].set_xticks([10, 30, 50, 70])
+            ax[i].grid(axis="both", **GRID)
+            ax[i].set_axisbelow(True)
+        # Both panels run 0 to their own ceiling on the SAME gridlines, so a
+        # fall in one is directly comparable with a fall in the other. Fifths
+        # rather than quarters: the ticks are labelled to one decimal, and
+        # 0.25 printed that way would read "0.2", which is a different number.
+        # (b) moves to twentieths for the same reason -- to keep the two panels
+        # on matching gridlines.
+        ax[0].set_ylim(0, 1.05)
+        ax[0].set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
+        ax[0].yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:.1f}"))
+        ax[0].set_ylabel("Normalized\nthroughput", linespacing=1.0)
+        ax[1].set_ylim(0, 105)
+        ax[1].set_yticks([0, 20, 40, 60, 80, 100])
+        ax[1].set_ylabel("SLO attainment (%)")
+
+        # With one arm there is no legend AND no row reserved for one: unlike
+        # the single-arm versions of the three-panel figures, the canvas shrinks
+        # instead, because this shape has no multi-arm counterpart of the same
+        # canvas to line up with.
+        top = 1.0
+        if legend:
+            fig.legend(handles, labels, loc="lower center", ncol=len(labels),
+                       bbox_to_anchor=(0.5, 0.90), frameon=False, fontsize=7,
+                       columnspacing=1.0, handlelength=1.4,
+                       handletextpad=0.35, borderaxespad=0.0)
+            top = 0.905
+        fig.tight_layout(rect=(0, 0, 1, top), w_pad=1.0, pad=0.3)
+        save(fig, out)
+
+
 def main():
     data = collect()
     present = [a for a in ARMS if data[a[0]]]
@@ -369,6 +459,21 @@ def main():
                        os.path.join(HERE,
                                     "motivation_admitted_reject_fsonly.pdf"),
                        denom="admitted", legend=False)
+    # The vLLM router alone, two panels, throughput normalised. It never
+    # rejects, so its admitted curve and its offered curve are the same line
+    # and the choice of denominator in (b) does not arise.
+    vllm = [a for a in present if a[0] == "vLLM"]
+    if vllm:
+        build_one_arm_norm(data, vllm,
+                           os.path.join(HERE, "motivation_vllm_2panel.pdf"))
+        # The same two panels with our system beside it. Both throughput curves
+        # are divided by the SAME number, so the panel still says which arm
+        # produced more.
+        both = vllm + [a for a in present if a[0] == OURS]
+        if len(both) > 1:
+            build_one_arm_norm(data, both,
+                               os.path.join(HERE,
+                                            "motivation_vllm_fs_2panel.pdf"))
     return 0
 
 
