@@ -333,7 +333,7 @@ def build_admit_reject(data, arms, out, denom="admitted", legend=True):
         save(fig, out)
 
 
-def build_one_arm_norm(data, arms, out):
+def build_one_arm_norm(data, arms, out, stacked=True, phases=False):
     """Two panels -- normalised throughput and attainment -- for one arm or two.
 
     THE THROUGHPUT AXIS IS DIVIDED BY A CONSTANT, so it runs 0 to 1 and the two
@@ -373,9 +373,25 @@ def build_one_arm_norm(data, arms, out):
         # line), so the caption refers to these panels as left and right. 1.40
         # is the floor: at that height the topmost ink lands 4 px from the
         # canvas edge at 400 dpi.
+        # STACKED, not side by side. The two panels share the x axis, so the
+        # rate is drawn and labelled once, and the reader compares the two
+        # quantities by looking straight down a load rather than across a gap.
+        # It costs height. Rotated, the two y labels are about 0.95 in
+        # ("Throughput (norm.)") and 1.05 in ("SLO attainment (%)"), and a label
+        # longer than its own panel spills past it -- at 2.55 in the two ran
+        # into each other at the boundary between the panels. Each panel has to
+        # be at least as tall as its label, which sets the canvas.
         legend = len(arms) > 1
-        fig, ax = plt.subplots(1, 2,
-                               figsize=(3.335, 1.58 if legend else 1.42))
+        if stacked:
+            fig, ax = plt.subplots(2, 1, sharex=True,
+                                   figsize=(3.335, 2.90 if legend else 2.75))
+        else:
+            # Side by side. The two panels no longer share an x axis, so the
+            # rate is drawn and named twice, and the canvas is short instead of
+            # tall: 1.55 in, which leaves each panel just over the 0.95 in the
+            # longer y label needs when rotated.
+            fig, ax = plt.subplots(1, 2,
+                                   figsize=(3.335, 1.70 if legend else 1.55))
         mk = dict(marker="o", ms=2.8, mec="white", mew=0.4)
         handles, labels = [], []
         for name, col, _, _ in arms:
@@ -387,8 +403,62 @@ def build_one_arm_norm(data, arms, out):
             handles.append(h)
             labels.append(name)
 
-        for i in (0, 1):
+        # THE TWO PHASE BOUNDARIES, computed from this arm's own curves rather
+        # than chosen: the load at which throughput is highest, and the load at
+        # which attainment falls through 90% of arrivals (linear interpolation
+        # between the two measured rates that bracket it, the same definition
+        # `fig_intro_capacity.py` uses for capacity). They are only drawn for a
+        # single arm -- with two arms on the axes there would be two of each and
+        # the shading would say nothing.
+        # `phases` is either False, True (the only arm defines them) or the
+        # name of the arm that does. With two arms each has its own pair of
+        # boundaries, and shading both would leave four bands that belong to
+        # nothing; one arm's bands, NAMED IN THE CAPTION, say more.
+        pa = arms[0][0] if phases is True else phases
+        if pa:
+            xs = sorted(data[pa])
+            th = [data[pa][k][0] for k in xs]
+            at = [data[pa][k][DENOM["admitted"][0]] for k in xs]
+            peak = xs[int(np.argmax(th))]
+            knee = xs[-1]
+            for j in range(len(xs)):
+                if at[j] < 90.0:
+                    knee = xs[j] if j == 0 else (
+                        xs[j - 1] + (at[j - 1] - 90.0) * (xs[j] - xs[j - 1])
+                        / (at[j - 1] - at[j]))
+                    break
+            b = sorted([knee, peak])
+            print(f"  phases from {pa}: SLO knee {knee:.1f}, throughput peak "
+                  f"{peak:.0f} req/s")
+            # Three bands, lightest first, so the eye reads left to right as
+            # "nothing wrong / one thing wrong / both wrong". The shading is the
+            # phase and the line is its edge; drawing only the line leaves the
+            # reader to decide which side of it each phase is on.
+            edges = [7.0] + b + [73.0]
+            for i in (0, 1):
+                for k, (lo, hi) in enumerate(zip(edges[:-1], edges[1:])):
+                    ax[i].axvspan(lo, hi, color="#000000",
+                                  alpha=(0.0, 0.05, 0.10)[k], lw=0, zorder=0)
+                for v in b:
+                    ax[i].axvline(v, color="#777777", lw=0.8, ls="--",
+                                  zorder=1)
+            # The numerals go in BOTH panels. The bands are the same x in each,
+            # but a reader looking at the right panel should not have to carry
+            # "the middle band is II" across the gap from the left one.
+            for k, name in enumerate(("I", "II", "III")):
+                mid = 0.5 * (edges[k] + edges[k + 1])
+                for i in (0, 1):
+                    ax[i].annotate(name, (mid, 1.0),
+                                   xycoords=("data", "axes fraction"),
+                                   xytext=(0, -7), textcoords="offset points",
+                                   color="#555555", fontsize=6.5, ha="center",
+                                   va="top")
+
+        # One x label under the bottom panel when the axis is shared; one under
+        # each panel when it is not.
+        for i in ([1] if stacked else [0, 1]):
             ax[i].set_xlabel("Offered rate (req/s)", labelpad=1.5)
+        for i in (0, 1):
             ax[i].set_xlim(7, 73)
             ax[i].set_xticks([10, 30, 50, 70])
             ax[i].grid(axis="both", **GRID)
@@ -402,7 +472,7 @@ def build_one_arm_norm(data, arms, out):
         ax[0].set_ylim(0, 1.05)
         ax[0].set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
         ax[0].yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:.1f}"))
-        ax[0].set_ylabel("Normalized\nthroughput", linespacing=1.0)
+        ax[0].set_ylabel("Throughput (norm.)")
         ax[1].set_ylim(0, 105)
         ax[1].set_yticks([0, 20, 40, 60, 80, 100])
         ax[1].set_ylabel("SLO attainment (%)")
@@ -413,12 +483,14 @@ def build_one_arm_norm(data, arms, out):
         # canvas to line up with.
         top = 1.0
         if legend:
+            # The legend needs a fixed physical height, so the fraction is
+            # computed from the canvas rather than written as a constant.
+            top = 1.0 - 0.20 / fig.get_size_inches()[1]
             fig.legend(handles, labels, loc="lower center", ncol=len(labels),
-                       bbox_to_anchor=(0.5, 0.90), frameon=False, fontsize=7,
-                       columnspacing=1.0, handlelength=1.4,
+                       bbox_to_anchor=(0.5, top - 0.006), frameon=False,
+                       fontsize=7, columnspacing=1.0, handlelength=1.4,
                        handletextpad=0.35, borderaxespad=0.0)
-            top = 0.905
-        fig.tight_layout(rect=(0, 0, 1, top), w_pad=1.0, pad=0.3)
+        fig.tight_layout(rect=(0, 0, 1, top), h_pad=0.7, w_pad=1.0, pad=0.3)
         save(fig, out)
 
 
@@ -466,6 +538,10 @@ def main():
     if vllm:
         build_one_arm_norm(data, vllm,
                            os.path.join(HERE, "motivation_vllm_2panel.pdf"))
+        # The same two panels side by side rather than stacked.
+        build_one_arm_norm(data, vllm,
+                           os.path.join(HERE, "motivation_vllm_2panel_lr.pdf"),
+                           stacked=False, phases=True)
         # The same two panels with our system beside it. Both throughput curves
         # are divided by the SAME number, so the panel still says which arm
         # produced more.
@@ -474,6 +550,23 @@ def main():
             build_one_arm_norm(data, both,
                                os.path.join(HERE,
                                             "motivation_vllm_fs_2panel.pdf"))
+        # The two arms with no admission control between them: the vLLM router
+        # refuses nothing, llm-d refuses most of the load. Both throughput
+        # curves are divided by the SAME number, so the left panel still says
+        # which of the two produced more.
+        vl = vllm + [a for a in present if a[0] == "llm-d"]
+        if len(vl) > 1:
+            build_one_arm_norm(data, vl,
+                               os.path.join(HERE,
+                                            "motivation_vllm_llmd_2panel.pdf"))
+            # Side by side with llm-d beside it, banded by the VLLM ROUTER's
+            # two boundaries. llm-d has its own and they are not these; the
+            # caption has to say whose the shading is.
+            build_one_arm_norm(data, vl,
+                               os.path.join(
+                                   HERE,
+                                   "motivation_vllm_llmd_2panel_lr.pdf"),
+                               stacked=False, phases="vLLM")
     return 0
 
 

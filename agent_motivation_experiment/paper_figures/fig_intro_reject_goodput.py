@@ -85,6 +85,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.ticker as mticker  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -107,6 +108,8 @@ EXP22 = _load_module(os.path.join(
 # run after the other is fixed.
 CAP = _load_module(os.path.join(HERE, "fig_intro_capacity.py"), "capfig")
 ARMS = CAP.ARMS
+# The arm the ratio variant divides by.
+REF = "FluidServe"
 
 # 1.75, down from 2.05. At 1.60 the rotated y labels are as tall as the
 # canvas and the topmost ink lands 2 px from the edge at 300 dpi, so this is
@@ -141,6 +144,10 @@ def collect():
                     EXP22.per_request(served, "violate_served"),
                     100.0 * r["rejected"].mean(),
                     ok["output_tokens"].sum() / span,
+                    # Every output token the engines emitted, whether or not the
+                    # request it belonged to met its rule. The left panel can be
+                    # drawn on either this or the line above it.
+                    served["output_tokens"].sum() / span,
                 ))
         out[name] = {k: tuple(float(np.mean(c)) for c in zip(*v))
                      for k, v in acc.items()}
@@ -155,12 +162,43 @@ def main():
     arms = [a for a in ARMS if data[a[0]]]
 
     print(f"{'arm':13s} {'rate':>5s} {'admitted':>9s} {'rejected':>9s} "
-          f"{'goodput':>9s}")
+          f"{'goodput':>9s} {'thru':>9s}")
     for name, _, _, _ in arms:
         for rate in sorted(data[name]):
-            adm, rej, gp = data[name][rate]
-            print(f"{name:13s} {rate:5.0f} {adm:9.1f} {rej:9.1f} {gp:9.0f}")
+            adm, rej, gp, th = data[name][rate]
+            print(f"{name:13s} {rate:5.0f} {adm:9.1f} {rej:9.1f} {gp:9.0f} "
+                  f"{th:9.0f}")
 
+    build(data, arms, 2, "Goodput (tokens/s)",
+          os.path.join(HERE, "intro_reject_goodput.pdf"))
+    # The same figure with the left panel showing every token the engines
+    # emitted rather than only the ones that counted. ⚠ IT ASKS A DIFFERENT
+    # QUESTION AND ANSWERS IT DIFFERENTLY: on goodput the arms span 27x at
+    # 70 req/s, on throughput 1.7x. Throughput beside attainment says "the
+    # engines were equally busy and the outcomes were not"; goodput beside
+    # attainment says "and here is what the busyness was worth". Both are
+    # honest; the caption has to say which is on the axis.
+    build(data, arms, 3, "Throughput (tokens/s)",
+          os.path.join(HERE, "intro_reject_throughput.pdf"))
+    # The same panel with the y axis cut at 4k, and with every arm divided by
+    # FluidServe at the same rate. Both make the throughput differences easier
+    # to see and both need a sentence in the caption to stay honest -- one
+    # because the axis is truncated, the other because the unit is gone.
+    build(data, arms, 3, "Throughput (tokens/s)",
+          os.path.join(HERE, "intro_reject_throughput_zoom.pdf"), mode="zoom")
+    if REF in data:
+        build(data, arms, 3, f"Throughput / {REF}",
+              os.path.join(HERE, "intro_reject_throughput_ratio.pdf"),
+              mode="ratio")
+        # Both panels against ours. The rejection rate on the right axis stays
+        # in per cent: a ratio of rejection rates is undefined for the two arms
+        # that never reject, and 0/56.1 says nothing a reader can use.
+        build(data, arms, 3, "Throughput (norm.)",
+              os.path.join(HERE, "intro_reject_ratio_both.pdf"), mode="ratio2")
+    return 0
+
+
+def build(data, arms, left, left_label, out, mode="abs"):
     with plt.rc_context(ps.STYLE):
         fig, (ax_g, ax_a) = plt.subplots(1, 2, figsize=(ps.COL_W, FIG_H))
         ax_r = ax_a.twinx()
@@ -170,9 +208,27 @@ def main():
             x = sorted(data[name])
             adm = [data[name][k][0] for k in x]
             rej = [data[name][k][1] for k in x]
-            gp = [data[name][k][2] for k in x]
+            gp = [data[name][k][left] for k in x]
+            if mode in ("ratio", "ratio2"):
+                # Each arm's throughput DIVIDED BY FLUIDSERVE'S AT THE SAME
+                # OFFERED RATE, so FluidServe is a flat 1.0 and every other
+                # curve reads directly as "this fraction of what ours produced
+                # at the same load". Per rate, not against a single number: the
+                # question is how the arms compare at each point on the sweep,
+                # and one divisor would fold the shape of our own curve into
+                # everyone else's.
+                gp = [data[name][k][left] / data[REF][k][left] for k in x]
             h, = ax_g.plot(x, gp, color=col, marker=mk, ms=2.8, mec="white",
                            mew=0.4)
+            if mode == "ratio2":
+                # Attainment divided by FluidServe's at the same rate, like the
+                # left panel. ⚠ THIS AXIS COMPRESSES THE INTERESTING END: three
+                # arms land between 0.01 and 0.09 at 70 req/s and are then
+                # indistinguishable from each other and from zero. That IS the
+                # statement -- next to ours they are all a rounding error -- but
+                # if the ordering among them matters, the unnormalised version
+                # is the one to use.
+                adm = [adm[j] / data[REF][k][0] for j, k in enumerate(x)]
             ax_a.plot(x, adm, color=col, marker=mk, ms=2.8, mec="white",
                       mew=0.4)
             # Short dashes rather than dots, and 1.2 pt rather than 0.9. A
@@ -183,19 +239,54 @@ def main():
             ax_r.plot(x, rej, color=col, ls=(0, (2.2, 1.2)), lw=1.2)
             handles.append(h)
 
-        ax_g.set_ylabel("Goodput (tokens/s)")
+        ax_g.set_ylabel(left_label)
+        if mode in ("ratio", "ratio2"):
+            # The reference is a line on the figure, not just the arm that
+            # happens to sit at 1.0: without it a reader has to find FluidServe
+            # in the legend to know what the axis is against.
+            ax_g.axhline(1.0, color="#999999", lw=0.7, ls=":", zorder=0)
         # Five ticks, matching the right panel's 0/25/50/75/100 so the two
         # panels are read at the same rhythm. The step is 4k rather than the
         # 3.5k that would put the top tick at the data maximum, because every
         # label then stays three characters: "10.5k" is two characters wider
         # than "12k" and at 3.335 in for two panels plus a twin axis that width
         # comes out of the y label, which it pushed off the canvas once already.
-        ax_g.set_ylim(0, 16000)
-        ax_g.set_yticks([0, 4000, 8000, 12000, 16000])
-        ax_g.yaxis.set_major_formatter(ps.kfmt())
-        ax_a.set_ylabel("SLO attainment (%)")
-        ax_a.set_ylim(0, 105)
-        ax_a.set_yticks([0, 25, 50, 75, 100])
+        if mode in ("ratio", "ratio2"):
+            ax_g.set_ylim(0.4, 1.12)
+            ax_g.set_yticks([0.4, 0.6, 0.8, 1.0])
+        elif mode == "zoom":
+            # ⚠ THE AXIS DOES NOT START AT ZERO. Every arm produces at least
+            # 4,900 tokens/s at the rates on this sweep, so a zero-based axis
+            # spends its lower quarter on nothing; but a truncated axis makes
+            # ratios look larger than they are, and THE CAPTION MUST SAY THAT
+            # THE AXIS IS CUT. The 1.7x spread at 70 req/s looks like about 3x
+            # here.
+            ax_g.set_ylim(4000, 16400)
+            ax_g.set_yticks([4000, 8000, 12000, 16000])
+            ax_g.yaxis.set_major_formatter(ps.kfmt())
+        else:
+            ax_g.set_ylim(0, 16000)
+            ax_g.set_yticks([0, 4000, 8000, 12000, 16000])
+            ax_g.yaxis.set_major_formatter(ps.kfmt())
+        if mode == "ratio2":
+            # "(norm.)", not "/ FluidServe": the divisor is the same on both
+            # panels and naming it twice on two rotated labels costs width that
+            # a 3.335 in figure with a twin axis does not have. ⚠ THE AXIS THEN
+            # DOES NOT SAY WHAT IT WAS NORMALISED BY, so the caption must:
+            # every curve is divided by FluidServe's value at the same offered
+            # rate, which is why FluidServe is the flat line at 1.0.
+            ax_a.set_ylabel("SLO attain. (norm.)")
+            # Fifths, not quarters: the labels are written to one decimal and
+            # 0.25 printed that way reads "0.2", which is a different number.
+            ax_a.set_ylim(0, 1.12)
+            ax_a.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
+            ax_a.yaxis.set_major_formatter(
+                mticker.FuncFormatter(lambda v, _: f"{v:.1f}"))
+            ax_a.axhline(1.0, color="#999999", lw=0.7, ls=":", zorder=0)
+        else:
+            ax_a.set_ylabel("SLO attainment (%)")
+            ax_a.set_ylim(0, 105)
+            ax_a.set_yticks([0, 25, 50, 75, 100])
         # The style is named on the axis rather than in a key inside the panel:
         # the panel has eight lines and every place a key would go is on top
         # of one of them. Naming the dotted family is enough -- the other is
@@ -224,8 +315,7 @@ def main():
                    frameon=False, handlelength=1.0, columnspacing=0.4,
                    handletextpad=0.22, borderaxespad=0.0)
         fig.tight_layout(rect=(0, 0, 1, 0.895), w_pad=0.6, pad=0.3)
-        ps.save(fig, os.path.join(HERE, "intro_reject_goodput.pdf"))
-    return 0
+        ps.save(fig, out)
 
 
 if __name__ == "__main__":

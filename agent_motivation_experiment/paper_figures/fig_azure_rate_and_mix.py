@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Paper figure: in the source trace the arrival rate and the class composition both move, and they move apart.
 
-  azure_rate_and_mix.pdf    3.335 x 2.45 in, `figure`, width=\\columnwidth
+  azure_rate_and_mix.pdf     3.335 x 2.45 in, `figure`, width=\\columnwidth
+  azure_rate_and_mix_lr.pdf  3.335 x 1.42 in, the same two panels side by side
 
 Two panels over the SAME four-day window of the Azure LLM Inference 2024 traces.
 
@@ -120,6 +121,7 @@ PLAN = "traces/dynamic/canonical/dyn60_azure4d.plan.json"
 CONV = "traces/azure/plots/_minute_conv2024.csv"
 CODE = "traces/azure/plots/_minute_code2024.csv"
 FIG_H = 2.45
+FIG_H_SHORT = 1.95
 C_RATE = "#1f77b4"
 # A muted terracotta, and the two nearby colours it deliberately is not.
 # paper_style.ARM_COLOR binds #d62728 to PolyServe and #ff7f0e to an ablation arm,
@@ -188,27 +190,149 @@ def main():
           f"p95 {np.percentile(tv,95):.1f}%  max {tv.max():.1f}%"
           f"   (the share that would have to change class to match the average)")
 
+    draw(hours, total, peak, hb, tv, "stack",
+         os.path.join(HERE, "azure_rate_and_mix.pdf"))
+    draw(hours, total, peak, hb, tv, "stack",
+         os.path.join(HERE, "azure_rate_and_mix_short.pdf"), height=FIG_H_SHORT)
+    draw(hours, total, peak, hb, tv, "side",
+         os.path.join(HERE, "azure_rate_and_mix_lr.pdf"))
+    return 0
+
+
+def span(ax, x, y, lo, hi, label):
+    """A double-headed arrow between two horizontal rules, labelled beside it.
+
+    WHERE IT IS PUT IS COMPUTED, NOT CHOSEN. The arrow spans the full height
+    between the two rules, so it crosses the series wherever it is placed; what
+    can be avoided is placing it where the series is HIGH, which is where the
+    label would sit on top of a peak. The x is therefore the point of the
+    series' own minimum within the middle half of the window -- middle half so
+    the label, which is drawn to the RIGHT of the arrow, does not run off the
+    axis, and the series' own minimum so the crossing happens where the curve
+    is thin and flat.
+
+    WHICH SIDE THE LABEL GOES ON follows from that x: to the right of the arrow
+    in the first half of the window and to the left in the second. Both minima
+    here land past the middle, and "up to 40% of arrivals" placed to the right
+    of hour 62 runs past the axis -- matplotlib does not clip a text artist to
+    its axes, so it would simply be drawn over the frame and, with
+    `bbox_inches` off, off the canvas.
+
+    THE LABEL SITS NEAR THE TOP OF THE ARROW, NOT AT ITS MIDDLE, AND HAS NO
+    BACKGROUND. An opaque background would keep the glyphs readable over the
+    filled area, but it ERASES what it covers: at the arrow's midpoint it was
+    cutting the tops off two peaks of the mixture series, which is worse than
+    an unreadable label because the reader cannot tell anything is missing. At
+    82% of the way up, both series are below the label everywhere it reaches,
+    so no background is needed.
+
+    ⚠ 82% IS A PROPERTY OF THESE TWO SERIES AT THESE PANEL HEIGHTS, not a rule.
+    A label's height in DATA units grows as the panel shrinks, so a shorter
+    figure can push the label down onto a peak that it cleared before. That is
+    why `check_overlap` measures the drawn text against the series and prints
+    what it finds, rather than the placement being trusted because it looked
+    right once.
+    """
+    n = len(x)
+    seg = slice(n // 4, 3 * n // 4)
+    xi = x[seg][int(np.argmin(np.asarray(y)[seg]))]
+    ax.annotate("", xy=(xi, hi), xytext=(xi, lo),
+                arrowprops=dict(arrowstyle="<->", lw=0.7, color="#333333",
+                                shrinkA=0, shrinkB=0, mutation_scale=6))
+    right = xi < 0.5 * x[-1]
+    return ax.text(xi + (0.025 if right else -0.025) * x[-1],
+                   lo + 0.82 * (hi - lo), label,
+                   ha="left" if right else "right", va="center", fontsize=7,
+                   color="#333333")
+
+
+def check_overlap(fig, ax, txt, x, y, name):
+    """Does the drawn label cross the series it is drawn over?
+
+    Called after `tight_layout`, because that is what fixes the axes box and
+    therefore what the text's extent in DATA coordinates depends on. The text
+    box is converted to data coordinates and compared against the series over
+    the same x range; anything that reaches into the box is reported with the
+    margin, so a placement that stops working at a new figure height says so
+    instead of being found by eye later, or not at all.
+    """
+    box = txt.get_window_extent(fig.canvas.get_renderer())
+    (x0, y0), (x1, y1) = ax.transData.inverted().transform(
+        [[box.x0, box.y0], [box.x1, box.y1]])
+    x, y = np.asarray(x), np.asarray(y)
+    m = (x >= x0) & (x <= x1)
+    if not m.any():
+        return
+    top = float(y[m].max())
+    if top >= y0:
+        print(f"  ⚠ {name}: the label overlaps the series by "
+              f"{top - y0:.3g} (label bottom {y0:.3g}, series top {top:.3g} "
+              f"over {x0:.1f}..{x1:.1f})")
+    else:
+        print(f"  {name}: label clears the series by {y0 - top:.3g} "
+              f"(label bottom {y0:.3g}, series top {top:.3g})")
+
+
+def draw(hours, total, peak, hb, tv, layout, out, height=None):
+    """The same two panels stacked (one above the other) or side by side.
+
+    BOTH FIT IN ONE COLUMN. Stacked, the two panels share one x axis and one
+    set of hour labels, which is why that version can afford 24-hour ticks and
+    2.45 in of height. Side by side, each panel is about 1.35 in wide and needs
+    its own x axis, so the ticks go to 48 hours -- five hour labels under 1.35
+    in of axes run together -- and the annotations are shortened for the same
+    reason. THE SIDE-BY-SIDE VERSION THEREFORE SHOWS THE SAME DATA AT LOWER
+    TIME RESOLUTION IN THE LABELLING, not in the data: every minute and every
+    10-minute bin is still drawn.
+
+    ⚠ THE STACKED VERSION IS THE ONE THAT SUPPORTS READING THE TWO PANELS
+    AGAINST EACH OTHER IN TIME. Vertically aligned panels put the same hour at
+    the same horizontal position, so a reader can drop a line from a peak in
+    the rate to the mixture below it. Side by side, that comparison requires
+    measuring from two different origins, and the figure's claim is precisely
+    that the two do NOT track each other (correlation +0.57). If the caption
+    makes that claim, the stacked version is the one to include.
+    """
+    side = layout == "side"
+    tight = not side and (height or FIG_H) < FIG_H
     with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(2, 1, figsize=(COL_W, FIG_H), sharex=True)
+        fig, ax = plt.subplots(1, 2, figsize=(COL_W, height or 1.42)) \
+            if side else plt.subplots(2, 1, figsize=(COL_W, height or FIG_H),
+                                      sharex=True)
 
         ax[0].plot(hours, total / peak, color=C_RATE, lw=0.5)
         ax[0].fill_between(hours, total / peak, color=C_RATE, alpha=0.15, lw=0)
         ax[0].axhline(1.0, color="#555555", lw=0.6, ls="--")
         ax[0].axhline(total.min() / peak, color="#555555", lw=0.6, ls="--")
-        ax[0].annotate(f"peak / trough = {peak/total.min():.1f}$\\times$",
-                       (0.5, 0.58), xycoords="axes fraction", ha="center",
-                       fontsize=7, color="#333333")
-        ax[0].set_ylabel("Arrival rate\n(normalized)")
+        t0 = span(ax[0], hours, total / peak, total.min() / peak, 1.0,
+                  (f"{peak/total.min():.1f}$\\times$" if side else
+                   f"peak / trough = {peak/total.min():.1f}$\\times$"))
+        # ONE LINE WHERE IT FITS AND TWO WHERE IT DOES NOT, same words either
+        # way. A rotated axis label is not clipped to its panel, and this one
+        # is 1.11 in of ink against a panel that is 0.95 in at the tall stacked
+        # height and 0.71 in at the short one; the tall version already spends
+        # its whole top margin on it (0.013 in left) and every height from 2.35
+        # down was measured with the label's ink at row 0, that is, cut off. At
+        # 8-9 pt the only way to keep one line at the short height would be to
+        # take the type below the paper's floor, so the short version breaks
+        # the line instead.
+        ax[0].set_ylabel("Arrival rate (norm.)" if not tight
+                         else "Arrival rate\n(norm.)")
         ax[0].set_ylim(0, 1.12)
         ax[0].set_yticks([0, 0.5, 1.0])
 
         ax[1].plot(hb, tv, color=C_MIX, lw=0.6)
         ax[1].fill_between(hb, tv, color=C_MIX, alpha=0.20, lw=0)
         ax[1].axhline(tv.max(), color="#333333", lw=0.6, ls="--")
-        ax[1].annotate(f"up to {tv.max():.0f}% of arrivals",
-                       (0.5, 0.63), xycoords="axes fraction", ha="center",
-                       fontsize=7, color="#333333")
-        ax[1].set_ylabel("Request mixture\ndeviation (%)")
+        # The lower end is 0, not tv.min(): the claim the arrow carries is the
+        # RANGE the deviation covers, and the trace does come within 0.4 points
+        # of zero, so drawing from the observed minimum would put the arrow's
+        # tail on a value no reader can see and read as if it started above the
+        # axis. ⚠ THE ARROW THEREFORE MEANS "up to", not "between x and y".
+        t1 = span(ax[1], hb, tv, 0.0, tv.max(),
+                  (f"up to {tv.max():.0f}%" if side else
+                   f"up to {tv.max():.0f}% of arrivals"))
+        ax[1].set_ylabel("Workload mixture\ndeviation (%)")
         ax[1].set_ylim(0, max(50.0, tv.max() * 1.25))
         ax[1].set_yticks([0, 20, 40])
 
@@ -216,13 +340,20 @@ def main():
             a.grid(axis="both", **GRID)
             a.set_axisbelow(True)
             a.set_xlim(0, hours[-1])
-            a.set_xticks(np.arange(0, hours[-1] + 1, 24))
-        ax[1].set_xlabel("Time (hours)")
+            a.set_xticks(np.arange(0, hours[-1] + 1, 48 if side else 24))
+        if side:
+            for a in ax:
+                a.set_xlabel("Time (hours)", labelpad=1.5)
+        else:
+            ax[1].set_xlabel("Time (hours)")
 
-        fig.tight_layout(pad=0.35)
-        fig.subplots_adjust(hspace=0.18)
-        save(fig, os.path.join(HERE, "azure_rate_and_mix.pdf"))
-    return 0
+        fig.tight_layout(pad=0.35, **({"w_pad": 1.2} if side else {}))
+        if not side:
+            fig.subplots_adjust(hspace=0.18)
+        print(f"{os.path.basename(out)}")
+        check_overlap(fig, ax[0], t0, hours, total / peak, "arrival rate")
+        check_overlap(fig, ax[1], t1, hb, tv, "mixture deviation")
+        save(fig, out)
 
 
 if __name__ == "__main__":

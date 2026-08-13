@@ -8,6 +8,13 @@ on the left, how full the KV pool was on the right.
   (a) Preemptions per 8-minute condition, summed over the four engines
   (b) KV cache occupancy, mean over the four engines and over all samples
 
+Two more, from `build_grid`, whose (b) IS THE 90TH PERCENTILE OF KV OCCUPANCY
+RATHER THAN ITS MEAN -- see that function for why the choice changes what the
+panel says about Llumnix SLO:
+
+  engine_state_2x2.pdf    3.335 x 3.05 in, four panels
+  engine_state_1x2.pdf    3.335 x 1.80 in, the top row of that grid alone
+
 FLUIDSERVE IS ABSENT, as in the other motivation figures: the point is what the
 deployed and published control planes do to the engines, and it does not need
 our system to be made.
@@ -81,6 +88,9 @@ def _load_module(path, name="m"):
 CAP = _load_module(os.path.join(HERE, "fig_intro_capacity.py"), "capfig")
 OURS = "FluidServe"
 ARMS = [a for a in CAP.ARMS if a[0] != OURS]
+# The five-arm order is the paper-wide one (vLLM, PolyServe, Llumnix SLO,
+# llm-d, FluidServe) and comes from `fig_intro_capacity.py` unchanged.
+ARMS_FS = list(CAP.ARMS)
 
 PRE = "vllm:num_preemptions_total"
 KV = "vllm:kv_cache_usage_perc"
@@ -154,9 +164,9 @@ def series(run):
             fleet("queue", 0), fleet("batch", 0))
 
 
-def collect():
+def collect(arms=ARMS_FS):
     out = {}
-    for name, _, _, pats in ARMS:
+    for name, _, _, pats in arms:
         acc = collections.defaultdict(list)
         seen = set()
         for pat in pats:
@@ -228,10 +238,17 @@ GRID_PANELS = [
     (4, "(d) Running batch", "p90 (requests)"),
 ]
 GRID_H = 3.05
+# The top row alone, on one row of panels. Shorter than half of GRID_H because
+# only one x axis is drawn instead of two.
+ROW_H = 1.80
 
 
-def build_grid(data, arms, out):
-    """Four engine-layer quantities in a 2x2 grid, one column wide.
+def build_grid(data, arms, out, panels=GRID_PANELS, nrow=2, height=GRID_H):
+    """Engine-layer quantities in a grid, one column wide.
+
+    With the default arguments this is the 2x2; `panels=GRID_PANELS[:2],
+    nrow=1` draws the top row alone as `engine_state_1x2.pdf`, which carries
+    the SAME p90 KV panel rather than the mean one in `preemption_kv.pdf`.
 
     (b) IS THE 90TH PERCENTILE HERE AND THE MEAN IN THE TWO-PANEL FIGURE, and the
     difference is not cosmetic. A preemption fires when the pool runs out, so
@@ -246,14 +263,16 @@ def build_grid(data, arms, out):
     would flatten everything below about 200 -- which is all of llm-d and all of
     Llumnix SLO -- onto the axis.
     """
+    ncol = 2
     with plt.rc_context(ps.STYLE):
-        fig, axes = plt.subplots(2, 2, figsize=(ps.COL_W, GRID_H), sharex=True)
-        ax = axes.ravel()
+        fig, axes = plt.subplots(nrow, ncol, figsize=(ps.COL_W, height),
+                                 sharex=True)
+        ax = np.asarray(axes).ravel()
         handles, labels = [], []
 
         for name, col, mk, _ in arms:
             x = sorted(data[name])
-            for i, (key, _, _) in enumerate(GRID_PANELS):
+            for i, (key, _, _) in enumerate(panels):
                 y = np.array([np.mean([v[key] for v in data[name][r]])
                               for r in x])
                 lo = y - np.array([min(v[key] for v in data[name][r])
@@ -267,49 +286,60 @@ def build_grid(data, arms, out):
                     handles.append(h)
                     labels.append(name)
 
-        for i, (_, title, ylab) in enumerate(GRID_PANELS):
+        for i, (key, title, ylab) in enumerate(panels):
             ax[i].set_title(title, fontsize=8, pad=2)
             ax[i].set_ylabel(ylab, labelpad=1.5)
             ax[i].set_xlim(7, 73)
             ax[i].set_xticks(XTICKS)
             ax[i].grid(axis="both", **ps.GRID)
             ax[i].set_axisbelow(True)
-            # Tick NUMBERS on all four, the axis NAME only on the bottom row:
-            # every panel has its own scale so a reader needs the values in each
-            # cell, while the x quantity is the same in all four.
+            # Tick NUMBERS on every panel, the axis NAME only on the bottom
+            # row: every panel has its own scale so a reader needs the values
+            # in each cell, while the x quantity is the same in all of them.
             ax[i].tick_params(labelbottom=True)
-        for i in (2, 3):
-            ax[i].set_xlabel("Offered rate (req/s)", labelpad=1.5)
+            if i >= len(panels) - ncol:
+                ax[i].set_xlabel("Offered rate (req/s)", labelpad=1.5)
 
-        ax[0].set_ylim(0, None)
-        ax[0].yaxis.set_major_formatter(ps.kfmt())
-        ax[1].set_ylim(0, 105)
-        ax[1].set_yticks([0, 25, 50, 75, 100])
-        ax[2].set_yscale("symlog", linthresh=1.0)
-        # Top just above the largest value (4,657) so the highest labelled
-        # decade is 10^3 and the curves are not pushed into the lower half of
-        # the panel by empty headroom.
-        ax[2].set_ylim(0, 8000)
-        ax[3].set_ylim(0, None)
+            # Keyed on WHICH QUANTITY the panel holds, not on its position, so
+            # a subset of the panels keeps its own limits.
+            if key == 0:                                    # preemptions
+                ax[i].set_ylim(0, None)
+                ax[i].yaxis.set_major_formatter(ps.kfmt())
+            elif key == 2:                                  # KV p90, per cent
+                ax[i].set_ylim(0, 105)
+                ax[i].set_yticks([0, 25, 50, 75, 100])
+            elif key == 3:                                  # waiting queue p90
+                ax[i].set_yscale("symlog", linthresh=1.0)
+                # Top just above the largest value (4,657) so the highest
+                # labelled decade is 10^3 and the curves are not pushed into
+                # the lower half of the panel by empty headroom.
+                ax[i].set_ylim(0, 8000)
+            else:                                           # running batch p90
+                ax[i].set_ylim(0, None)
 
+        # Reserved in INCHES rather than as a fraction of the canvas, so the
+        # legend keeps the same physical gap on a one-row figure as on the 2x2
+        # instead of being scaled down with the shorter canvas and clipped.
         fig.legend(handles, labels, loc="lower center", ncol=len(labels),
-                   bbox_to_anchor=(0.5, 0.935), frameon=False, fontsize=6.5,
-                   columnspacing=0.6, handlelength=1.2, handletextpad=0.3,
-                   borderaxespad=0.0)
-        fig.tight_layout(rect=(0, 0, 1, 0.94), w_pad=1.0, h_pad=0.9, pad=0.3)
+                   bbox_to_anchor=(0.5, 1 - 0.19825 / height), frameon=False,
+                   fontsize=6.5, columnspacing=0.6, handlelength=1.2,
+                   handletextpad=0.3, borderaxespad=0.0)
+        fig.tight_layout(rect=(0, 0, 1, 1 - 0.183 / height),
+                         w_pad=1.0, h_pad=0.9, pad=0.3)
         ps.save(fig, out)
 
 
 def main():
-    data = collect()
+    data = collect(ARMS_FS)
     arms = [a for a in ARMS if data[a[0]]]
-    missing = [n for n, _, _, _ in ARMS if not data[n]]
+    arms_fs = [a for a in ARMS_FS if data[a[0]]]
+    missing = [n for n, _, _, _ in ARMS_FS if not data[n]]
     if missing:
         print(f"  NOT DRAWN: {', '.join(missing)} has no conditions")
 
     print(f"{'arm':13s} {'rate':>5s} {'preempt':>9s} {'KVmean':>7s} "
           f"{'KVp90':>6s} {'Qp90':>7s} {'Bp90':>6s} {'n':>2s}")
-    for name, _, _, _ in arms:
+    for name, _, _, _ in arms_fs:
         for r in sorted(data[name]):
             v = data[name][r]
             m = [np.mean([x[i] for x in v]) for i in range(5)]
@@ -320,6 +350,10 @@ def main():
     build(data, arms, os.path.join(HERE, "preemption_kv_wide.pdf"),
           ps.TEXT_W, 1.62)
     build_grid(data, arms, os.path.join(HERE, "engine_state_2x2.pdf"))
+    build_grid(data, arms, os.path.join(HERE, "engine_state_1x2.pdf"),
+               panels=GRID_PANELS[:2], nrow=1, height=ROW_H)
+    build_grid(data, arms_fs, os.path.join(HERE, "engine_state_1x2_fs.pdf"),
+               panels=GRID_PANELS[:2], nrow=1, height=ROW_H)
     return 0
 
 

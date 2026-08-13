@@ -147,12 +147,15 @@ ARMS = [
     ("vLLM", ps.ARM_COLOR["vllmrouter"], "h",
      ["results/*exp77r*_vllmcache_m1_rpm_*"]),
     ("PolyServe", ps.ARM_COLOR["polyserve"], "o",
-     ["results/*exp72r1_polyserve_m1_rpm_*"]),
+     ["results/*exp72r1_polyserve_m1_rpm_*",
+      "results/*exp80r2_polyserve_m1_rpm_*"]),
     ("Llumnix SLO", ps.ARM_COLOR["slo"], "^",
-     ["results/*exp72r1_slo_m1f_rpm_*"]),
+     ["results/*exp72r1_slo_m1f_rpm_*",
+      "results/*exp80r2_slo_m1f_rpm_*"]),
     ("llm-d", ps.ARM_COLOR["llmd"], "D",
      ["results/*exp68s*_llmdslo_m1f_rpm_*", "results/*exp68r*_llmdslo_m1f_rpm_*",
-      "results/*exp70*_llmdslo_m1f_rpm_*"]),
+      "results/*exp70*_llmdslo_m1f_rpm_*",
+      "results/*exp80r2_llmdslo_m1f_rpm_*"]),
     # Named "FluidServe" and drawn in the shared blue, matching every other
     # paper figure and `fig_exp71_hour.py`. The arm is FluidServe v0.2 and the
     # version is stated in the docstring and the caption instead of on the axis:
@@ -162,7 +165,8 @@ ARMS = [
     # the earlier arm; here that separation does not exist.
     ("FluidServe", ps.ARM_COLOR["fluidserve"], "s",
      ["results/*exp68s*_fspfx_m1_rpm_*", "results/*exp68r*_fspfx_m1_rpm_*",
-      "results/*exp69*_fspfx_m1_rpm_*", "results/*exp70*_fspfx_m1_rpm_*"]),
+      "results/*exp69*_fspfx_m1_rpm_*", "results/*exp70*_fspfx_m1_rpm_*",
+      "results/*exp80r2_fspfx_m1_rpm_*"]),
 ]
 
 
