@@ -110,9 +110,22 @@ def main():
     ap.add_argument("--by", default="rate,arm",
                     help="comma-separated grouping columns (default rate,arm)")
     ap.add_argument("--out", default=None, help="write the per-run table here")
+    ap.add_argument("--since", default=None, metavar="YYMMDD",
+                    help="drop runs whose directory name sorts before this. The "
+                         "workload changed on 2026-08-08 and runs from either "
+                         "side of that must not enter one table, so --since "
+                         "260808 is the usual value; without it a glob happily "
+                         "averages a policy across a workload change and the "
+                         "repeat spread balloons instead of failing")
     a = ap.parse_args()
 
     dirs = sorted(d for d in glob.glob(a.runs) if os.path.isdir(d))
+    if a.since:
+        before = [d for d in dirs if os.path.basename(d) < a.since]
+        dirs = [d for d in dirs if os.path.basename(d) >= a.since]
+        # Loud, because a silent date filter is how a table comes out looking
+        # clean while the runs it needed were dropped.
+        print(f"--since {a.since}: kept {len(dirs)}, dropped {len(before)}")
     if not dirs:
         sys.exit(f"no run directories match {a.runs}")
 
