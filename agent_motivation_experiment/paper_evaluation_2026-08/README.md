@@ -49,6 +49,7 @@
 | **A3** | 우리 요소를 하나씩 끄면 몇 점 잃는가 | EXP-73 / EXP-78 / EXP-69, 3 도착률 × 2반복 | ✅ |
 | **A4** | 요청마다 정확한 출력 길이를 알려 주면 얼마나 좋아지는가 | EXP-64, 4 도착률 × 2 arm × 2반복 | ✅ |
 | **A5** | **클래스로 가르면 어디서 이기고 어디서 지는가** | 위 고정 세트, 5 arm × 8 도착률 × 2반복 | ✅ *(계획에 없던 것)* |
+| **A6** | **두 정책이 서로 다른 클래스를 거절한다** — 우리는 agent를, llm-d는 chat을 | 같은 세트의 FluidServe·llm-d | ✅ *(계획에 없던 것)* |
 
 ### B. 재분석만 (클러스터 0시간)
 
@@ -114,6 +115,7 @@
 | [00_audit.md](00_audit.md) | 계획을 세우기 전에 한 근거 감사 — 확인된 것과 낡은 것 |
 | [01_B1_binding_predicate.md](01_B1_binding_predicate.md) | B1의 방법과 결과 |
 | [02_B2_feasible_but_missed.md](02_B2_feasible_but_missed.md) | B2의 방법과 결과 |
+| [06_who_is_refused.md](06_who_is_refused.md) | **A6 — 계획에 없던 것.** "어떤 클래스를 버려서 이기는 것 아닌가"에 대한 답: **양쪽 다 버리고 무엇을 버릴지가 다르다.** 우리 agent 70~82%, llm-d chat 86~93% (45~70 req/s) |
 | [05_per_class.md](05_per_class.md) | **A5 — 계획에 없던 것.** 총계의 우위는 chat의 우위이고, deepresearch는 45 req/s부터, agent는 25 req/s부터 진다. **agent에서 이기는 것은 PolyServe다** |
 | [04_pace_diversity.md](04_pace_diversity.md) | **B3 — 계획에 없던 것.** 함대가 낼 수 있는 속도의 개수가 3 → 1 → 2로 움직이고, 2가 됐을 때 느슨한 쪽이 인스턴스 하나뿐이다 |
 | [03_C1_design.md](03_C1_design.md) | C1을 confound 없이 만들 수 있는가 |
