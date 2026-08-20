@@ -4,6 +4,21 @@
 반드시 들어가야 하는 것**을 적는다. 수치는 스크립트가 출력하는 것이고 여기에 옮겨 적지
 않는다 — 옮겨 적으면 재측정 때 한쪽만 갱신된다.
 
+## ⚠ 어느 그림이 어느 run 집합을 쓰는가 — 지금 둘로 갈려 있다
+
+**2026-08-21에 run이 20개 늘었고, 그것을 쓰는 그림과 안 쓰는 그림이 갈렸다. 그대로 두되
+여기에 적는다** — 조용히 갈리는 것이 이 저장소가 가장 자주 겪은 오류다.
+
+| 고정 집합 | 무엇 | 이것을 쓰는 그림 |
+|---|---|---|
+| `paper_experiment/static_sweep_clean_2026-08/` | 5 arm × 8 도착률 × **2반복** = 80 run (EXP-82 + EXP-86) | **manifest를 읽는 것들**: `eval_per_class`, `eval_who_is_refused`, `eval_admission_quality`, `eval_pace_diversity` |
+| `paper_experiment/eval_2026-08-21/` | **EXP-88** `fsroute` 16 run + **EXP-89** llm-d 3번째 반복 4 run | `eval_routing_only`(EXP-88), `intro_capacity*`(EXP-89) |
+
+**따라서 `intro_capacity*`의 llm-d는 10~25 req/s에서 3반복이고, manifest를 읽는 그림들의
+llm-d는 같은 구간에서 2반복이다.** 값 차이는 작다(90% 용량 20.3으로 동일, 95%가 10.0 → 10.1).
+**합칠지는 논문 그림을 확정할 때 한 번에 정한다** — 지금 manifest를 고치면 이미 그린 네 그림이
+조용히 바뀐다.
+
 ## A1 — `intro_capacity.pdf` / `intro_capacity_curves.pdf` / `intro_capacity_pair.pdf`
 
 | | |
