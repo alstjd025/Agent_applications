@@ -35,17 +35,24 @@ the two agree. Eight rates per arm: 10, 15, 20, 25, 35, 45, 55, 70 req/s.
 **Robustness, and the part of it that does NOT hold.**
 
       counted as saturated  vLLM router  PolyServe  Llumnix SLO  llm-d  FluidServe
-             95%              20.7        15.4         19.7      10.0      25.7
+             95%              20.7        15.4         19.7      10.1      25.7
              90%              21.6        15.9         20.4      20.3      28.4
-             80%              23.4        16.7         21.2      22.5      33.9
-             70%              25.1        17.6         22.0      24.7      40.3
+             80%              23.4        16.7         21.2      22.3      33.9
+             70%              25.1        17.6         22.0      24.3      40.3
+
+llm-d has THREE repeats at 10-25 req/s (EXP-89) and two elsewhere; every other arm
+has two everywhere. The third repeat was run because at the 95% line this arm read
+last on the strength of one cell whose two repeats were 9.3 points apart, and a
+robustness table that ranks a baseline worst on one unstable cell is one a reviewer
+is right to attack. It did not rescue the number: 10.0 -> 10.1. So llm-d being last
+at the 95% line is a property of the arm, not of an unlucky run.
 
 FluidServe is first at every threshold, so "this policy sustains the highest
 rate" does not depend on where the line is drawn, and the margin over the second
 arm grows as the threshold falls: 1.24x at 95%, 1.31x at 90%, 1.45x at 80%,
 1.61x at 70%. **The ordering among the four baselines depends on the threshold.**
-llm-d is LAST at 95% (10.0 req/s, and that value is set by a rate whose two
-repeats disagree by 11.5 points), fourth at 90% by 0.1 req/s against Llumnix SLO,
+llm-d is LAST at 95% (10.1 req/s, confirmed with a third repeat rather than
+resting on one unstable cell), fourth at 90% by 0.1 req/s against Llumnix SLO,
 and second at 80% and 70%, because it degrades gradually while the other two fall
 off a cliff. A single capacity number therefore ranks our policy against the
 baselines robustly and ranks the baselines against each other only at the
@@ -172,8 +179,18 @@ ARMS = [
     # points at 25 and 15.1 at 35 on the earlier runs. The error bar at the left
     # end of the curve is that, not a defect of the redraw, and no single run of
     # this arm should be quoted at 10 req/s.
+    # EXP-89 adds a THIRD repeat at 10, 15, 20 and 25 req/s -- the four cells that
+    # set both thresholds -- because at the 95% line this arm read last on the
+    # strength of one cell whose two repeats were 9.3 points apart. The
+    # pre-registered condition for merging was that the new repeat must not fall
+    # outside the existing pair in the same direction at all four rates, which
+    # would be a session effect rather than variance. It landed above at 10 and
+    # 20, below at 25 and inside at 15, so it is merged. It WIDENS the bands
+    # rather than tightening them: this arm is genuinely irreproducible at low
+    # load, and three repeats show that more clearly than two did.
     ("llm-d", ps.ARM_COLOR["llmd"], "D",
-     ["results/*exp82r[12]_llmdslo_m1f_rpm_*"]),
+     ["results/*exp82r[12]_llmdslo_m1f_rpm_*",
+      "results/*exp89r3_llmdslo_m1f_rpm_*"]),
     # Named "FluidServe" and drawn in the shared blue, matching every other
     # paper figure and `fig_exp71_hour.py`. The arm is FluidServe v0.2 and the
     # version is stated in the docstring and the caption instead of on the axis:
