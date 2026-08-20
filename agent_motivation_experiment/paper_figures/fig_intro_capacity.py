@@ -10,11 +10,16 @@ least 90% of ARRIVING requests still meet their own latency rule -- rejections
 counted as misses, so a policy cannot buy the number by refusing work. On the
 same four engines, the same request mix and the same rule:
 
-      FluidServe v0.2   28.1 req/s
-      vLLM router       21.4
+      FluidServe v0.2   28.4 req/s
+      vLLM router       21.6
       Llumnix SLO       20.4
-      llm-d             18.7
-      PolyServe         15.8
+      llm-d             20.3
+      PolyServe         15.9
+
+Recomputed 2026-08-21 on the pinned clean set (EXP-82 + EXP-86, two repeats at
+every one of the eight rates for all five arms). The previous table in this
+docstring -- 28.1 / 21.4 / 20.4 / 18.7 / 15.8 -- came from the six-experiment
+mixture that preceded the GOMAXPROCS instrumentation fix and MUST NOT be quoted.
 
 **Why two files.** The bar chart is the compact statement. The curve version
 shows where each bar comes from: attainment against offered rate with a rule at
@@ -30,19 +35,21 @@ the two agree. Eight rates per arm: 10, 15, 20, 25, 35, 45, 55, 70 req/s.
 **Robustness, and the part of it that does NOT hold.**
 
       counted as saturated  vLLM router  PolyServe  Llumnix SLO  llm-d  FluidServe
-             95%              20.6        15.4         20.0      12.2      25.4
-             90%              21.4        15.8         20.4      18.7      28.1
-             80%              22.9        16.7         21.3      22.7      33.7
-             70%              24.5        17.5         22.1      25.8      39.2
+             95%              20.7        15.4         19.7      10.0      25.7
+             90%              21.6        15.9         20.4      20.3      28.4
+             80%              23.4        16.7         21.2      22.5      33.9
+             70%              25.1        17.6         22.0      24.7      40.3
 
 FluidServe is first at every threshold, so "this policy sustains the highest
-rate" does not depend on where the line is drawn. **The ordering among the four
-baselines does.** llm-d is LAST at 95%, third at 90%, and second at 80% and 70%,
-because it degrades gradually while the other two fall off a cliff -- Llumnix SLO
-holds 95.4% at 20 req/s and drops to 34.4% at 25, and PolyServe holds 99.9% at 15
-and drops to 39.9% at 20. A single capacity number therefore ranks our policy
-against the baselines robustly and ranks the baselines against each other only at
-the threshold it was computed for. Say so in the caption; the curve figure shows
+rate" does not depend on where the line is drawn, and the margin over the second
+arm grows as the threshold falls: 1.24x at 95%, 1.31x at 90%, 1.45x at 80%,
+1.61x at 70%. **The ordering among the four baselines depends on the threshold.**
+llm-d is LAST at 95% (10.0 req/s, and that value is set by a rate whose two
+repeats disagree by 11.5 points), fourth at 90% by 0.1 req/s against Llumnix SLO,
+and second at 80% and 70%, because it degrades gradually while the other two fall
+off a cliff. A single capacity number therefore ranks our policy against the
+baselines robustly and ranks the baselines against each other only at the
+threshold it was computed for. Say so in the caption; the curve figure shows
 it directly and is the better choice where the ranking of baselines matters.
 
 **CAVEATS that belong in the caption.**
@@ -126,11 +133,27 @@ CRITERIA = [95.0, 90.0, 80.0, 70.0]
 # dropped, and rather than being filled in from its pre-fix sweep -- EXP-53/57
 # and EXP-66 are a different workload and putting them on this axis is the
 # same-name-two-quantities failure this repository keeps hitting.
-# The globs are the ones `analysis_scripts/redraw_static_sweep_workload2026-08-08.sh`
-# uses, character for character, including the workload-config token (`_m1_` or
-# `_m1f_`) and the repeat (`exp72r1`). That script is where the run selection for
-# this sweep is decided; two copies that differ by a wildcard are how one figure
-# keeps a run the other has dropped.
+# ⚠ THE RUNS CHANGED ON 2026-08-18. Every arm now comes from ONE OF TWO
+# EXPERIMENTS, EXP-82 and EXP-86, rather than from the six-experiment mixture
+# (EXP-68/69/70/72/77/80) that fed this table until then. Those earlier runs are
+# not wrong, but they were taken while the Llumnix Go gateway was being stopped
+# by the kernel: it sized its thread pool from the host's 72 CPUs against a
+# container quota of 8 cores, so it was descheduled for 18.7% of the run and
+# every stream it carried froze and thawed together. EXP-82 (FluidServe, llm-d)
+# and EXP-86 (the other three) re-measured all eight rates with two repeats at
+# `GOMAXPROCS=16`; the fraction of token intervals under 5 ms falls from 14.11%
+# to 0.29%. The pinned set is `paper_experiment/static_sweep_clean_2026-08/`
+# and the superseded figures are in `paper_figures/old_2026-08-18/`.
+#
+# ⚠ AND IT WAS NOT ONLY THE INSTRUMENTATION, at least for our arm. EXP-82 wrote
+# down in advance that a gateway which stops for 18.7% of the run might be
+# holding FluidServe back through its own hold-and-retry path, and that if
+# attainment moved the experiment had fixed the SYSTEM rather than the
+# measurement. At 45 / 55 / 70 req/s FluidServe rejects 2.4-2.8 points less and
+# attains 3.2-3.7 points more, and the two-repeat intervals of the old and new
+# runs do not overlap at any of the three. THE CAPTION MUST NOT SAY THE NUMBERS
+# ARE UNCHANGED. The knee moves very little (28.0 -> 28.4) because it is set at
+# 25-35 req/s, where the shift is +0.9 and +0.3.
 ARMS = [
     # Labelled "vLLM" on the figures. What it actually is: the PyPI
     # `vllm-router` package's default `cache_aware` policy, which is a fork of
@@ -138,35 +161,26 @@ ARMS = [
     # default is `roundrobin`. Two different pieces of software carry the name
     # "vLLM router", so the short label on the axis cannot carry the
     # distinction and THE CAPTION HAS TO NAME WHICH ONE.
-    # Both repeats, as the canonical selection script has it. This was pinned to
-    # repeat 1 for a few hours on 2026-08-10 because repeat 2 was still landing
-    # and `exp77r*` was giving the arm two repeats at two rates and one at the
-    # other six -- points averaged over different numbers of runs, changing
-    # every time another condition finished. EXP-77 completed at 00:50 KST on
-    # 2026-08-11 with all eight rates in both repeats.
     ("vLLM", ps.ARM_COLOR["vllmrouter"], "h",
-     ["results/*exp77r*_vllmcache_m1_rpm_*"]),
+     ["results/*exp86r[12]_vllmcache_m1_rpm_*"]),
     ("PolyServe", ps.ARM_COLOR["polyserve"], "o",
-     ["results/*exp72r1_polyserve_m1_rpm_*",
-      "results/*exp80r2_polyserve_m1_rpm_*"]),
+     ["results/*exp86r[12]_polyserve_m1_rpm_*"]),
     ("Llumnix SLO", ps.ARM_COLOR["slo"], "^",
-     ["results/*exp72r1_slo_m1f_rpm_*",
-      "results/*exp80r2_slo_m1f_rpm_*"]),
+     ["results/*exp86r[12]_slo_m1f_rpm_*"]),
+    # ⚠ llm-d's two repeats disagree by 9.7 points at 10 req/s (87.8 and 97.5)
+    # and this arm has been the unstable one throughout: EXP-80 recorded 12.0
+    # points at 25 and 15.1 at 35 on the earlier runs. The error bar at the left
+    # end of the curve is that, not a defect of the redraw, and no single run of
+    # this arm should be quoted at 10 req/s.
     ("llm-d", ps.ARM_COLOR["llmd"], "D",
-     ["results/*exp68s*_llmdslo_m1f_rpm_*", "results/*exp68r*_llmdslo_m1f_rpm_*",
-      "results/*exp70*_llmdslo_m1f_rpm_*",
-      "results/*exp80r2_llmdslo_m1f_rpm_*"]),
+     ["results/*exp82r[12]_llmdslo_m1f_rpm_*"]),
     # Named "FluidServe" and drawn in the shared blue, matching every other
     # paper figure and `fig_exp71_hour.py`. The arm is FluidServe v0.2 and the
     # version is stated in the docstring and the caption instead of on the axis:
     # no other version of ours appears in this paper, so "v0.2" on a tick label
-    # asks the reader to hold a distinction the figure never uses. The cyan this
-    # carried came from the EXP-71 analysis script, where it separates v0.2 from
-    # the earlier arm; here that separation does not exist.
+    # asks the reader to hold a distinction the figure never uses.
     ("FluidServe", ps.ARM_COLOR["fluidserve"], "s",
-     ["results/*exp68s*_fspfx_m1_rpm_*", "results/*exp68r*_fspfx_m1_rpm_*",
-      "results/*exp69*_fspfx_m1_rpm_*", "results/*exp70*_fspfx_m1_rpm_*",
-      "results/*exp80r2_fspfx_m1_rpm_*"]),
+     ["results/*exp82r[12]_fspfx_m1_rpm_*"]),
 ]
 
 
