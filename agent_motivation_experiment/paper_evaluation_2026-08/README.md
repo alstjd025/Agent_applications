@@ -50,6 +50,7 @@
 | **A4** | 요청마다 정확한 출력 길이를 알려 주면 얼마나 좋아지는가 | EXP-64, 4 도착률 × 2 arm × 2반복 | ✅ |
 | **A5** | **클래스로 가르면 어디서 이기고 어디서 지는가** | 위 고정 세트, 5 arm × 8 도착률 × 2반복 | ✅ *(계획에 없던 것)* |
 | **A6** | **두 정책이 서로 다른 클래스를 거절한다** — 우리는 agent를, llm-d는 chat을 | 같은 세트의 FluidServe·llm-d | ✅ *(계획에 없던 것)* |
+| **A7** | **"tail을 희생해서 gain을 얻는 것 아니냐"** — 두 tail을 갈라서, 그리고 그 tail이 무엇을 사는지 | `31_tails_all_arms_clean.csv` | ✅ 그림 `eval_tails.pdf` |
 
 ### B. 재분석만 (클러스터 0시간)
 
@@ -125,6 +126,7 @@
 | [01_B1_binding_predicate.md](01_B1_binding_predicate.md) | B1의 방법과 결과 |
 | [02_B2_feasible_but_missed.md](02_B2_feasible_but_missed.md) | B2의 방법과 결과 |
 | [11_profile_sample_size.md](11_profile_sample_size.md) | **B6.** ⚠ **세 입력 중 길이 프로파일만 스스로 안 고쳐진다**(`sync.Once`) — 그래서 로버스트니스를 물을 수 있는 유일한 입력이고, **step 시간 모델에 오차를 주입하려던 계획은 `noteResidual`이 되돌리므로 무효다.** 수렴 곡선과 클러스터 격자 |
+| [12_tail_objection.md](12_tail_objection.md) | **A7 — tail 반문의 답.** 요청 간 p90은 우리가 유일하게 전 구간 예산 안, 요청 안 p90은 llm-d가 1위지만 **그 매끄러움은 goodput으로 산 것**(정점 9.4k가 7.6k로 떨어짐 대 우리 13.9k 단조 증가). 같은 일을 할 때 지는 +14~29 ms도 그대로 적었다 |
 | [09_accuracy.md](09_accuracy.md) | **B5.** 길이 프로파일은 정확하고(0.97~1.00배), step 시간 모델은 중앙값이 맞으며 꼬리가 보수적이고, **KV 투영은 낡은 수치가 3~4배 틀렸다**(3.6배 → **1.08~1.12배**, 88.5% → **58.3%**) |
 | [07_why_agent_is_refused.md](07_why_agent_is_refused.md) | **B4.** "기다리는 동안 예산을 까먹는다"를 **반증했다**(agent는 0.02초 만에 거절된다). 그리고 **예측/관측 비를 여덟 도착률에서 재서 감사 항목 하나를 해소했다**(0.95~1.00) |
 | [06_who_is_refused.md](06_who_is_refused.md) | **A6 — 계획에 없던 것.** "어떤 클래스를 버려서 이기는 것 아닌가"에 대한 답: **양쪽 다 버리고 무엇을 버릴지가 다르다.** 우리 agent 70~82%, llm-d chat 86~93% (45~70 req/s) |
