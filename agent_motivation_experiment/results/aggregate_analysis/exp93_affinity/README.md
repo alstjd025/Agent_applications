@@ -215,10 +215,45 @@ rank 1 tests a mechanism no run has yet exercised.
 
 ## 5. What remains unverified, merged across the five analyses
 
-1. **Whether the looser pace was used.** No batch size, admission decision, queue depth or
-   preemption count was read on the freed engine at the moments it was free. The link from
-   the fleet structure of section 1 to the 1.41-point attainment result is untested, and it
-   is the largest gap in the set.
+1. ~~**Whether the looser pace was used.**~~ **CLOSED 2026-08-24 — `a7_freed_engine_use.md`.**
+   **The freed engine is underused: its modelled step time sits at 0.416 / 0.417 of the pace it
+   is allowed, against 0.764 / 0.769 on a chat-bound engine** (p50 over 59 one-minute windows,
+   two repeats, 35.0-point gap against repeat spreads of 0.1 and 0.5). It produces **1,693 /
+   1,653 output tokens per second against 3,514 / 3,629** on a chat-carrying engine, 46-48% as
+   much.
+
+   **But there are two regimes and the hour average hides them, and only one of them names a fix.**
+   In the segment where chat is 93% of requests the freed engine is nearly EMPTY — 10.5 / 10.0
+   decoding requests against 140.5 / 147.5 on its peers, KV 10% full, no prefill queue, no
+   preemption. **The work does not exist there**: deep research and swe together arrive at 1.71
+   req/s against chat's 22.72, so freeing one engine of four from a class that is 93% of arrivals
+   reserves capacity that at most 7% of the stream could use. In the other three segments the
+   freed engine is at physical KV occupancy 0.99 or above for 42-83% of its seconds and preempts
+   21-40 times a minute: **fully committed, and committed on memory rather than on pace.** The
+   gate there would allow 4.2 to 5.1 more req/s and the KV cap allows 0.00 to 0.19.
+
+   > **That is the outcome-layer measurement of the pace-for-memory trade that section 3 could
+   > only infer.** The grouped class carries **5,667 / 5,541 KV tokens per decode slot against
+   > 2,422 / 2,203** on a mixed engine, so grouping it fills the engine's memory long before it
+   > fills the pace the grouping bought.
+
+   ⚠ **The size of the underuse depends on which step time is used, and the two disagree.**
+   Substituting the MEASURED inter-token latency for the modelled one gives 0.766 / 0.784 on
+   chat-free windows against 1.021 / 1.026 on chat-carrying ones — still underused, but by 22%
+   of headroom rather than 58%. The reason is that measured over modelled is 1.781 / 1.790 on
+   chat-free windows against 1.326 / 1.314 on chat-carrying ones: **the decode-only step law
+   under-reads exactly the engine whose headroom the structural argument depends on.**
+
+   ⚠ **And the preference does not change what a freed engine does.** Preference-off chat-free
+   windows sit at 0.426 / 0.434, indistinguishable from the preference-on ones outside the
+   93%-chat segment. What the preference changes is how many freed engines there are, and it adds
+   the near-empty kind.
+
+   **The design change this names** is not "send more work to the loosened engine", which only
+   addresses one regime. It is **a bound on how much of the fleet the preference may reserve for
+   a class, tied to what the other classes actually arrive at** — because where the reservation
+   is largest the minority classes cannot fill it, and where they can fill it the engine
+   saturates on KV instead.
 2. **The admissible pace is a model, not a read-back.** `scheduler.jsonl` exports 47 keys per
    scrape and none is a per-instance pace, gate, budget or step-time value, so the pace
    distribution combines measured per-engine class residency with the nominal class budgets
