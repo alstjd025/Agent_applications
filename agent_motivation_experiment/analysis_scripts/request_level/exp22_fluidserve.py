@@ -93,6 +93,27 @@ ARM_STYLE = {
                      label="FluidServe, class preference off"),
     "fspslos": dict(color="#7f7f7f", ls="-.", marker="*",
                     label="FluidServe, both off"),
+    # EXP-94, the class-preference STRENGTH axis. sortCandidates scores a feasible
+    # instance as w*share + (1-w)*room; w=1.0 is the deployed default and is the
+    # `fspfx` arm, so these are the interior of an axis whose endpoints only were
+    # measured. Registered before the sweep is scored, for the reason above: an arm
+    # missing from this table is dropped from every figure without a message.
+    "fsw00": dict(color="#1f77b4", ls=":", marker="o",
+                  label="FluidServe, preference weight 0"),
+    "fsw25": dict(color="#4c9fd4", ls=":", marker="o",
+                  label="FluidServe, preference weight 0.25"),
+    "fsw50": dict(color="#7fbfe0", ls=":", marker="o",
+                  label="FluidServe, preference weight 0.5"),
+    "fsw75": dict(color="#a8d5ec", ls=":", marker="o",
+                  label="FluidServe, preference weight 0.75"),
+    # EXP-95, the pin ladder: how many engines chat is ALLOWED to occupy, which
+    # turns the emergent separation into a controlled one.
+    "fspinc1": dict(color="#d62728", ls=(0,(1,1)), marker="s",
+                     label="FluidServe, chat pinned to 1 engine"),
+    "fspinc2": dict(color="#e06666", ls=(0,(1,1)), marker="s",
+                     label="FluidServe, chat pinned to 2 engines"),
+    "fspinc3": dict(color="#f0a6a6", ls=(0,(1,1)), marker="s",
+                     label="FluidServe, chat pinned to 3 engines"),
     # The vLLM router's default cache_aware policy. Registered before the arm
     # runs, for the reason in the block above: an arm missing from this table is
     # dropped from every figure without a message.

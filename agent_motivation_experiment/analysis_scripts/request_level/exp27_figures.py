@@ -79,7 +79,14 @@ ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
          "fsnoshed": "#0e7c86", "fsroute": "#6bbfc6",
          # EXP-79, the independent-combination arm. Same control plane as
          # fspfx with the shed test decoupled, so it stays in the cyan family.
-         "fsindep": "#1a5c7a"}
+         "fsindep": "#1a5c7a",
+         # EXP-94, the class-preference STRENGTH axis. Shades of one hue rather
+         # than four hues, because these are one axis sampled at four points and
+         # the figure has to read as a ladder rather than as four policies.
+         "fsw00": "#1f77b4", "fsw25": "#4c9fd4", "fsw50": "#7fbfe0", "fsw75": "#a8d5ec",
+         # EXP-95, the pin ladder. A second one-axis family, kept away from the
+         # weight family so the two ladders are not mistaken for one.
+         "fspinc1": "#d62728", "fspinc2": "#e06666", "fspinc3": "#f0a6a6"}
 ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "fluidserve": "FluidServe (prefix acct. off)", "fluidserveflat": "FluidServe (v20 off)",
          "slofifo": "Llumnix SLO + FIFO", "sloqoserve": "Llumnix SLO + QoServe",
@@ -88,6 +95,13 @@ ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "llmdslo": "llm-d", "fspfx": "FluidServe v0.2",
          "fspfxb": "FluidServe v0.2 (calibration fixed)",
          "fspnopend": "FluidServe, holding off",
+         "fsw00": "FluidServe, pref. weight 0",
+         "fsw25": "FluidServe, pref. weight 0.25",
+         "fsw50": "FluidServe, pref. weight 0.5",
+         "fsw75": "FluidServe, pref. weight 0.75",
+         "fspinc1": "FluidServe, chat on 1 engine",
+         "fspinc2": "FluidServe, chat on 2 engines",
+         "fspinc3": "FluidServe, chat on 3 engines",
          "fspnoaff": "FluidServe, class preference off",
          "fspslos": "FluidServe, both off",
          "vllmcache": "vLLM router (cache-aware)",

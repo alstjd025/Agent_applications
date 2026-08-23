@@ -59,7 +59,10 @@ ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
              # aborts on an unregistered arm and the abort is the point: an arm
              # missing here used to be dropped from the figure in silence.
              "fspnopend", "fspnoaff", "fspslos", "vllmcache",
-             "fsnoshed", "fsroute", "fsindep"]
+             "fsnoshed", "fsroute", "fsindep",
+             # EXP-94 weight sweep and EXP-95 pin ladder.
+             "fsw00", "fsw25", "fsw50", "fsw75",
+             "fspinc1", "fspinc2", "fspinc3"]
 ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
              "loadbalance": "Llumnix", "llmdslo": "llm-d",
              "fspnopend": "FluidServe\n(holding off)",
@@ -69,6 +72,13 @@ ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
              "fsnoshed": "FluidServe\n(no rejection)",
              "fsroute": "FluidServe\n(routing only)",
              "fsindep": "FluidServe\n(independent shed)",
+             "fsw00": "FluidServe\n(pref. w=0)",
+             "fsw25": "FluidServe\n(pref. w=0.25)",
+             "fsw50": "FluidServe\n(pref. w=0.5)",
+             "fsw75": "FluidServe\n(pref. w=0.75)",
+             "fspinc1": "FluidServe\n(chat on 1 engine)",
+             "fspinc2": "FluidServe\n(chat on 2 engines)",
+             "fspinc3": "FluidServe\n(chat on 3 engines)",
              # From v0.2 onward `fspfx` is the deployed default and is the arm the
              # paper calls FluidServe, while `fluidserve` is the ablation with
              # prefix accounting switched off -- the four drivers pin FS_PREFIX=false
