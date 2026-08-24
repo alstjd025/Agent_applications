@@ -61,8 +61,12 @@ ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
              "fspnopend", "fspnoaff", "fspslos", "vllmcache",
              "fsnoshed", "fsroute", "fsindep",
              # EXP-94 weight sweep and EXP-95 pin ladder.
-             "fsw00", "fsw25", "fsw50", "fsw75",
-             "fspinc1", "fspinc2", "fspinc3"]
+             "fsw00", "fsw25", "fsw50", "fsw75", "fscount",
+             "fspinc1", "fspinc2", "fspinc3",
+             # EXP-93/97. `fsnoaff` is the class term removed entirely, which is
+             # not the same arm as `fspnoaff` (that name belongs to EXP-73's
+             # ladder and its runs sit in a different session).
+             "fsnoaff"]
 ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
              "loadbalance": "Llumnix", "llmdslo": "llm-d",
              "fspnopend": "FluidServe\n(holding off)",
@@ -72,6 +76,8 @@ ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
              "fsnoshed": "FluidServe\n(no rejection)",
              "fsroute": "FluidServe\n(routing only)",
              "fsindep": "FluidServe\n(independent shed)",
+             "fscount": "FluidServe\n(pref. by count)",
+             "fsnoaff": "FluidServe\n(class pref. off)",
              "fsw00": "FluidServe\n(pref. w=0)",
              "fsw25": "FluidServe\n(pref. w=0.25)",
              "fsw50": "FluidServe\n(pref. w=0.5)",
