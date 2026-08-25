@@ -71,6 +71,7 @@ ARM_STYLE = {
     # EXP-98: per-instance correction / pace cap in the memory predicate.
     "fsboth": dict(color="#e377c2", ls="-", marker="s", label="FluidServe (per-inst. corr. + pace cap)"),
     "fsnaboth": dict(color="#bcbd22", ls="--", marker="s", label="FluidServe (pref. off + corr. + pace cap)"),
+    "fsdead": dict(color="#17becf", ls="-", marker="D", label="FluidServe (+ first-token deadline)"),
     "fscorr": dict(color="#8c564b", ls="-", marker="s", label="FluidServe (per-inst. corr.)"),
     "fspacecap": dict(color="#7f7f7f", ls="-", marker="s", label="FluidServe (pace cap)"),
 

@@ -46,6 +46,7 @@ ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
          # EXP-98.
          "fsboth": "#e377c2",
          "fsnaboth": "#bcbd22",
+         "fsdead": "#17becf",
          "fscorr": "#8c564b",
          "fspacecap": "#7f7f7f",
 
@@ -98,6 +99,7 @@ ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          # EXP-98.
          "fsboth": "FluidServe (per-inst. corr. + pace cap)",
          "fsnaboth": "FluidServe (pref. off + corr. + pace cap)",
+         "fsdead": "FluidServe (+ first-token deadline)",
          "fscorr": "FluidServe (per-inst. corr.)",
          "fspacecap": "FluidServe (pace cap)",
 
@@ -124,7 +126,7 @@ ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "fsindep": "FluidServe, rejection decided independently"}
 # Line style per arm for the latency CDFs, where colour already encodes class.
 ARM_LS = {"fluidserve": "-", "slo": "--", "polyserve": ":",
-          "fsboth": "-", "fsnaboth": "--", "fscorr": "-", "fspacecap": "-",
+          "fsboth": "-", "fsnaboth": "--", "fsdead": "-", "fscorr": "-", "fspacecap": "-",
           "fluidservefifo": "-", "fluidserveqoserve": "--",
           "slofifo": "-.", "sloqoserve": ":",
           "llmdslo": "-", "fspfx": "--", "fspfxb": "-.",

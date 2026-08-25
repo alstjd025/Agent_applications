@@ -71,7 +71,9 @@ ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
              # memory predicate, separately and together.
              "fscorr", "fspacecap", "fsboth",
              # EXP-99: the same two changes with the class preference OFF.
-             "fsnaboth"]
+             "fsnaboth",
+             # EXP-100.
+             "fsdead"]
 ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
              "loadbalance": "Llumnix", "llmdslo": "llm-d",
              "fspnopend": "FluidServe\n(holding off)",
@@ -85,6 +87,7 @@ ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
              "fsnoaff": "FluidServe\n(class pref. off)",
              "fsboth": "FluidServe\n(per-inst. corr.\n+ pace cap)",
              "fsnaboth": "FluidServe\n(class pref. off\n+ corr. + pace cap)",
+             "fsdead": "FluidServe\n(+ first-token\ndeadline)",
              "fscorr": "FluidServe\n(per-inst. corr.)",
              "fspacecap": "FluidServe\n(pace cap)",
 
