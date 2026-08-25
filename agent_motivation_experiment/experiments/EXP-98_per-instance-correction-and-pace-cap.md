@@ -134,7 +134,31 @@ deepresearch 전용 엔진은 0.834로 사전 문턱 1.0 ± 0.05 **미달**이�
 
 **8002는 chat을 56.4% 들고 있는데 게이트 허용치가 100 ms다.**
 
-### 5.3 왜 chat이 게이트에서 빠지는가 — 요청의 남은 예산이 바닥나서다
+### 5.3 ⚠ 이 절의 첫 판은 틀렸다 — chat 은 게이트에서 "빠진" 것이 아니다
+
+처음에 이 절에 **"chat 의 잔고가 바닥나 `unachievable` 이 되어 게이트에서 빠졌다"**고 적었다.
+**틀렸다. `unachievable` 이 네 엔진 전부에서 0 이다.**
+
+`gateAllowance` 는 잔고가 아니라 **디코드 중인 요청의 `nominalMs`(클래스의 명목 예산) 최소**다
+(`fluidserve.go:1058-1060`). 그러므로 게이트가 100 이라는 것은 단순히 **그 인스턴스에 디코드
+중인 chat 이 없다**는 뜻이다. 아래가 그 시계열이다 (8002):
+
+| 창 | 디코드 중 | **게이트=50 인 표본 비율** | 큐 prefill | 관측 step |
+|---|---|---|---|---|
+| 0~5분 | 181 | **100.0%** | 0 | 39.7 ms |
+| 5~10분 | 225 | **100.0%** | 0 | 44.9 ms |
+| 10~15분 | 1 | 86.0% | 0 | 17.8 ms |
+| **15~20분** | 102 | **21.0%** | 8,722 | 64.3 ms |
+| 20~25분 이후 | 106~150 | **0.0%** | 78,678~142,911 | 64.9~73.5 ms |
+
+**8002 는 15분에 chat 을 잃고 되찾지 못한다. 그 15분이 믹스가 chat 93% 에서 33% 로 바뀌는
+시점이다.** chat 도착이 줄고 클래스 선호가 남은 chat 을 chat 이 많은 엔진으로 보내므로, 한 번
+잃으면 돌아올 이유가 없다.
+
+그 다음은 처음 적은 대로다 — 게이트가 100 이 되면 `capKv` 가 음수에서 902,646 으로 열리고,
+deepresearch 가 몰리고, 큐가 14만 토큰까지 쌓인다.
+
+### 5.3.1 (원래 §5.3, 잔고 계산 자체는 맞다)
 
 `liveRequest.allowanceMs`는 명목 예산이 아니라 **잔고**다
 (`fluidserve_registry.go:626-641`):
@@ -205,3 +229,104 @@ deepresearch 가 채워 그 클래스의 첫 토큰 시간이 13초가 된다.
 ⚠ **`fsnaboth`(클래스 선호 끔 + 두 변경)가 이것에 직접 답한다** — 선호를 끄면 deepresearch 가
 한 엔진에 모이지 않으므로 되먹임이 시작되지 않을 수 있다. **그 결과를 보기 전에 이 구조를
 고치는 코드를 쓰지 않는다.**
+
+---
+
+## 6. prefill 과 KV 상한이 결정의 어디에 들어가는가 — 전체 지도 (2026-08-25)
+
+수정을 제안하기 전에 **지금 코드에서 그 두 양이 실제로 무엇에 영향을 주는지** 빠짐없이 적는다.
+결정 경로는 다음 순서다 (`fluidserve.go:1337-1400`):
+
+```
+flux()        인스턴스 상태      meanStep, gateAllowance, tightestAllowance, capKv, capMem, proj
+evaluate()    후보별 계산        meanAfter, headroomAfter, prefillMs, room, harm, feasible
+sortCandidates()                 feasible 먼저 -> score desc -> room desc -> id
+best = cands[0]
+  best.feasible?               -> route
+  enablePend && canWait(best)? -> pend  (재시도)
+  enableShed && best.missesOwnBudget? -> shed (거절)
+  아니면                        -> force (feasible 이 아닌데도 배치)
+```
+
+| 양 | 무엇에서 나오나 | **판정 (feasible)** | **정렬** | **거절 (shed)** | **보유 (pend)** |
+|---|---|---|---|---|---|
+| `effectivePrefill`<br>= max(큐, 도착 예상) | 엔진 status + 관측 duty | ✓ `meanStepMs` 의 prefill 항 → `overGate`·`overIncumbents` | 간접 (`capKv` 통해) | ✓ | ✓ |
+| `capKv`<br>= 속도 기반 KV 상한 | `maxKvForAllowance`, prefill 포함 | `pacecap` 켜면 ✓ | ✓ `room` | | |
+| `capMem`<br>= 물리 KV 풀 | `kvCapacity × 0.95 / 공유율` | ✓ `overMemory` | ✓ `room` 의 분모 | | |
+| `proj`<br>= KV 투영 | `kvLogical + inflow − outflow`.<br>**큐의 prompt 토큰 없음** | ✓ `newKv = proj + cost` | ✓ | | |
+| **`prefillMs`**<br>= 큐 대기 + 자기 prompt | `prefillEstimateMs` | **✗ (`deadlineFeasible` 기본 꺼짐)** | **✗** | ✓ `missesTtftDeadline` | ✓ |
+| **`PlacementDelayBound`**<br>= 관측된 배치 지연 | registry 의 EWMA | ✗ | ✗ | **✗** | **✓ (함대 하나)** |
+
+### 6.1 이 표가 드러내는 구멍 넷
+
+**① 첫 토큰 시간이 판정에 없다.** `feasible` 의 넷은 **토큰당 속도 셋과 KV 공간 하나**다.
+큐가 14만 토큰인 인스턴스도 그 넷을 통과한다 — 토큰당 속도가 게이트 안이고 KV 가 `capMem`
+아래이기 때문이다. 그것을 묻는 `missesTtftDeadline` 은 `--fluidserve-deadline-feasible`
+뒤에 있고 기본값이 false 다.
+
+**② `prefillEstimateMs` 가 "엔진이 prefill 만 한다"고 가정한다.**
+`queued = (큐 토큰 / chunk) × prefillStepMs(chunk)` 인데, 이는 duty = 1 이다.
+**8002 의 실측 `prefill_duty` 는 0.453 이다.** 그리고 `prefillStepMs` 는 유휴 엔진에서 잰
+표다(`ttft.json`: *"one request at a time against an idle engine"*).
+
+| 큐 토큰 | 정책의 추정 TTFT | 판정 |
+|---|---|---|
+| 78,678 | 5,282 ms | 통과 |
+| 110,881 | 7,325 ms | 통과 |
+| **137,366** | **9,005 ms** | **통과 — 예산 10,000 바로 아래** |
+
+**실측 평균은 13,028 ms 다. 추정이 31% 작고, 그 31% 가 예산선을 넘느냐 마느냐를 가른다.**
+⚠ 단순히 `1/duty` 를 곱하면 19,899 ms 로 이번엔 53% 과대예측이므로, 그 보정은 **되먹임이어야
+하지 곱셈 상수가 아니다.**
+
+**③ 거절과 보유가 같은 질문에 다른 양으로 답한다.**
+
+```
+canWait (보유):            waited < ttftSlo − prefillMs − PlacementDelayBound − recheckMs
+missesTtftDeadline (거절): waited + prefillMs > ttftSlo
+```
+
+**보유 판정은 관측된 배치 지연을 더하고 거절 판정은 안 더한다.** 둘 다 "첫 토큰이 예산 안에
+나오는가"를 묻는데 한쪽만 관측을 쓴다.
+
+**④ 그 관측된 지연이 함대 하나다.** `requestRegistry.delayMean` 은 인스턴스 구분 없는 필드
+하나다(`fluidserve_registry.go:269-271`, 갱신은 577-583). 그런데 실측 TTFT p90 이:
+
+| 엔진 | TTFT p50 | **TTFT p90** |
+|---|---|---|
+| 8000 | 765 ms | 2,564 ms |
+| 8001 | 447 ms | 1,265 ms |
+| **8002** | 732 ms | **20,022 ms** |
+| 8003 | 459 ms | 1,520 ms |
+
+**16배 갈린다. 함대 평균 하나는 어느 엔진도 묘사하지 않는다** — 이번에 `correction` 에서
+고친 것과 정확히 같은 형태이고, 이것이 **세 번째 함대 스칼라**다(앞의 둘은
+`capacityModel.correction` 과 `prefillFraction`).
+
+### 6.2 제안 — 작고 근거가 분명한 것부터
+
+**제안 1. 배치 지연을 인스턴스별로.** `requestRegistry.delayMean/delayMeanSq/delaySeen` 을
+인스턴스별 맵으로. **이번에 `correction` 에 한 것과 같은 변경이고 새 상수가 없다.**
+표본이 4분의 1 이 되는 것은 `fsMinPlacementDelaySamples` 하한이 이미 처리한다 — 미달이면
+`ttftSafetyMs` 로 떨어지므로 인스턴스별로도 안전망이 그대로 작동한다.
+
+**제안 2. `missesTtftDeadline` 도 그 지연을 더한다.** 한 줄이다. **거절과 보유가 같은 양을
+보게 만드는 것**이고, 제안 1 없이 하면 함대 평균을 더하는 것이라 8002 에서 여전히 작다.
+
+**제안 3. `--fluidserve-deadline-feasible` 를 켠다.** 첫 토큰 마감을 `feasible` 에 넣는다.
+EXP-87 이 이것을 재고 실패했는데 그 이유가 **"막힌 요청이 갈 곳이 없다"**였다.
+**지금은 다르다** — §13.3 이 잰 대로 다른 세 엔진이 deepresearch 를 **0.0% 위반**으로
+처리한다. ⚠ **제안 1·2 뒤여야 한다.** 추정이 31% 작은 채로 켜면 통과해 버린다.
+
+**제안 4. 정렬 comparator 에 `prefillMs` 를 넣는다.** 이미 계산돼 있고 문턱 검사에만
+쓰인다(CLAUDE.md 가 후보로 적어 둔 것). **거절이 아니라 선택을 바꾼다** — 큐가 짧은 엔진을
+먼저 고르면 큐가 애초에 안 쌓인다. ⚠ **클래스 선호와 충돌한다**: 지금 comparator 가
+`score desc → room desc` 이고 `w=1.0` 에서 `room` 의 가중치가 0 이므로, `prefillMs` 를
+`score` 뒤에 놓으면 거의 안 걸린다. **어디에 놓을지가 설계 결정이고 실험이 필요하다.**
+
+**⚠ 권하지 않는 것: `prefillEstimateMs` 에 `1/duty` 를 곱하는 것.** ②에서 본 대로
+53% 과대예측이 된다. 되먹임이 아니라 상수 보정이라 같은 함정이다.
+
+**⚠ 그리고 이 넷 중 어느 것도 지금 쓰지 않는다.** `fsnaboth`(클래스 선호 끔 + 이번 두 변경)가
+대기 중이고, **선호를 끄면 deepresearch 가 한 엔진에 모이지 않아 8002 같은 상태가 아예 안
+생길 수 있다.** 그러면 필요한 수정이 달라진다.
