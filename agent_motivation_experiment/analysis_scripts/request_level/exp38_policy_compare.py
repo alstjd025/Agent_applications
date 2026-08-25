@@ -69,7 +69,9 @@ ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
              "fsnoaff",
              # EXP-98: the per-instance correction and the pace cap in the
              # memory predicate, separately and together.
-             "fscorr", "fspacecap", "fsboth"]
+             "fscorr", "fspacecap", "fsboth",
+             # EXP-99: the same two changes with the class preference OFF.
+             "fsnaboth"]
 ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
              "loadbalance": "Llumnix", "llmdslo": "llm-d",
              "fspnopend": "FluidServe\n(holding off)",
@@ -82,6 +84,7 @@ ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
              "fscount": "FluidServe\n(pref. by count)",
              "fsnoaff": "FluidServe\n(class pref. off)",
              "fsboth": "FluidServe\n(per-inst. corr.\n+ pace cap)",
+             "fsnaboth": "FluidServe\n(class pref. off\n+ corr. + pace cap)",
              "fscorr": "FluidServe\n(per-inst. corr.)",
              "fspacecap": "FluidServe\n(pace cap)",
 

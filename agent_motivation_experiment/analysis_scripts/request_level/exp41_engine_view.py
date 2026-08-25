@@ -71,7 +71,9 @@ ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe (prefix off)",
         # EXP-98.
         "fscorr": "FluidServe (per-inst. corr.)",
         "fspacecap": "FluidServe (pace cap)",
-        "fsboth": "FluidServe (corr. + pace cap)"}
+        "fsboth": "FluidServe (corr. + pace cap)",
+        # EXP-99.
+        "fsnaboth": "FluidServe (pref. off + corr. + pace cap)"}
 # One colour per engine, held across every panel and both figures.
 ENG_C = {8000: "#1f77b4", 8001: "#ff7f0e", 8002: "#2ca02c", 8003: "#d62728"}
 WIN = 60.0  # seconds per point on the engine series
