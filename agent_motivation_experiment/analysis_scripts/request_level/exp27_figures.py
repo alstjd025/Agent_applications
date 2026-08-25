@@ -43,6 +43,11 @@ from exp22_fluidserve import (  # noqa: E402
 )
 
 ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
+         # EXP-98.
+         "fsboth": "#e377c2",
+         "fscorr": "#8c564b",
+         "fspacecap": "#7f7f7f",
+
          "fluidserveflat": "#9467bd",
          # EXP-40 crosses two control planes with two engine schedulers. Hue is
          # the control plane so it means what it means everywhere else; the
@@ -83,11 +88,17 @@ ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
          # EXP-94, the class-preference STRENGTH axis. Shades of one hue rather
          # than four hues, because these are one axis sampled at four points and
          # the figure has to read as a ladder rather than as four policies.
+         "fscount": "#d62728",
          "fsw00": "#1f77b4", "fsw25": "#4c9fd4", "fsw50": "#7fbfe0", "fsw75": "#a8d5ec",
          # EXP-95, the pin ladder. A second one-axis family, kept away from the
          # weight family so the two ladders are not mistaken for one.
          "fspinc1": "#d62728", "fspinc2": "#e06666", "fspinc3": "#f0a6a6"}
 ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
+         # EXP-98.
+         "fsboth": "FluidServe (per-inst. corr. + pace cap)",
+         "fscorr": "FluidServe (per-inst. corr.)",
+         "fspacecap": "FluidServe (pace cap)",
+
          "fluidserve": "FluidServe (prefix acct. off)", "fluidserveflat": "FluidServe (v20 off)",
          "slofifo": "Llumnix SLO + FIFO", "sloqoserve": "Llumnix SLO + QoServe",
          "fluidservefifo": "FluidServe + FIFO",
@@ -95,6 +106,7 @@ ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "llmdslo": "llm-d", "fspfx": "FluidServe v0.2",
          "fspfxb": "FluidServe v0.2 (calibration fixed)",
          "fspnopend": "FluidServe, holding off",
+         "fscount": "FluidServe, pref. by count",
          "fsw00": "FluidServe, pref. weight 0",
          "fsw25": "FluidServe, pref. weight 0.25",
          "fsw50": "FluidServe, pref. weight 0.5",
@@ -110,6 +122,7 @@ ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "fsindep": "FluidServe, rejection decided independently"}
 # Line style per arm for the latency CDFs, where colour already encodes class.
 ARM_LS = {"fluidserve": "-", "slo": "--", "polyserve": ":",
+          "fsboth": "-", "fscorr": "-", "fspacecap": "-",
           "fluidservefifo": "-", "fluidserveqoserve": "--",
           "slofifo": "-.", "sloqoserve": ":",
           "llmdslo": "-", "fspfx": "--", "fspfxb": "-.",

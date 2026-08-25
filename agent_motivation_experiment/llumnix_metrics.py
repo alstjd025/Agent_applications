@@ -103,6 +103,20 @@ SCHEDULER_METRICS = {
     # unpredictable / gate / incumbents / memory -- counted separately per
     # condition, so two failing on the same candidate is visible as such.
     "scheduler_fluidserve_infeasible_total",
+    # EXP-96. WHERE the sort decided, counted rather than reconstructed. Every
+    # earlier statement about this path was rebuilt from the client's residency
+    # records while the policy counts its own registry, and the two disagree.
+    #
+    # ⚠ Adding a series to the Go code is not enough: this list is a whitelist,
+    # and a counter missing from it is exported by the scheduler and dropped by
+    # the collector. EXP-96's first attempt lost all three for that reason and
+    # four conditions had to be rerun.
+    "scheduler_fluidserve_sort_tie_total",         # how many feasible candidates
+                                                   # shared the top score; >1 means
+                                                   # the free-space tie-break decided
+    "scheduler_fluidserve_topshare_total",         # taken / tie / blocked / passed_over
+    "scheduler_fluidserve_topshare_blocked_total",  # which predicate stopped the
+                                                   # instance holding most of the class
     "scheduler_fluidserve_headroom_tokens",       # per instance
     "scheduler_fluidserve_cap_kv_tokens",         # latency-imposed capacity
     "scheduler_fluidserve_projected_kv_tokens",
@@ -115,6 +129,10 @@ SCHEDULER_METRICS = {
     "scheduler_fluidserve_unachievable_requests",
     "scheduler_fluidserve_retired_total",
     "scheduler_fluidserve_capacity_correction",   # measured mean step / predicted
+    # The same ratio kept per instance. Without this the per-instance mode
+    # cannot be checked from a run at all: the fleet series above is
+    # published in both modes and looks identical.
+    "scheduler_fluidserve_instance_correction",
     "scheduler_fluidserve_prefill_fraction",      # measured share of a prompt actually computed
     "scheduler_fluidserve_arriving_prefill_tokens",  # projected over the horizon
     "scheduler_fluidserve_queued_prefill_tokens",    # what the engine reports right now

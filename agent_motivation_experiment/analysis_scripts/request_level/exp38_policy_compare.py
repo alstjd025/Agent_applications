@@ -66,7 +66,10 @@ ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
              # EXP-93/97. `fsnoaff` is the class term removed entirely, which is
              # not the same arm as `fspnoaff` (that name belongs to EXP-73's
              # ladder and its runs sit in a different session).
-             "fsnoaff"]
+             "fsnoaff",
+             # EXP-98: the per-instance correction and the pace cap in the
+             # memory predicate, separately and together.
+             "fscorr", "fspacecap", "fsboth"]
 ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
              "loadbalance": "Llumnix", "llmdslo": "llm-d",
              "fspnopend": "FluidServe\n(holding off)",
@@ -78,6 +81,10 @@ ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
              "fsindep": "FluidServe\n(independent shed)",
              "fscount": "FluidServe\n(pref. by count)",
              "fsnoaff": "FluidServe\n(class pref. off)",
+             "fsboth": "FluidServe\n(per-inst. corr.\n+ pace cap)",
+             "fscorr": "FluidServe\n(per-inst. corr.)",
+             "fspacecap": "FluidServe\n(pace cap)",
+
              "fsw00": "FluidServe\n(pref. w=0)",
              "fsw25": "FluidServe\n(pref. w=0.25)",
              "fsw50": "FluidServe\n(pref. w=0.5)",

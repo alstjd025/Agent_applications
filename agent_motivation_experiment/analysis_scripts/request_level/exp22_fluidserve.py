@@ -68,6 +68,11 @@ ARM_STYLE = {
     "fluidserveqoserve": dict(color="#aec7e8", ls="--", marker="s", label="FluidServe + QoServe"),
     # EXP-66. Brown, not orange: orange is the deep-research class colour.
     "llmdslo": dict(color="#8c564b", ls="-", marker="D", label="llm-d"),
+    # EXP-98: per-instance correction / pace cap in the memory predicate.
+    "fsboth": dict(color="#e377c2", ls="-", marker="s", label="FluidServe (per-inst. corr. + pace cap)"),
+    "fscorr": dict(color="#8c564b", ls="-", marker="s", label="FluidServe (per-inst. corr.)"),
+    "fspacecap": dict(color="#7f7f7f", ls="-", marker="s", label="FluidServe (pace cap)"),
+
     # EXP-67/68/69. Registering them matters more than the colours do:
     # fig_engines and make_figures build their arm list as
     # [k for k in ARM_STYLE if k in slides], so an arm that is absent here is
@@ -98,6 +103,12 @@ ARM_STYLE = {
     # `fspfx` arm, so these are the interior of an axis whose endpoints only were
     # measured. Registered before the sweep is scored, for the reason above: an arm
     # missing from this table is dropped from every figure without a message.
+    # EXP-96/97. The class preference with its normalisation replaced: ranked by
+    # how many of the class an instance holds rather than by the class's share of
+    # that instance's own occupancy. Red so it reads against fspfx's cyan on the
+    # figures that carry both, since those two are the comparison.
+    "fscount": dict(color="#d62728", ls="-", marker="D",
+                    label="FluidServe, preference by count"),
     "fsw00": dict(color="#1f77b4", ls=":", marker="o",
                   label="FluidServe, preference weight 0"),
     "fsw25": dict(color="#4c9fd4", ls=":", marker="o",

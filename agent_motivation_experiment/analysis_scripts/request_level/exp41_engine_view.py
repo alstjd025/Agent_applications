@@ -67,7 +67,11 @@ ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe (prefix off)",
         # exp38_policy_compare.py this script has no abort on an unknown arm, so
         # a run set of four came out as a figure of two and said nothing.
         "fscount": "FluidServe (pref. by count)",
-        "fsnoaff": "FluidServe (class pref. off)"}
+        "fsnoaff": "FluidServe (class pref. off)",
+        # EXP-98.
+        "fscorr": "FluidServe (per-inst. corr.)",
+        "fspacecap": "FluidServe (pace cap)",
+        "fsboth": "FluidServe (corr. + pace cap)"}
 # One colour per engine, held across every panel and both figures.
 ENG_C = {8000: "#1f77b4", 8001: "#ff7f0e", 8002: "#2ca02c", 8003: "#d62728"}
 WIN = 60.0  # seconds per point on the engine series
