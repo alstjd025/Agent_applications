@@ -45,15 +45,30 @@ SAMPLE_S = 5.0
 WIN_S = 180.0          # window for the stability whisker
 CLASS_C = {"chat": "#1f77b4", "deepresearch": "#ff7f0e", "swe": "#d62728"}
 
+# Row label carries what the arm IS, not the directory name. The three FluidServe
+# rows are a chain: each adds one change to the row above it.
+#
+# llm-d is attributed from Envoy's access log, not the scheduler's dispatch log.
+# It does not pass through the Llumnix scheduler at all, so build_request_engine_map
+# finds nothing for it; llmd_engine_map matches client rows to Envoy's
+# %UPSTREAM_HOST% by (start time, duration) and reaches 99.94% here.
+#
+# PolyServe, Llumnix SLO and the vLLM router have never been run on THIS trace,
+# so they cannot be added without six more hour-long runs.
 RUNS = [
-    ("deployed (share)",        1, "260824_0647_exp97r1_fspfx_shift"),
-    ("deployed (share)",        2, "260824_0945_exp97br1_fspfx_shift"),
-    ("normalisation fixed",     1, "260824_0754_exp97r1_fscount_shift"),
-    ("normalisation fixed",     2, "260824_1058_exp97br1_fscount_shift"),
-    ("+ corr. + pace cap",      1, "260825_0133_exp98r1_fsboth_shift"),
-    ("+ corr. + pace cap",      2, "260825_0246_exp98r2_fsboth_shift"),
+    ("FluidServe\ndeployed (share)",                 1, "260824_0647_exp97r1_fspfx_shift"),
+    ("FluidServe\ndeployed (share)",                 2, "260824_0945_exp97br1_fspfx_shift"),
+    ("FluidServe\n+ normalisation fixed",            1, "260824_0754_exp97r1_fscount_shift"),
+    ("FluidServe\n+ normalisation fixed",            2, "260824_1058_exp97br1_fscount_shift"),
+    ("FluidServe\n+ per-inst. corr. + pace cap",     1, "260825_0133_exp98r1_fsboth_shift"),
+    ("FluidServe\n+ per-inst. corr. + pace cap",     2, "260825_0246_exp98r2_fsboth_shift"),
+    ("llm-d",                                        1, "260822_2303_exp93r1_llmdslo_shift"),
+    ("llm-d",                                        2, "260823_0129_exp93br1_llmdslo_shift"),
 ]
-ARM_ORDER = ["deployed (share)", "normalisation fixed", "+ corr. + pace cap"]
+ARM_ORDER = ["FluidServe\ndeployed (share)",
+             "FluidServe\n+ normalisation fixed",
+             "FluidServe\n+ per-inst. corr. + pace cap",
+             "llm-d"]
 
 
 def segments():
@@ -150,7 +165,7 @@ def draw(df, segs, out_base):
     arms = [a for a in ARM_ORDER if a in set(df["arm"])]
     ncols = len(segs)
     fig, axes = plt.subplots(2 * len(arms), ncols,
-                             figsize=(3.1 * ncols, 2.2 * len(arms)),
+                             figsize=(3.1 * ncols, 2.15 * len(arms)),
                              squeeze=False)
     for ai, arm in enumerate(arms):
         for si, (sname, t0, t1, chatpct) in enumerate(segs):
@@ -182,7 +197,7 @@ def draw(df, segs, out_base):
             ax.tick_params(labelsize=7)
             ax.set_ylim(0, bottom.max() * 1.20 if bottom.max() else 1)
             if si == 0:
-                ax.set_ylabel(f"{arm}\nrequests", fontsize=7)
+                ax.set_ylabel(f"{arm}\n(requests)", fontsize=6.6)
             if ai == 0:
                 ax.set_title(f"{sname}  (chat {chatpct:.0f}%)", fontsize=8)
 
@@ -203,20 +218,32 @@ def draw(df, segs, out_base):
                 ax2.set_ylabel("chat ITL\nmedian (ms)", fontsize=7)
             if ai == len(arms) - 1:
                 ax2.set_xlabel("engine (last digit of port)", fontsize=7)
-    h, l = axes[0][0].get_legend_handles_labels()
-    fig.legend(h, l, fontsize=7, ncol=3, frameon=False,
-               loc="upper center", bbox_to_anchor=(0.5, 0.945))
+    # Everything the reader has to decode is in the legend, not only the colours:
+    # the black rule and the number above each bar are quantities too, and a
+    # caption-only explanation is one the reader has to hold in their head while
+    # looking somewhere else.
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
+    h = [Patch(facecolor=CLASS_C[c], label=c) for c in CLASSES]
+    h += [Line2D([0], [0], color="k", lw=1.4,
+                 label="| chat share range over 3-min windows (short = steady)"),
+          Line2D([0], [0], color="none",
+                 label="12  = % of TIME that engine held no chat"),
+          Line2D([0], [0], marker="o", color="none",
+                 markerfacecolor=CLASS_C["chat"], markersize=5,
+                 label="lower panels: chat median ms/token, one point per repeat")]
+    fig.legend(handles=h, fontsize=7, ncol=3, frameon=False,
+               loc="upper center", bbox_to_anchor=(0.5, 0.955))
     fig.suptitle(
-        "Per-instance class binding by mix segment. Bars are both repeats summed; "
-        "the vertical rule on each bar is that engine's chat share over three-minute "
-        "windows inside the segment, so a short rule means the bar held throughout. "
-        "Numbers above bars are the % of sampled time the engine held no chat. "
+        "Per-instance class binding by mix segment. One column per segment because the "
+        "mix moves -- chat is 93, 33, 77 and 60 percent of arrivals across them -- so a "
+        "bar pooled over the hour would describe no segment. Bars are both repeats summed. "
         "Lower panels: chat median inter-token time per repeat against its 50 ms budget "
         "(note the axis starts at 38 ms, not 0). The no-chat number is a share of TIME "
         "while the bar is a count of REQUESTS, so an engine can hold most of the chat "
         "requests and still be chat-free half the time if those requests are short.",
         fontsize=7.2, y=0.998, wrap=True)
-    fig.tight_layout(rect=(0, 0, 1, 0.925))
+    fig.tight_layout(rect=(0, 0, 1, 0.905))
     for ext in ("pdf", "png"):
         fig.savefig(f"{out_base}.{ext}", dpi=200)
     print(f"wrote {out_base}.pdf / .png")
