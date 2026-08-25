@@ -59,7 +59,15 @@ from exp22_fluidserve import (  # noqa: E402
 ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe (prefix off)",
         "fsa": "FluidServe + margin", "polyserve": "PolyServe",
         "loadbalance": "Llumnix",
-        "fspfx": "FluidServe v0.2", "llmdslo": "llm-d"}
+        "fspfx": "FluidServe v0.2", "llmdslo": "llm-d",
+        # EXP-93/97's class-preference arms. `fscount` ranks the feasible
+        # instances by how many of the class each holds, `fsnoaff` has no class
+        # term at all. Registered here rather than after the figures were drawn,
+        # because an arm missing from this table is dropped in silence: unlike
+        # exp38_policy_compare.py this script has no abort on an unknown arm, so
+        # a run set of four came out as a figure of two and said nothing.
+        "fscount": "FluidServe (pref. by count)",
+        "fsnoaff": "FluidServe (class pref. off)"}
 # One colour per engine, held across every panel and both figures.
 ENG_C = {8000: "#1f77b4", 8001: "#ff7f0e", 8002: "#2ca02c", 8003: "#d62728"}
 WIN = 60.0  # seconds per point on the engine series
@@ -338,16 +346,36 @@ def main():
     # wrong when it did not, so the exclusion is stated instead of relied on.
     ap.add_argument("--exclude", nargs="*", default=[],
                     help="substrings; any run directory containing one is dropped")
+    # Naming a run outright, rather than describing it with a glob the script
+    # then resolves. One --pattern cannot address a set whose arms come from
+    # different sessions, and where it matches more than one run it takes
+    # sorted()[-1]: `*r1_fspfx_shift*` matches exp97r1 AND exp97br1, so asking
+    # for repeat 1 quietly drew repeat 2. A caller that has already decided
+    # which directory it means should be able to say so.
+    ap.add_argument("--run", nargs="*", default=[], metavar="ARM=DIR",
+                    help="explicit run per arm; when given, --pattern is unused")
     ap.add_argument("--out-dir", required=True)
     a = ap.parse_args()
     os.makedirs(a.out_dir, exist_ok=True)
 
     runs = {}
-    for arm in ARMS:
-        hits = [h for h in glob.glob(a.pattern.format(arm=arm, variant=a.variant))
-                if not any(x in h for x in a.exclude)]
-        if hits:
-            runs[arm] = sorted(hits)[-1]
+    if a.run:
+        for spec in a.run:
+            arm, _, d = spec.partition("=")
+            if not d:
+                sys.exit(f"--run wants ARM=DIR, got {spec!r}")
+            if not os.path.isdir(d):
+                sys.exit(f"--run {arm}: no such directory {d}")
+            if arm not in ARMS:
+                sys.exit(f"--run {arm}: not in ARMS, so it would be dropped from "
+                         f"the figure without a message. Add it to ARMS.")
+            runs[arm] = d
+    else:
+        for arm in ARMS:
+            hits = [h for h in glob.glob(a.pattern.format(arm=arm, variant=a.variant))
+                    if not any(x in h for x in a.exclude)]
+            if hits:
+                runs[arm] = sorted(hits)[-1]
     if not runs:
         sys.exit(f"no runs for variant {a.variant}")
     print(f"variant {a.variant}: {runs}")
