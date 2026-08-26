@@ -70,6 +70,7 @@ ARM_STYLE = {
     "llmdslo": dict(color="#8c564b", ls="-", marker="D", label="llm-d"),
     # EXP-98: per-instance correction / pace cap in the memory predicate.
     "fsboth": dict(color="#e377c2", ls="-", marker="s", label="FluidServe (per-inst. corr. + pace cap)"),
+    "fsinterleave": dict(color="#7f7f7f", ls="-", marker="D", label="FluidServe (+ interleave-aware first-token estimate)"),
     "fsdelay": dict(color="#17becf", ls="-", marker="^", label="FluidServe (+ per-inst. delay in deadline test)"),
     "fsdeadfix": dict(color="#8c564b", ls="-", marker="v", label="FluidServe (+ delay, deadline in feasibility)"),
     "fsnaboth": dict(color="#bcbd22", ls="--", marker="s", label="FluidServe (pref. off + corr. + pace cap)"),

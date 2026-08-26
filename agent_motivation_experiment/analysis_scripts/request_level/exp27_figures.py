@@ -45,6 +45,7 @@ from exp22_fluidserve import (  # noqa: E402
 ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
          # EXP-98.
          "fsboth": "#e377c2", "fsdelay": "#17becf", "fsdeadfix": "#8c564b",
+         "fsinterleave": "#7f7f7f",
          "fsnaboth": "#bcbd22",
          "fsdead": "#17becf",
          "fscorr": "#8c564b",
@@ -98,6 +99,7 @@ ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
 ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          # EXP-98.
          "fsboth": "FluidServe (per-inst. corr. + pace cap)",
+         "fsinterleave": "FluidServe (+ interleave-aware first-token estimate)",
          "fsdelay": "FluidServe (+ per-inst. delay in deadline test)",
          "fsdeadfix": "FluidServe (+ delay, deadline in feasibility)",
          "fsnaboth": "FluidServe (pref. off + corr. + pace cap)",
@@ -128,7 +130,7 @@ ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "fsindep": "FluidServe, rejection decided independently"}
 # Line style per arm for the latency CDFs, where colour already encodes class.
 ARM_LS = {"fluidserve": "-", "slo": "--", "polyserve": ":",
-          "fsboth": "-", "fsnaboth": "--", "fsdelay": "-", "fsdeadfix": "-", "fsdead": "-", "fscorr": "-", "fspacecap": "-",
+          "fsboth": "-", "fsnaboth": "--", "fsdelay": "-", "fsdeadfix": "-", "fsinterleave": "-", "fsdead": "-", "fscorr": "-", "fspacecap": "-",
           "fluidservefifo": "-", "fluidserveqoserve": "--",
           "slofifo": "-.", "sloqoserve": ":",
           "llmdslo": "-", "fspfx": "--", "fspfxb": "-.",

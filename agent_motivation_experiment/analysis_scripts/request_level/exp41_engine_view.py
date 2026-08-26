@@ -72,6 +72,7 @@ ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe (prefix off)",
         "fscorr": "FluidServe (per-inst. corr.)",
         "fspacecap": "FluidServe (pace cap)",
         "fsboth": "FluidServe (corr. + pace cap)",
+        "fsinterleave": "FluidServe (+ interleave-aware first-token estimate)",
         "fsdelay": "FluidServe (+ per-inst. delay in deadline test)",
         "fsdeadfix": "FluidServe (+ delay, deadline in feasibility)",
         # EXP-99.
