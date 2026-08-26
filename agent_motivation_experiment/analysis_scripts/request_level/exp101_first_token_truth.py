@@ -44,10 +44,27 @@ import pandas as pd
 DISPATCH = re.compile(
     r"^I(\d{2})(\d{2}) (\d{2}):(\d{2}):(\d{2})\.(\d{6})\s+\d+ \S+ "
     r"\[Schedule\] dispatch request ([0-9a-fA-F-]{8,}) to \S+ instance (\d+)")
+# Go prints an infinite float as "+Inf" and a NaN as "NaN", and a FORCED
+# placement onto an infeasible candidate is exactly where prefillMs is
+# infinite. A pattern that only accepted digits would drop those lines in
+# silence -- and they are the placements most likely to be late, so losing them
+# would flatter the estimate in the table this script exists to build.
+_NUM = r"[-+]?(?:\d+(?:\.\d+)?(?:[eE][-+]?\d+)?|Inf|NaN)"
 PLACEMENT = re.compile(
     r"\[Schedule\] dispatch request (\S+) fsplacement tier=(\d+) waited=(-?\d+) "
-    r"prefillest=([-\d.einf]+) prefillraw=([-\d.einf]+) prompt=(\d+) "
+    r"prefillest=(" + _NUM + r") prefillraw=(" + _NUM + r") prompt=(\d+) "
     r"decision=(\w+) inst=(\d+)")
+
+
+def _f(text):
+    """Go's float formatting into a Python float. +Inf and NaN are real
+    outcomes here, not parse failures."""
+    t = text.strip()
+    if t.endswith("Inf"):
+        return float("-inf") if t.startswith("-") else float("inf")
+    if t.endswith("NaN"):
+        return float("nan")
+    return float(t)
 
 # The first-token budget each class is judged on, in seconds. Same numbers the
 # scoring rules use; stated here rather than imported because this script must
@@ -84,8 +101,8 @@ def read_dispatch(path, year):
                 if u in pred:
                     continue
                 pred[u] = dict(tier=int(tier), waited_ms=float(waited),
-                               prefillest_ms=float(est),
-                               prefillraw_ms=float(raw),
+                               prefillest_ms=_f(est),
+                               prefillraw_ms=_f(raw),
                                prompt=int(prompt), decision=decision,
                                inst=inst)
     return when, pred
@@ -161,7 +178,10 @@ def report(run):
           f"{'seen/late':>11}{'false alarm':>13}{'pred p50':>10}{'pred p90':>10}")
     for cls, g in j.groupby("cls"):
         budget_ms = 1000.0 * TTFT_BUDGET.get(cls, np.nan)
-        # The decision's own test: waited + prefillest against the budget.
+        # The decision's own test: waited + prefillest against the budget. An
+        # infinite estimate counts as "expected late", which is what the
+        # decision path itself does -- missesTtftDeadline returns true outright
+        # on an infinite prefillMs.
         expected_late = (g.waited_ms + g.prefillest_ms) >= budget_ms
         was_late = (1000.0 * g.first_token_latency) >= budget_ms
         tp = int((expected_late & was_late).sum())
@@ -181,14 +201,17 @@ def report(run):
     # ORDERS the requests the way the outcome does.
     print("\n  rank correlation between the prediction and the outcome")
     for cls, g in j.groupby("cls"):
+        n_all = len(g)
         g = g[np.isfinite(g.prefillest_ms) & np.isfinite(g.post_s)]
+        dropped = n_all - len(g)
         if len(g) < 100:
             continue
         rho = g.prefillest_ms.corr(g.post_s, method="spearman")
         rho_tot = (g.waited_ms + g.prefillest_ms).corr(
             1000.0 * g.first_token_latency, method="spearman")
+        note = f"   [{dropped} non-finite predictions excluded]" if dropped else ""
         print(f"  {cls:>14}  prediction vs post-dispatch time {rho:+.3f}   "
-              f"(waited+prediction) vs whole first-token time {rho_tot:+.3f}")
+              f"(waited+prediction) vs whole first-token time {rho_tot:+.3f}{note}")
     print("  Near zero means the estimate carries no ordering information about "
           "the outcome, and then no threshold on it separates the two "
           "populations whatever constant it is given.")
