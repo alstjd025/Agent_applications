@@ -133,6 +133,15 @@ SCHEDULER_METRICS = {
     # cannot be checked from a run at all: the fleet series above is
     # published in both modes and looks identical.
     "scheduler_fluidserve_instance_correction",
+    # EXP-101: the placement-delay instrumentation. The two _ms_total counters
+    # are a pair -- realised over predicted is the ratio the experiment gates
+    # on -- and the samples counter is their common denominator.
+    "scheduler_fluidserve_placement_predicted_ms_total",
+    "scheduler_fluidserve_placement_realised_ms_total",
+    "scheduler_fluidserve_placement_samples_total",
+    "scheduler_fluidserve_instance_delay_mean_ms",
+    "scheduler_fluidserve_instance_delay_samples",
+    "scheduler_fluidserve_infeasible_sole_total",
     "scheduler_fluidserve_prefill_fraction",      # measured share of a prompt actually computed
     "scheduler_fluidserve_arriving_prefill_tokens",  # projected over the horizon
     "scheduler_fluidserve_queued_prefill_tokens",    # what the engine reports right now

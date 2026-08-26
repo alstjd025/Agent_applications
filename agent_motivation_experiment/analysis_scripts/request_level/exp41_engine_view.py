@@ -72,6 +72,8 @@ ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe (prefix off)",
         "fscorr": "FluidServe (per-inst. corr.)",
         "fspacecap": "FluidServe (pace cap)",
         "fsboth": "FluidServe (corr. + pace cap)",
+        "fsdelay": "FluidServe (+ per-inst. delay in deadline test)",
+        "fsdeadfix": "FluidServe (+ delay, deadline in feasibility)",
         # EXP-99.
         "fsnaboth": "FluidServe (pref. off + corr. + pace cap)",
         # EXP-100.
