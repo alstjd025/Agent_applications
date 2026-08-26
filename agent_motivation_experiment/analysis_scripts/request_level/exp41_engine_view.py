@@ -73,6 +73,9 @@ ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe (prefix off)",
         "fspacecap": "FluidServe (pace cap)",
         "fsboth": "FluidServe (corr. + pace cap)",
         "fsinterleave": "FluidServe (+ interleave-aware first-token estimate)",
+        # The second repeat of the same arm, drawn beside the first so the
+        # repeat-to-repeat movement is visible next to the difference under test.
+        "fsinterleave_r2": "FluidServe (interleave-aware, repeat 2)",
         "fsdelay": "FluidServe (+ per-inst. delay in deadline test)",
         "fsdeadfix": "FluidServe (+ delay, deadline in feasibility)",
         # EXP-99.
