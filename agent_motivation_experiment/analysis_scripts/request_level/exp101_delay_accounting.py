@@ -82,6 +82,10 @@ def report(run):
     per_inst = defaultdict(lambda: [0.0, 0.0, 0.0])
     gauges = {}
     sole, allr = defaultdict(float), defaultdict(float)
+    # Whether the counter EXISTS in this run, as distinct from being zero. The
+    # old binary does not publish it, and a table of zeroes reads as "no
+    # condition refused anything on its own", which is the opposite claim.
+    sole_present = any(split(k)[0] == SOLE for k in last)
     for key, hi in last.items():
         name, labels = split(key)
         lo = first.get(key, 0.0)
@@ -122,7 +126,13 @@ def report(run):
         print(f"  gate: real/pred must reach 1.0 +/- 0.1 -- "
               f"{'PASS' if abs(ratio - 1.0) <= 0.1 else 'FAIL'} at {ratio:.3f}")
 
-    if allr:
+    if allr and not sole_present:
+        print("  refusals by condition (the sole-condition counter is ABSENT "
+              "from this run, so the second question cannot be asked of it)")
+        print(f"  {'condition':>14} {'fired':>12}")
+        for reason in sorted(allr, key=lambda r: -allr[r]):
+            print(f"  {reason:>14} {allr[reason]:12.0f}")
+    elif allr:
         print("  refusals by condition: every firing, and the firings where "
               "that condition was the ONLY one refusing the candidate")
         print(f"  {'condition':>14} {'fired':>12} {'sole':>12} {'sole share':>11}")

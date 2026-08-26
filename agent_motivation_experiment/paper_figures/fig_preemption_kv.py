@@ -28,15 +28,15 @@ other figure in this paper.
 ⚠ THE TWO PANELS CANNOT BE READ SEPARATELY, BECAUSE ZERO PREEMPTIONS HAPPENS FOR
 TWO OPPOSITE REASONS. llm-d sits at zero at every rate, and not because it is
 healthy: it refuses 52-80% of arrivals from 35 req/s on and its KV pool holds
-28-32%, so its engines are short of work and there is nothing to evict. Its
+27.9-32.0%, so its engines are short of work and there is nothing to evict. Its
 token throughput is the lowest of the four. The right panel is what separates
 starved from comfortable from thrashing, and the caption has to say that the
 left panel alone ranks nothing.
 
 ⚠ AND PREEMPTIONS FALLING IS NOT AN IMPROVEMENT EITHER. PolyServe drops from
-3,175 at 35 req/s to 1,902 at 70. At 70 one of its engines holds a waiting queue
-of 7,738 requests, so most arrivals never enter the running batch at all and
-cannot be evicted from it. Preemption counts the requests that got in and were
+3,270 at 35 req/s to 1,896 at 70. At 70 its busiest engine holds a waiting queue
+whose 90th percentile is 7,640 and 8,200 requests in the two repeats, so most
+arrivals never enter the running batch at all and cannot be evicted from it. Preemption counts the requests that got in and were
 then pushed out, so a queue deep enough to block entry drives the count DOWN.
 Said plainly: the arm with the fewest evictions at 70 req/s among the three that
 evict at all is the arm doing worst.
@@ -46,14 +46,17 @@ last and the first sample of `vllm:num_preemptions_total` in each engine's own
 metrics file, summed over the four engines, per 8-minute condition. KV occupancy
 is the mean of `vllm:kv_cache_usage_perc` over the four engines and every sample
 in the condition -- a mean, not a peak, so a pool that is full half the time
-reads near 50 rather than near 100. Error bars are min..max over repeats and a
-point with no bar is one run, which is not the same as a precise one.
+reads near 50 rather than near 100. Error bars are min..max over the two
+repeats; a point whose bar is invisible is one where the two runs agreed, not
+one that was measured once.
 
 DATA. The same runs and the same `ARMS` table as `fig_intro_capacity.py`, which
-this imports rather than copying: PolyServe and Llumnix SLO from EXP-72 (one
-repeat at every rate), llm-d from EXP-68/70 (two repeats at 35-70, one at 10-25),
-the vLLM router from EXP-77 (two repeats at every rate). Eight rates, the
-workload as fixed on 2026-08-08. The exploratory version of this figure, with
+this imports rather than copying. EXP-80 (2026-08-13) filled the 23 cells that
+had only one run, so EVERY ARM NOW HAS TWO REPEATS AT ALL EIGHT RATES -- the 80
+runs pinned in `paper_experiment/static_sweep_2026-08/`. Every point therefore
+carries an error bar, and it is min..max over two, which is a floor on the
+spread rather than an estimate of it. The workload is the one fixed on
+2026-08-08. The exploratory version of this figure, with
 FluidServe and with both panels stacked, is
 `analysis_scripts/request_level/preemption_vs_rate.py`.
 
@@ -114,8 +117,9 @@ def series(run):
     idle ones read as a fleet at the middle, which is exactly PolyServe's state.
     The busiest-engine variant is in
     `analysis_scripts/request_level/engine_state_p90.py`, and for PolyServe the
-    two differ a great deal -- queue p90 2,794 averaged against 7,640 on the
-    engine that holds the class carrying 77% of the requests.
+    two differ a great deal -- at 70 req/s the fleet average is 2,794 and 2,936
+    over the two repeats against 7,640 and 8,200 on the engine holding the class
+    that carries 77% of the requests.
     """
     total, seen = 0.0, 0
     per = collections.defaultdict(list)
@@ -253,8 +257,8 @@ def build_grid(data, arms, out, panels=GRID_PANELS, nrow=2, height=GRID_H):
     (b) IS THE 90TH PERCENTILE HERE AND THE MEAN IN THE TWO-PANEL FIGURE, and the
     difference is not cosmetic. A preemption fires when the pool runs out, so
     what predicts one is the top of the KV distribution rather than its centre.
-    On the mean, Llumnix SLO reads 70-76% at 35-70 req/s and looks like it has
-    room; on p90 it reads 98-100% and does not. The mean answers "how much memory
+    On the mean, Llumnix SLO reads 69.7-75.6% at 35-70 req/s and looks like it
+    has room; on p90 it reads 98.0-99.9% and does not. The mean answers "how much memory
     was in use over the run", which is a different question and is what the
     two-panel figure asks.
 
@@ -350,6 +354,7 @@ def main():
     build(data, arms, os.path.join(HERE, "preemption_kv_wide.pdf"),
           ps.TEXT_W, 1.62)
     build_grid(data, arms, os.path.join(HERE, "engine_state_2x2.pdf"))
+    build_grid(data, arms_fs, os.path.join(HERE, "engine_state_2x2_fs.pdf"))
     build_grid(data, arms, os.path.join(HERE, "engine_state_1x2.pdf"),
                panels=GRID_PANELS[:2], nrow=1, height=ROW_H)
     build_grid(data, arms_fs, os.path.join(HERE, "engine_state_1x2_fs.pdf"),
