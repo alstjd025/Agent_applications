@@ -102,7 +102,8 @@ def report(run):
         elif name == ALL:
             allr[label_value(labels, "reason")] += delta
         elif name == JOINT:
-            joint[label_value(labels, "cell")] += delta
+            joint[(label_value(labels, "tier"),
+                   label_value(labels, "cell"))] += delta
 
     print(f"\n{os.path.basename(run)}")
     if not per_inst:
@@ -130,28 +131,31 @@ def report(run):
               f"{'PASS' if abs(ratio - 1.0) <= 0.1 else 'FAIL'} at {ratio:.3f}")
 
     if joint:
-        tp = joint.get("slow_slow", 0.0)
-        fn = joint.get("fast_slow", 0.0)
-        fp = joint.get("slow_fast", 0.0)
-        tn = joint.get("fast_fast", 0.0)
-        n = tp + fn + fp + tn
-        print("  did the decision expect a slow first token when the first "
+        # The tier is the class's per-token budget in milliseconds, which is how
+        # the scheduler names a class everywhere else.
+        names = {"25": "swe", "50": "chat", "100": "deepresearch"}
+        print("  did the decision expect a slow first token where the first "
               "token was in fact slow, at the 10 s line")
-        print(f"  {'':>22}{'was slow':>12}{'was fast':>12}")
-        print(f"  {'expected slow':>22}{tp:12.0f}{fp:12.0f}")
-        print(f"  {'expected fast':>22}{fn:12.0f}{tn:12.0f}")
-        if n:
+        print(f"  {'class':>14}{'placed':>9}{'was late':>10}{'foreseen':>10}"
+              f"{'seen/late':>11}{'false alarm':>13}")
+        tiers = sorted({t for t, _ in joint})
+        for tier in tiers:
+            tp = joint.get((tier, "slow_slow"), 0.0)
+            fn = joint.get((tier, "fast_slow"), 0.0)
+            fp = joint.get((tier, "slow_fast"), 0.0)
+            tn = joint.get((tier, "fast_fast"), 0.0)
+            n = tp + fn + fp + tn
             late = tp + fn
-            print(f"  of {late:.0f} placements whose first token took 10 s or "
-                  f"more ({100.0 * late / n:.1f}% of {n:.0f}), the decision "
-                  f"expected {100.0 * tp / late if late else float('nan'):.1f}% "
-                  f"of them to be slow")
-            print(f"  and of {tp + fp:.0f} it expected to be slow, "
-                  f"{100.0 * fp / (tp + fp) if (tp + fp) else float('nan'):.1f}% "
-                  f"were in fact fast -- what refusing on this estimate costs")
-            print("  a test can only refuse what it can see: if the first "
-                  "percentage is near zero the estimate carries no signal "
-                  "about the outcome and no threshold on it separates the two")
+            flagged = tp + fp
+            recall = (100.0 * tp / late) if late else float("nan")
+            alarm = (100.0 * fp / flagged) if flagged else float("nan")
+            print(f"  {names.get(tier, tier):>14}{n:9.0f}{late:10.0f}"
+                  f"{tp:10.0f}{recall:10.1f}%{alarm:12.1f}%")
+        print("  seen/late is how much of the late work a first-token test "
+              "could refuse at all; false alarm is what refusing on it costs.")
+        print("  A test can only refuse what it can see: near zero on the "
+              "first column and no threshold on this estimate separates the "
+              "two populations, whatever constant it is given.")
 
     if allr and not sole_present:
         print("  refusals by condition (the sole-condition counter is ABSENT "
