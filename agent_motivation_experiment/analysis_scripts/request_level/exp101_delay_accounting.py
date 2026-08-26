@@ -34,6 +34,7 @@ SAMP = "scheduler_fluidserve_placement_samples_total"
 SOLE = "scheduler_fluidserve_infeasible_sole_total"
 ALL  = "scheduler_fluidserve_infeasible_total"
 DMEAN = "scheduler_fluidserve_instance_delay_mean_ms"
+JOINT = "scheduler_fluidserve_placement_joint_total"
 
 
 def series(path):
@@ -81,7 +82,7 @@ def report(run):
 
     per_inst = defaultdict(lambda: [0.0, 0.0, 0.0])
     gauges = {}
-    sole, allr = defaultdict(float), defaultdict(float)
+    sole, allr, joint = defaultdict(float), defaultdict(float), defaultdict(float)
     # Whether the counter EXISTS in this run, as distinct from being zero. The
     # old binary does not publish it, and a table of zeroes reads as "no
     # condition refused anything on its own", which is the opposite claim.
@@ -100,6 +101,8 @@ def report(run):
             sole[label_value(labels, "reason")] += delta
         elif name == ALL:
             allr[label_value(labels, "reason")] += delta
+        elif name == JOINT:
+            joint[label_value(labels, "cell")] += delta
 
     print(f"\n{os.path.basename(run)}")
     if not per_inst:
@@ -125,6 +128,30 @@ def report(run):
               f"{tr/ts if ts else 0:9.1f} {ratio:10.3f}")
         print(f"  gate: real/pred must reach 1.0 +/- 0.1 -- "
               f"{'PASS' if abs(ratio - 1.0) <= 0.1 else 'FAIL'} at {ratio:.3f}")
+
+    if joint:
+        tp = joint.get("slow_slow", 0.0)
+        fn = joint.get("fast_slow", 0.0)
+        fp = joint.get("slow_fast", 0.0)
+        tn = joint.get("fast_fast", 0.0)
+        n = tp + fn + fp + tn
+        print("  did the decision expect a slow first token when the first "
+              "token was in fact slow, at the 10 s line")
+        print(f"  {'':>22}{'was slow':>12}{'was fast':>12}")
+        print(f"  {'expected slow':>22}{tp:12.0f}{fp:12.0f}")
+        print(f"  {'expected fast':>22}{fn:12.0f}{tn:12.0f}")
+        if n:
+            late = tp + fn
+            print(f"  of {late:.0f} placements whose first token took 10 s or "
+                  f"more ({100.0 * late / n:.1f}% of {n:.0f}), the decision "
+                  f"expected {100.0 * tp / late if late else float('nan'):.1f}% "
+                  f"of them to be slow")
+            print(f"  and of {tp + fp:.0f} it expected to be slow, "
+                  f"{100.0 * fp / (tp + fp) if (tp + fp) else float('nan'):.1f}% "
+                  f"were in fact fast -- what refusing on this estimate costs")
+            print("  a test can only refuse what it can see: if the first "
+                  "percentage is near zero the estimate carries no signal "
+                  "about the outcome and no threshold on it separates the two")
 
     if allr and not sole_present:
         print("  refusals by condition (the sole-condition counter is ABSENT "

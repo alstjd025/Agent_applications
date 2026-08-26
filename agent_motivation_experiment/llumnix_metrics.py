@@ -139,6 +139,7 @@ SCHEDULER_METRICS = {
     "scheduler_fluidserve_placement_predicted_ms_total",
     "scheduler_fluidserve_placement_realised_ms_total",
     "scheduler_fluidserve_placement_samples_total",
+    "scheduler_fluidserve_placement_joint_total",
     "scheduler_fluidserve_instance_delay_mean_ms",
     "scheduler_fluidserve_instance_delay_samples",
     "scheduler_fluidserve_infeasible_sole_total",
