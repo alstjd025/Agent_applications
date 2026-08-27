@@ -45,7 +45,7 @@ spec:
             - { name: TRACE, value: "__TRACE__" }
             - { name: LOAD_PROCS, value: "12" }
             - { name: ARM, value: "__ARM__" }
-            - { name: TRANSCRIPT, value: "/work/results/exp10_transcript/transcript_swe_short7k_mix1500.jsonl" }
+            - { name: TRANSCRIPT, value: "/work/workloads/codingagent_request_level_poisson/data/transcript_swe_short7k_mix1500.jsonl" }
             - { name: WCFG_PATH, value: "__WCFG__" }
             # CHANGED 2. The client sends the two SLO headers and the objective
             # header only when these are set; unset, it sends what it always

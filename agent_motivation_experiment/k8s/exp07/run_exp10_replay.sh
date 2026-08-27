@@ -12,7 +12,7 @@ set -uo pipefail
 cd "$(dirname "$0")"
 META=../../results/exp07_meta
 mkdir -p "$META"
-TRANSCRIPT=../../results/exp10_transcript/transcript_swe_calls.jsonl
+TRANSCRIPT=../../workloads/codingagent_request_level_poisson/data/transcript_swe_calls.jsonl
 LAMBDAS="1,2,3,4,5,6,8,10,12,16,20"
 DURMIN=8
 

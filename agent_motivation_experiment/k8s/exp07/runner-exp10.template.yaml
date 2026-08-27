@@ -29,7 +29,7 @@ spec:
             - { name: HF_HOME, value: /hf-cache }
             - { name: HF_HUB_OFFLINE, value: "1" }
             - { name: HF_DATASETS_OFFLINE, value: "1" }
-            - { name: TRANSCRIPT, value: "/work/results/exp10_transcript/transcript_swe_calls.jsonl" }
+            - { name: TRANSCRIPT, value: "/work/workloads/codingagent_request_level_poisson/data/transcript_swe_calls.jsonl" }
             - { name: LAMBDA_LIST, value: "__LAMBDAS__" }
             - { name: DURATION_MIN, value: "__DURMIN__" }
             - { name: LOAD_PROCS, value: "8" }

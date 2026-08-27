@@ -33,7 +33,7 @@ spec:
             - { name: DURATION_MIN, value: "__DURMIN__" }
             - { name: LOAD_PROCS, value: "12" }
             - { name: ARM, value: "__ARM__" }
-            - { name: TRANSCRIPT, value: "/work/results/exp10_transcript/transcript_swe_short7k_mix1500.jsonl" }
+            - { name: TRANSCRIPT, value: "/work/workloads/codingagent_request_level_poisson/data/transcript_swe_short7k_mix1500.jsonl" }
             - { name: WCFG_PATH, value: "__WCFG__" }
             # EXP-64. The per-request output-length table, mounted from the same
             # hostPath as the rest of /work. BOTH arms carry it -- what differs is

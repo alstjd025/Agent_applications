@@ -44,7 +44,7 @@ declare -A MIXCFG=(
   [m1f]=/work/workload_configs/mix_short_m1_slofair.json
 )
 HOSTWORK=/home/nxclab/llumnix_reproduce/Agent_applications/agent_motivation_experiment
-SHORT_TRANSCRIPT="$HOSTWORK/results/exp10_transcript/transcript_swe_short7k_mix1500.jsonl"
+SHORT_TRANSCRIPT="$HOSTWORK/workloads/codingagent_request_level_poisson/data/transcript_swe_short7k_mix1500.jsonl"
 
 check_stack() {
   local th bin mig extra

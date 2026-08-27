@@ -81,7 +81,7 @@ declare -A WCFG_FAIR=(
   [azcode]=/work/workload_configs/mix_azcode_w60_m1_slofair.json
   [shift]=/work/workload_configs/mix_dyn60_shift_m2Am1B_b1045_slofair.json
 )
-SHORT_TRANSCRIPT="$HOSTWORK/results/exp10_transcript/transcript_swe_short7k_mix1500.jsonl"
+SHORT_TRANSCRIPT="$HOSTWORK/workloads/codingagent_request_level_poisson/data/transcript_swe_short7k_mix1500.jsonl"
 
 check_stack() {
   local th bin mig extra

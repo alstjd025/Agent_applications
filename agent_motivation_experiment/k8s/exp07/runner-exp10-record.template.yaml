@@ -3,7 +3,7 @@
 # swe_bench_coding_tool_delay at 0.5 jobs/s for 60 min, admission OFF,
 # single load proc (multi-proc appends could interleave the ~22KB JSONL
 # lines), recording every successful call's full prompt + timings to
-# results/exp10_transcript/transcript_swe_calls.jsonl for literal replay.
+# workloads/codingagent_request_level_poisson/data/transcript_swe_calls.jsonl for literal replay.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -28,7 +28,7 @@ spec:
             - { name: HF_HOME, value: /hf-cache }
             - { name: HF_HUB_OFFLINE, value: "1" }
             - { name: HF_DATASETS_OFFLINE, value: "1" }
-            - { name: TRANSCRIPT, value: "/work/results/exp10_transcript/transcript_swe_calls.jsonl" }
+            - { name: TRANSCRIPT, value: "/work/workloads/codingagent_request_level_poisson/data/transcript_swe_calls.jsonl" }
             - { name: RESULT_UID, value: "3092" }
             - { name: RESULT_GID, value: "1999" }
           command: ["/bin/bash", "-lc"]

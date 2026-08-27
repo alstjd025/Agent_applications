@@ -48,8 +48,8 @@ does reach for them can tell.
 Usage
 -----
     python workloads/codingagent_request_level_poisson/build_short_transcript.py \
-        --in  results/exp10_transcript/transcript_swe_calls_mix1500.jsonl \
-        --out results/exp10_transcript/transcript_swe_short7k_mix1500.jsonl \
+        --in  workloads/codingagent_request_level_poisson/data/transcript_swe_calls_mix1500.jsonl \
+        --out workloads/codingagent_request_level_poisson/data/transcript_swe_short7k_mix1500.jsonl \
         --target-mean-tokens 7000
 """
 

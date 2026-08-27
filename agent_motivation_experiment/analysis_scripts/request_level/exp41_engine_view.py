@@ -77,6 +77,10 @@ ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe (prefix off)",
         "fsv3_r2": "FluidServe v0.3 (repeat 2)",
         "fsv3noaff": "FluidServe v0.3 (class preference off)",
         "fsv3noaff_r2": "FluidServe v0.3, preference off (repeat 2)",
+        "fsv3b40": "FluidServe v0.3 (swe budget 40 s)",
+        "fsv3b40_r2": "FluidServe v0.3 (swe 40 s, repeat 2)",
+        "fsv3noaffb40": "FluidServe v0.3 (swe 40 s, preference off)",
+        "fsv3noaffb40_r2": "FluidServe v0.3 (swe 40 s, preference off, repeat 2)",
         # The second repeat of the same arm, drawn beside the first so the
         # repeat-to-repeat movement is visible next to the difference under test.
         "fsinterleave_r2": "FluidServe (interleave-aware, repeat 2)",

@@ -33,7 +33,7 @@ spec:
             - { name: DURATION_MIN, value: "__DURMIN__" }
             - { name: LOAD_PROCS, value: "12" }
             - { name: ARM, value: "__ARM__" }
-            - { name: TRANSCRIPT, value: "/work/results/exp10_transcript/transcript_swe_short7k_mix1500.jsonl" }
+            - { name: TRANSCRIPT, value: "/work/workloads/codingagent_request_level_poisson/data/transcript_swe_short7k_mix1500.jsonl" }
             - { name: WCFG_PATH, value: "__WCFG__" }
             # Output-token cap. Unset, agent.py falls back to DEFAULT_MAX_TOKENS
             # = 2048, and the deep-research class was being cut there: with the

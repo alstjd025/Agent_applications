@@ -50,10 +50,26 @@ import matplotlib.pyplot as plt  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from plot_per_engine_attainment import class_of  # noqa: E402
 
+# swe's end-to-end budget is settable from the environment, in seconds, because
+# a sensitivity condition varies it and the POLICY's copy of it moves too (the
+# --fluidserve-class-budgets flag, set from FS_SWE_E2E_MS). If only one of the
+# two moved, the scheduler and the scorer would judge the same requests against
+# different budgets and neither would say so.
+#
+# It is loud on purpose. A run scored at one budget cannot be compared with a run
+# scored at another, and the failure mode is that nobody notices, so an override
+# announces itself on every import.
+_SWE_E2E_S = float(os.environ.get("FS_SWE_E2E_S", "30.0"))
+if abs(_SWE_E2E_S - 30.0) > 1e-9:
+    print(f"!! FS_SWE_E2E_S={_SWE_E2E_S}: swe is being scored against a "
+          f"{_SWE_E2E_S} s end-to-end budget, NOT the standard 30 s. Numbers "
+          f"from this run are not comparable with numbers scored at 30 s.",
+          file=sys.stderr)
+
 SLO_RULES = {
     "chat":         {"ttft": 5.0,  "tbt": 50.0},
     "deepresearch": {"ttft": 10.0, "tbt": 100.0},
-    "swe":          {"e2e": 30.0},
+    "swe":          {"e2e": _SWE_E2E_S},
 }
 CLASSES = ["chat", "deepresearch", "swe"]
 CLASS_COLORS = {"chat": "#1f77b4", "deepresearch": "#ff7f0e", "swe": "#d62728"}
@@ -73,6 +89,8 @@ ARM_STYLE = {
     "fsinterleave": dict(color="#7f7f7f", ls="-", marker="D", label="FluidServe (+ interleave-aware first-token estimate)"),
     "fsv3": dict(color="#1f77b4", ls="-", marker="o", label="FluidServe v0.3"),
     "fsv3noaff": dict(color="#ff7f0e", ls="--", marker="x", label="FluidServe v0.3 (class preference off)"),
+    "fsv3b40": dict(color="#2ca02c", ls="-", marker="s", label="FluidServe v0.3 (swe budget 40 s)"),
+    "fsv3noaffb40": dict(color="#8c564b", ls="--", marker="v", label="FluidServe v0.3 (swe 40 s, preference off)"),
     "fsdelay": dict(color="#17becf", ls="-", marker="^", label="FluidServe (+ per-inst. delay in deadline test)"),
     "fsdeadfix": dict(color="#8c564b", ls="-", marker="v", label="FluidServe (+ delay, deadline in feasibility)"),
     "fsnaboth": dict(color="#bcbd22", ls="--", marker="s", label="FluidServe (pref. off + corr. + pace cap)"),

@@ -27,7 +27,7 @@
   },
   "deepresearch_config": {},
   "swe_config": {
-    "transcript_file": "/work/results/exp10_transcript/transcript_swe_short7k_mix1500.jsonl"
+    "transcript_file": "/work/workloads/codingagent_request_level_poisson/data/transcript_swe_short7k_mix1500.jsonl"
   },
   "mean_input_tokens": {
     "chat": 674,

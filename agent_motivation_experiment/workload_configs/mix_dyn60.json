@@ -22,7 +22,7 @@
   "class_plan_file": "/work/traces/dynamic/canonical/dyn60_azure4d.csv",
   "chat_config": {"num_conversations": 1000},
   "deepresearch_config": {},
-  "swe_config": {"transcript_file": "/work/results/exp10_transcript/transcript_swe_calls_mix1500.jsonl"},
+  "swe_config": {"transcript_file": "/work/workloads/codingagent_request_level_poisson/data/transcript_swe_calls_mix1500.jsonl"},
   "slo": {
     "chat":         {"ttft_ms": 5000,  "tbt_ms": 50,  "out_len": 386},
     "deepresearch": {"ttft_ms": 10000, "tbt_ms": 100, "out_len": 275},
