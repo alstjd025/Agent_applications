@@ -37,6 +37,7 @@ ARM_GLOBS = [
     ("force off", "#2ca02c", ["*exp107r[12]_fsv3nofrc_shift"]),
     ("cap + force off", "#d62728", ["*exp107r[12]_fsv3capnofrc_shift"]),
     ("guardrail cap", "#7b3294", ["*exp107gr[12]_fsv3capg_shift"]),
+    ("guardrail + force off", "#e6550d", ["*exp107hr[12]_fsv3capgnofrc_shift"]),
     ("llm-d", "#8c564b", ["*exp93r1_llmdslo_shift", "*exp93br1_llmdslo_shift"]),
 ]
 CLASSES = ["chat", "deepresearch", "swe"]

@@ -27,6 +27,8 @@ B1=$(ls -d results/*exp107r1_fsv3capnofrc_shift 2>/dev/null | head -1)
 B2=$(ls -d results/*exp107r2_fsv3capnofrc_shift 2>/dev/null | head -1)
 G1=$(ls -d results/*exp107gr1_fsv3capg_shift 2>/dev/null | head -1)
 G2=$(ls -d results/*exp107gr2_fsv3capg_shift 2>/dev/null | head -1)
+H1=$(ls -d results/*exp107hr1_fsv3capgnofrc_shift 2>/dev/null | head -1)
+H2=$(ls -d results/*exp107hr2_fsv3capgnofrc_shift 2>/dev/null | head -1)
 L1=$(ls -d results/*exp93r1_llmdslo_shift 2>/dev/null | head -1)
 L2=$(ls -d results/*exp93br1_llmdslo_shift 2>/dev/null | head -1)
 
@@ -36,7 +38,7 @@ L2=$(ls -d results/*exp93br1_llmdslo_shift 2>/dev/null | head -1)
 # header-only metrics.csv (~600 bytes) marks exactly that state, so require
 # real content before a run may join the set.
 complete() { [ -n "$1" ] && [ -s "$1/metrics.csv" ] && [ "$(wc -c < "$1/metrics.csv")" -gt 100000 ]; }
-for v in C1 C2 K1 K2 F1 F2 B1 B2 G1 G2 L1 L2; do
+for v in C1 C2 K1 K2 F1 F2 B1 B2 G1 G2 H1 H2 L1 L2; do
   d=${!v}
   if [ -n "$d" ] && ! complete "$d"; then
     echo "  NOTE: $(basename "$d") is incomplete (metrics.csv not merged) -- skipped"
@@ -51,6 +53,7 @@ for pair in "fsv3 control rep 1|$C1" "fsv3 control rep 2|$C2" \
             "fsv3nofrc rep 1|$F1" "fsv3nofrc rep 2|$F2" \
             "fsv3capnofrc rep 1|$B1" "fsv3capnofrc rep 2|$B2" \
             "capg rep 1|$G1" "capg rep 2|$G2" \
+            "capg+nofrc rep 1|$H1" "capg+nofrc rep 2|$H2" \
             "llm-d rep 1|$L1" "llm-d rep 2|$L2"; do
   name=${pair%%|*}; dir=${pair#*|}
   if [ -n "$dir" ]; then printf "  %-22s %s\n" "$name" "$dir"
@@ -60,7 +63,7 @@ done
 
 echo
 echo "=== engine attribution"
-for d in "$C1" "$C2" "$K1" "$K2" "$F1" "$F2" "$B1" "$B2" "$G1" "$G2" "$L1" "$L2"; do
+for d in "$C1" "$C2" "$K1" "$K2" "$F1" "$F2" "$B1" "$B2" "$G1" "$G2" "$H1" "$H2" "$L1" "$L2"; do
   [ -n "$d" ] || continue
   [ -f "$d/analysis/request_engine.csv" ] && { echo "  $(basename "$d") already built"; continue; }
   python3 "$R/build_request_engine_map.py" "$d" 2>&1 | tail -1 | sed 's/^/  /'
@@ -77,6 +80,8 @@ SERIES=(); HOUR=(); RUNS=(); EV=()
 [ -n "$B2" ] && { SERIES+=("cap + force off rep 2|#ff9896|-.|$B2"); HOUR+=("cap + force off rep 2|#ff9896|$B2"); RUNS+=("$B2"); EV+=("fsv3capnofrc_r2=$B2"); }
 [ -n "$G1" ] && { SERIES+=("guardrail cap rep 1|#7b3294|-|$G1"); HOUR+=("guardrail cap rep 1|#7b3294|$G1"); RUNS+=("$G1"); EV+=("fsv3capg=$G1"); }
 [ -n "$G2" ] && { SERIES+=("guardrail cap rep 2|#c994c7|-|$G2"); HOUR+=("guardrail cap rep 2|#c994c7|$G2"); RUNS+=("$G2"); EV+=("fsv3capg_r2=$G2"); }
+[ -n "$H1" ] && { SERIES+=("guardrail+force-off rep 1|#e6550d|-|$H1"); HOUR+=("guardrail+force-off rep 1|#e6550d|$H1"); RUNS+=("$H1"); EV+=("fsv3capgnofrc=$H1"); }
+[ -n "$H2" ] && { SERIES+=("guardrail+force-off rep 2|#fdae6b|-|$H2"); HOUR+=("guardrail+force-off rep 2|#fdae6b|$H2"); RUNS+=("$H2"); EV+=("fsv3capgnofrc_r2=$H2"); }
 [ -n "$L1" ] && { SERIES+=("llm-d rep 1|#8c564b|--|$L1"); HOUR+=("llm-d rep 1|#8c564b|$L1"); RUNS+=("$L1"); EV+=("llmdslo=$L1"); }
 [ -n "$L2" ] && { SERIES+=("llm-d rep 2|#c49c94|--|$L2"); HOUR+=("llm-d rep 2|#c49c94|$L2"); RUNS+=("$L2"); EV+=("llmdslo_r2=$L2"); }
 
