@@ -189,7 +189,7 @@ set_arm() {
         FS_PER_INSTANCE_CORR FS_MEMORY_PACE_CAP FS_DEADLINE_FEASIBLE \
         FS_PER_INSTANCE_DELAY FS_DEADLINE_USES_DELAY \
         FS_SHED_NO_FIRST_TOKEN FS_PREFILL_INTERLEAVE FS_SWE_E2E_MS \
-        FS_INSTANCE_CAP FS_CAP_WINDOW_MULT FS_FORCE
+        FS_INSTANCE_CAP FS_CAP_WINDOW_MULT FS_FORCE FS_SWE_TBT_MS
   # Then write the v0.2 configuration out, so that no arm depends on a compiled
   # default. An arm wanting v0.3 behaviour overrides these below; an arm that
   # does not is pinned to what its existing results were measured under.
@@ -428,6 +428,16 @@ set_arm() {
                                           FS_MEMORY_PACE_CAP=true FS_PREFILL_INTERLEAVE=true \
                                           FS_INSTANCE_CAP=true FS_CAP_WINDOW_MULT=3.0 FS_FORCE=false \
                                           FS_SWE_E2E_MS=40000 ;;
+    # EXP-107T. The adopted configuration with the agent class's SLO in
+    # PER-TOKEN form: budget 25:decode:75 (tier key stays 25 -- it names the
+    # class in every profile; the third field is the real budget) and TTFT
+    # 7,000 ms via the _t75 workload config. Scoring: ttft<=7s AND mean
+    # per-token <=75 ms; the t75 suffix records the form, per the b40 rule.
+    fsv3capgnofrct75) policy=fluidserve; export FS_PREFIX=true FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false \
+                                          FS_AFFINITY_METRIC=count FS_PER_INSTANCE_CORR=true \
+                                          FS_MEMORY_PACE_CAP=true FS_PREFILL_INTERLEAVE=true \
+                                          FS_INSTANCE_CAP=true FS_CAP_WINDOW_MULT=3.0 FS_FORCE=false \
+                                          FS_SWE_TBT_MS=75 ;;
     fsdelay)     policy=fluidserve; export FS_AFFINITY_METRIC=count FS_PREFIX=true FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false \
                                           FS_PER_INSTANCE_CORR=true FS_MEMORY_PACE_CAP=true \
                                           FS_PER_INSTANCE_DELAY=true FS_DEADLINE_USES_DELAY=true ;;
@@ -544,6 +554,9 @@ run_cell() {  # $1 arm, $2 variant (ablation|full)
   local trace=${TRACE[$variant]:-} wcfg=${WCFG[$variant]:-}
   if [ "$arm" = "slo" ] && [ -n "${WCFG_FAIR[$variant]:-}" ]; then
     wcfg=${WCFG_FAIR[$variant]}
+  fi
+  if [ "$arm" = "fsv3capgnofrct75" ]; then
+    wcfg=/work/workload_configs/mix_dyn60_shift_m2Am1B_b1045_t75.json
   fi
   [ -n "$trace" ] || { echo "[exp30] unknown variant '$variant'"; return 1; }
   [ -s "${HOSTWORK}${trace#/work}" ] || { echo "[exp30] missing $trace"; return 1; }

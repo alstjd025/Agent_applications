@@ -1,0 +1,72 @@
+{
+ "_comment": [
+  "EXP-93. The mix-shift stress trace. Same hour, same arrival band 10-45 req/s,",
+  "same seed, and the SAME ARRIVAL TIMES as mix_dyn60_short_m123_b1045.json --",
+  "the two plan CSVs are byte-identical in the arrival_s column and differ only",
+  "in the class label of 46,632 of the 99,242 rows. Only the mix schedule moved,",
+  "so any difference between a run on this trace and a run on that one is",
+  "attributable to the class mix and not to the arrival process.",
+  "",
+  "Mix schedule m2,A,m1,B instead of m1,m2,m3,m1, by request count:",
+  "  s0 m2  chat 93.0 / deepresearch  4.7 / swe  2.3 %",
+  "  s1 A   chat 33.3 / deepresearch 33.3 / swe 33.3 %   <- the even region",
+  "  s2 m1  chat 76.9 / deepresearch 15.4 / swe  7.7 %",
+  "  s3 B   chat 60.0 / deepresearch 30.0 / swe 10.0 %",
+  "",
+  "Why. The deployed hour trace moves chat between 66.7% and 93.0% of the",
+  "requests and never approaches an even mix, so the claim that the system is",
+  "robust to a shift in the class mix is currently supported only inside a",
+  "chat-majority region. This schedule reaches 33.3% and steps in both",
+  "directions (93.0 -> 33.3 -> 76.9 -> 60.0), which widens the measured shift",
+  "and tests recovery rather than only degradation.",
+  "",
+  "What the shift does to capacity, which is the point of the experiment: the",
+  "arrival band is unchanged while the workload's weight per request is not.",
+  "Mean input tokens per request, derived from the class means (chat 674,",
+  "deepresearch 4,055, swe 6,812), are about 970 in s0 and about 3,850 in s1, a",
+  "factor of four, and FluidServe v0.2's 90% knee is 28.0 req/s on m1 against an",
+  "estimated 12.5 req/s on the even mix (extrapolated from EXP-92's two rates,",
+  "15 and 20 req/s, so it is an estimate and not a measurement). The arrival",
+  "rate therefore crosses a knee that the arrival rate itself did not move.",
+  "",
+  "KNOWN LIMITATION, recorded rather than fixed. The swe transcript holds 1,500",
+  "records. On m1 the class is 1/13 of the arrivals, so a record returns every",
+  "9.1 minutes, which is longer than both the engine's prompt residence (about 1",
+  "minute) and the scheduler's prefix index (about 2.8 minutes). In the s1",
+  "segment the class is 1/3 of the arrivals and a record returns about every 2.7",
+  "minutes, which is inside the scheduler's prefix index, so swe's prefix hit",
+  "rate is inflated in that segment. Both arms see the same trace, but they",
+  "exploit prefix reuse through different mechanisms, so the segment-1 numbers",
+  "are not a clean comparison of prefix behaviour. Enlarging the transcript is a",
+  "separate open task and would trade this for a worse problem (a 13,218-record",
+  "build has 98.9% structural prefix sharing against this sample's 78.9%).",
+  "",
+  "Derived from mix_dyn60_short_m123_b1045.json; only class_plan_file changed.",
+  "EXP-107T variant: ONLY slo.swe.ttft_ms moved 11800 -> 7000. tbt_ms stays 25 because it is the tier KEY (profiles and logs name the class by it); the real per-token budget 75 ms is stated policy-side via --fluidserve-class-budgets 25:decode:75 and scoring-side by the per-token rule at 75 ms, with the arm name (t75) recording the form."
+ ],
+ "class_plan_file": "/work/traces/dynamic/canonical/dyn60_shift_m2Am1B_b1045.csv",
+ "chat_config": {
+  "num_conversations": 10000
+ },
+ "deepresearch_config": {},
+ "swe_config": {
+  "transcript_file": "/work/workloads/codingagent_request_level_poisson/data/transcript_swe_short7k_mix1500.jsonl"
+ },
+ "slo": {
+  "chat": {
+   "ttft_ms": 5000,
+   "tbt_ms": 50,
+   "out_len": 386
+  },
+  "deepresearch": {
+   "ttft_ms": 10000,
+   "tbt_ms": 100,
+   "out_len": 275
+  },
+  "swe": {
+   "ttft_ms": 7000,
+   "tbt_ms": 25,
+   "out_len": 728
+  }
+ }
+}
