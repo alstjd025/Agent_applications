@@ -66,10 +66,32 @@ if abs(_SWE_E2E_S - 30.0) > 1e-9:
           f"from this run are not comparable with numbers scored at 30 s.",
           file=sys.stderr)
 
+# FS_SWE_TBT_MS switches swe to the per-token FORM (TTFT + mean per-token time,
+# like chat and deepresearch) instead of an end-to-end budget. This mirrors the
+# scheduler-side env of the same name (set_scheduler_profiling.py builds
+# --fluidserve-class-budgets "25:decode:<ms>" from it), so the policy and the
+# scorer switch forms together. TTFT comes from FS_SWE_TTFT_S (default 7).
+# Mutually exclusive with FS_SWE_E2E_S: the two envs describe different forms
+# of the same promise and setting both means nobody knows which one ran.
+_SWE_TBT_MS = os.environ.get("FS_SWE_TBT_MS")
+if _SWE_TBT_MS is not None and abs(_SWE_E2E_S - 30.0) > 1e-9:
+    raise SystemExit("FS_SWE_TBT_MS and FS_SWE_E2E_S are both set; pick one form")
+if _SWE_TBT_MS is not None:
+    _SWE_TTFT_S = float(os.environ.get("FS_SWE_TTFT_S", "7.0"))
+    _SWE_RULE = {"ttft": _SWE_TTFT_S, "tbt": float(_SWE_TBT_MS)}
+    print(f"!! FS_SWE_TBT_MS={_SWE_TBT_MS}: swe is being scored in PER-TOKEN "
+          f"form (TTFT <= {_SWE_TTFT_S} s, mean per-token <= {_SWE_TBT_MS} ms), "
+          f"NOT the standard end-to-end 30 s. swe columns from this scoring "
+          f"must never sit in a table with e2e-scored swe columns, and any "
+          f"citation must carry the effective e2e this promise implies.",
+          file=sys.stderr)
+else:
+    _SWE_RULE = {"e2e": _SWE_E2E_S}
+
 SLO_RULES = {
     "chat":         {"ttft": 5.0,  "tbt": 50.0},
     "deepresearch": {"ttft": 10.0, "tbt": 100.0},
-    "swe":          {"e2e": _SWE_E2E_S},
+    "swe":          _SWE_RULE,
 }
 CLASSES = ["chat", "deepresearch", "swe"]
 CLASS_COLORS = {"chat": "#1f77b4", "deepresearch": "#ff7f0e", "swe": "#d62728"}

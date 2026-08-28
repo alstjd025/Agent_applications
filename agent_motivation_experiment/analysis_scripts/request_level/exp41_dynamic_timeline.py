@@ -122,25 +122,43 @@ def main():
     # An explicit series list, for comparisons the arm name cannot express: two
     # runs of the SAME arm that differ in something outside the policy, such as
     # the length profile, or arms drawn from different experiments. Repeatable,
-    # as label|colour|linestyle|glob. When given it replaces the arm registry.
+    # as label|colour|linestyle|glob[|swe-rule]. When given it replaces the arm
+    # registry. The optional fifth field re-scores THAT series' swe rows under
+    # its own promise instead of the global SLO_RULES: "e2e:40" (seconds) or
+    # "tok:7:75" (TTFT seconds, mean per-token ms). This exists because arms
+    # measured under different swe promise FORMS (EXP-107T) can only share a
+    # figure if each is scored by the rule it actually ran under -- and then the
+    # swe columns are different quantities, which the labels must say.
     ap.add_argument("--series", nargs="*", default=[],
-                    help="label|colour|linestyle|glob, repeatable")
+                    help="label|colour|linestyle|glob[|swe-rule], repeatable")
     ap.add_argument("--out-dir", required=True)
     a = ap.parse_args()
     os.makedirs(a.out_dir, exist_ok=True)
 
     arms = dict(ARMS)
     runs = {}
+    swe_rules = {}
     if a.series:
         arms = {}
         for spec in a.series:
-            lab, col, ls, pat = spec.split("|", 3)
+            parts = spec.split("|")
+            if len(parts) not in (4, 5):
+                sys.exit(f"bad series spec (want 4 or 5 fields): {spec!r}")
+            lab, col, ls, pat = parts[:4]
             hits = [h for h in glob.glob(pat)
                     if not any(x in h for x in a.exclude)]
             if not hits:
                 sys.exit(f"series {lab!r} matched nothing: {pat}")
             arms[lab] = (lab, col, ls)
             runs[lab] = sorted(hits)[-1]
+            if len(parts) == 5:
+                f = parts[4].split(":")
+                if f[0] == "e2e" and len(f) == 2:
+                    swe_rules[lab] = ("e2e", float(f[1]))
+                elif f[0] == "tok" and len(f) == 3:
+                    swe_rules[lab] = ("tok", float(f[1]), float(f[2]))
+                else:
+                    sys.exit(f"bad swe-rule {parts[4]!r} (want e2e:<s> or tok:<s>:<ms>)")
     else:
         for arm in ARMS:
             hits = [h for h in glob.glob(a.pattern.format(arm=arm, variant=a.variant))
@@ -152,6 +170,27 @@ def main():
     print(f"variant {a.variant}: {list(runs)}")
 
     data = {arm: load_run(d) for arm, d in runs.items()}
+    # Per-series swe re-score. load_run scored every run with the global
+    # SLO_RULES; a series carrying its own rule gets its swe rows re-judged
+    # from the same three quantities the global rule used (first-token latency,
+    # end-to-end latency, and the corrected mean inter-token time that load_run
+    # publishes as itl_ms). Only the two violate_* columns move; chat and
+    # deepresearch rows are untouched, so panels C/D/G mix swe rules across
+    # arms exactly as the labels state.
+    for arm, rule in swe_rules.items():
+        r = data[arm]
+        m = r["class"] == "swe"
+        ttft = pd.to_numeric(r["first_token_latency"], errors="coerce")
+        e2e = pd.to_numeric(r["latency"], errors="coerce")
+        if rule[0] == "e2e":
+            miss = e2e > rule[1]
+        else:
+            miss = (ttft > rule[1]) | (r["itl_ms"] > rule[2])
+        miss = miss | (ttft.isna() & ~r["cutoff"])
+        r.loc[m, "violate_served"] = miss[m]
+        r.loc[m, "violate_offered"] = (miss[m] | r.loc[m, "rejected"]
+                                       | r.loc[m, "errored"])
+        print(f"swe re-scored for {arm!r}: {rule}")
     dur = min(r["rel"].max() for r in data.values())
 
     with plt.rc_context(PAPER_STYLE):
@@ -245,8 +284,13 @@ def main():
         # allowed (CLAUDE.md, 2026-08-01) but a reader has to be told, because
         # the spread to judge a difference against depends on it.
         src = ", ".join(f"{arms[k][0]}: {os.path.basename(runs[k])}" for k in data)
-        fig.suptitle(f"{a.title} {a.variant} — one hour of moving load, {who}, "
-                     f"stock FIFO (one run each)\n{src}", fontsize=8.5, y=1.02)
+        # Wrapped, because bbox_inches="tight" fits the CANVAS to the ink: an
+        # unwrapped source line naming seven run directories once widened the
+        # saved image to 8,870 px while the axes stayed at a third of that.
+        import textwrap
+        fig.suptitle(textwrap.fill(
+            f"{a.title} {a.variant} — one hour of moving load, {who}, "
+            f"stock FIFO (one run each). {src}", 150), fontsize=8.5, y=1.03)
         fig.tight_layout()
         # Shared with exp41_engine_view so the two figures of one run agree on
         # their names. A title naming two experiments -- "EXP-54/57", which is

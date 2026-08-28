@@ -298,6 +298,18 @@ e2e-채점 표와도 비교 금지. n=1, 같은 규칙 대조군 없음.
   원칙의 정직한 가격.
 - ⚠ 이 run도 백업 전송과 병행(카나리아는 §10.1에서 건강 확인).
 
+**그림 (자기 규칙 채점, `results/aggregate_analysis/exp107_capforce/`)**:
+- `exp107t_own_rule_timeline.png` — 3패널(offered / admitted / swe admitted),
+  각 arm을 자기 약속으로 채점(t75만 7s/75ms, 나머지는 e2e 30s).
+- `exp107t_ownrule_full_timeline.png` — 표준 8패널 타임라인의 같은 채점 판.
+  `exp41_dynamic_timeline.py`에 `--series`의 다섯째 필드(`tok:7:75` /
+  `e2e:<s>`)로 series별 swe 재채점을 추가해 그렸다(2026-08-28). 채점기
+  `exp22_fluidserve.py`도 `FS_SWE_TBT_MS` 환경변수로 per-token 형태 전환을
+  지원한다(정책 쪽과 같은 이름, 켜면 import마다 경고).
+- ⚠ 두 그림 모두 swe 열이 arm마다 **다른 양**이다 — 숫자 비교 금지, 모양 비교만.
+  공통 30초 잣대 판(`exp107t_comparison` 계열)과 반드시 같이 놓는다. t75를
+  인용할 때는 유효 e2e(admitted swe p50 34.2s, >30s 62.7%)를 병기한다.
+
 **재개 후 첫 실험 셋**: ⑴ t75 반복 2 + 규칙-대조 arm(fsv3에 t75 SLO만 얹은 것 —
 cap·force와 형태 전환의 몫 분리), ⑵ 배치 줄 `meanAfter` 계측(§10.2의 미결 한 칸),
 ⑶ v0.4 기본값 이동.
