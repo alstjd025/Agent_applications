@@ -18,3 +18,9 @@ qwen-bailian-usagetraces-anon/
 # two below broke every push until the history was rewritten on 2026-08-28.
 agent_motivation_experiment/workloads/codingagent_request_level_poisson/data/transcript_swe_calls.jsonl
 agent_motivation_experiment/workloads/codingagent_request_level_poisson/data/transcript_swe_calls_mix1500.jsonl
+
+# macOS AppleDouble sidecars. A backup copy of this tree on an exFAT volume
+# grows one ._<name> file per real file, and a single `git add -A` from such
+# a copy would commit all of them.
+._*
+.DS_Store
