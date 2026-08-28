@@ -11,3 +11,10 @@ sglang/
 results/
 # Cloned dataset repo (separate git repo, 26M)
 qwen-bailian-usagetraces-anon/
+
+# SWE replay transcripts over GitHub's 100 MB limit. They live on disk and in
+# the NHNHOME backup (md5-verified at the 2026-08-27 recovery); the 51 MB
+# short7k file that the workload actually replays IS tracked. Committing the
+# two below broke every push until the history was rewritten on 2026-08-28.
+agent_motivation_experiment/workloads/codingagent_request_level_poisson/data/transcript_swe_calls.jsonl
+agent_motivation_experiment/workloads/codingagent_request_level_poisson/data/transcript_swe_calls_mix1500.jsonl

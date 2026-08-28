@@ -43,3 +43,15 @@ structural prefix share  81.5% -> 78.9%
    swe의 `task_id`에서 `__r\d+$`를 떼면 transcript의 `request_id`이고, `input_tokens`가
    `recorded_input_tokens`와 정확히 같아야 한다. 2026-08-27 복구 때 EXP-104 두 run의
    12,886건에서 **없는 레코드 0개, 입력 토큰 평균 차이 +0.0**으로 확인했다.
+
+## 2026-08-28 — git 히스토리에서 큰 두 파일을 뺐다
+
+`transcript_swe_calls.jsonl`(1,562,495,220 B, md5 `2eda3b39ac36fc34307b6d1db5bde683`)와
+`transcript_swe_calls_mix1500.jsonl`(177,861,405 B, md5 `62304fb17d2c6eab5bd6c18339b98b1b`)는
+GitHub 100 MB 한도를 넘어 push가 거부되어, 2026-08-28에 최근 6커밋을 재작성해
+추적에서 뺐다(디스크·NHNHOME 백업에는 그대로 있고, 위 md5가 대조 기준이다).
+재작성 중 filter-branch의 checkout이 작업 트리에서 두 파일을 지웠고, 재작성 전
+ref(`refs/original/`)의 blob에서 바이트 동일하게 즉시 복구했다 — git 객체는 내용
+주소이므로 이 md5들이 곧 복구 검증이다. 재발 방지로 저장소 .gitignore에 두 경로가
+등록되어 있다. replay가 실제로 읽는 `transcript_swe_short7k_mix1500.jsonl`(51 MB)은
+계속 git 추적 대상이다.
