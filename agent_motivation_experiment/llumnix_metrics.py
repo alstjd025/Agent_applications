@@ -117,6 +117,21 @@ SCHEDULER_METRICS = {
     "scheduler_fluidserve_topshare_total",         # taken / tie / blocked / passed_over
     "scheduler_fluidserve_topshare_blocked_total",  # which predicate stopped the
                                                    # instance holding most of the class
+    # EXP-107. The class-instance cap: per tier, the demand-derived limit on
+    # how many instances the class may gate, the current gate-holder count,
+    # the arrival-rate estimate behind the limit, and what the filter removed.
+    # The `instcap_` prefix is deliberate -- `cap_kv_tokens` below is an older,
+    # unrelated series and loose greps must not conflate them. The shed-reason
+    # split (cannot_meet / no_feasible) is the force-branch replacement's
+    # accounting: what share of rejections protects the request itself versus
+    # the requests already running.
+    "scheduler_fluidserve_instcap_limit",
+    "scheduler_fluidserve_instcap_gate_count",
+    "scheduler_fluidserve_instcap_lambda",
+    "scheduler_fluidserve_instcap_excluded_total",
+    "scheduler_fluidserve_instcap_blocked_feasible_total",
+    "scheduler_fluidserve_instcap_empty_fallback_total",
+    "scheduler_fluidserve_shed_reason_total",
     "scheduler_fluidserve_headroom_tokens",       # per instance
     "scheduler_fluidserve_cap_kv_tokens",         # latency-imposed capacity
     "scheduler_fluidserve_projected_kv_tokens",

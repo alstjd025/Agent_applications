@@ -70,6 +70,9 @@ ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
              # EXP-98: the per-instance correction and the pace cap in the
              # memory predicate, separately and together.
              "fscorr", "fspacecap", "fsboth", "fsdelay", "fsdeadfix", "fsinterleave", "fsv3", "fsv3noaff", "fsv3b40", "fsv3noaffb40",
+             # EXP-107: the class-instance cap and the force branch off,
+             # separately and together, over the fsv3 base.
+             "fsv3cap", "fsv3nofrc", "fsv3capnofrc", "fsv3capg", "fsv3capgnofrc",
              # EXP-99: the same two changes with the class preference OFF.
              "fsnaboth",
              # EXP-100.
@@ -91,6 +94,11 @@ ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
              "fsv3noaff": "FluidServe v0.3\n(class preference off)",
              "fsv3b40": "FluidServe v0.3\n(swe budget 40 s)",
              "fsv3noaffb40": "FluidServe v0.3\n(swe 40 s, pref. off)",
+             "fsv3cap": "FluidServe v0.3\n(+ class-instance cap)",
+             "fsv3nofrc": "FluidServe v0.3\n(force off)",
+             "fsv3capnofrc": "FluidServe v0.3\n(cap, force off)",
+             "fsv3capg": "FluidServe v0.3\n(+ cap, guardrail form)",
+             "fsv3capgnofrc": "FluidServe v0.3\n(guardrail cap, force off)",
              "fsdelay": "FluidServe\n(+ per-inst. delay\nin deadline test)",
              "fsdeadfix": "FluidServe\n(+ delay, deadline\nin feasibility)",
              "fsnaboth": "FluidServe\n(class pref. off\n+ corr. + pace cap)",
