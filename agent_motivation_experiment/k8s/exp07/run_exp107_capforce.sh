@@ -418,6 +418,16 @@ set_arm() {
                                           FS_AFFINITY_METRIC=count FS_PER_INSTANCE_CORR=true \
                                           FS_MEMORY_PACE_CAP=true FS_PREFILL_INTERLEAVE=true \
                                           FS_INSTANCE_CAP=true FS_CAP_WINDOW_MULT=3.0 FS_FORCE=false ;;
+    # EXP-107I (final): the candidate configuration with swe's end-to-end budget
+    # at 40 s. The b40 suffix follows EXP-105's rule -- the budget moves in the
+    # policy (FS_SWE_E2E_MS) here AND in the scorer (FS_SWE_E2E_S=40) at
+    # analysis time, and the arm name records which budget scored it. Its
+    # budget-matched control is EXP-105's fsv3b40 runs, NOT the 30 s arms.
+    fsv3capgnofrcb40) policy=fluidserve; export FS_PREFIX=true FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false \
+                                          FS_AFFINITY_METRIC=count FS_PER_INSTANCE_CORR=true \
+                                          FS_MEMORY_PACE_CAP=true FS_PREFILL_INTERLEAVE=true \
+                                          FS_INSTANCE_CAP=true FS_CAP_WINDOW_MULT=3.0 FS_FORCE=false \
+                                          FS_SWE_E2E_MS=40000 ;;
     fsdelay)     policy=fluidserve; export FS_AFFINITY_METRIC=count FS_PREFIX=true FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false \
                                           FS_PER_INSTANCE_CORR=true FS_MEMORY_PACE_CAP=true \
                                           FS_PER_INSTANCE_DELAY=true FS_DEADLINE_USES_DELAY=true ;;
