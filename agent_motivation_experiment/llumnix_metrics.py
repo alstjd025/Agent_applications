@@ -94,6 +94,21 @@ SCHEDULER_METRICS = {
     "scheduler_polyserve_tier_servers",
     "scheduler_polyserve_tier_demand",
     "scheduler_polyserve_live_servers",
+    # The idle pool of section 4.3 and the two events that move servers in and
+    # out of it, so that a run can be asked whether the allocation moved at all
+    # and what moved it. With four servers and three tiers the pool is expected
+    # to be empty for most of a run, and a series that is flat at zero is the
+    # answer to that question rather than a missing measurement.
+    "scheduler_polyserve_pool_servers",
+    "scheduler_polyserve_scale_total",           # from_pool / from_tier / to_pool
+    # Which rung of the placement ladder each request left on: own_tier,
+    # promotion, scale_up, forced, pending, refused. Without this a run where
+    # admission never binds and one where it binds but promotion absorbs
+    # everything are identical in every request-level metric.
+    "scheduler_polyserve_placement_total",
+    # And why a server refused, split by the rung it refused on:
+    # first_token / second_token / steady_state / memory.
+    "scheduler_polyserve_refused_total",
     # FluidServe. Same reason as above: the per-decision detail is only in the
     # scheduler's log, which does not survive an hour-long run. What the run has
     # to be able to answer afterwards is why each request went where it did, so
