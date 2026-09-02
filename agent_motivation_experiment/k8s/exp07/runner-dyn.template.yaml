@@ -17,6 +17,21 @@
 #                                        the trough rate (phase=warmup)
 #   no --post-duration-grace             the trace driver ignores it and always
 #                                        drains in flight work; the k8s job
+#
+# EXP-109: --post-duration-grace 600. --disable-timeouts removes every
+# client-side abort, so a policy that does not reject keeps a backlog the run
+# then waits out. The vLLM router's hour took 293 MINUTES to drain and was still
+# 50.9% unfinished when the driver's 300-minute deadline fired, which left its
+# Job running while the next arm started on the same fleet -- two runners on one
+# cluster, and the second one's numbers are not of the thing it names.
+# Ten minutes is far more than the arms that reject need: their in-flight share
+# at minute 61 is 0.2-0.6%, so they finish inside the grace and their numbers do
+# not move. Requests abandoned at the end are recorded as agent=grace_cut with
+# is_server_terminated=True. load_run counts those in the ARRIVAL denominator
+# and attain() drops them from both ATTAINMENT denominators, so an attainment
+# from a run with a large grace_cut share is computed over the requests that
+# finished -- the fast ones -- and the unfinished share has to be reported
+# beside it.
 #                                        timeout is the real backstop
 #
 # Placeholders: __JOBNAME__ __SESSION__ __TRACE__ __WCFG__ __ARM__
@@ -87,6 +102,7 @@ spec:
                 --load-threads 2048 \
                 --restart-server --restart-per-condition \
                 --disable-timeouts \
+                --post-duration-grace 600 \
                 --workload-config "${WCFG}" \
                 --priority-mode deadline \
                 --max-tokens "${MAX_TOKENS}" \

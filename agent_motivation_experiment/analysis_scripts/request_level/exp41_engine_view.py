@@ -68,6 +68,18 @@ ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe (prefix off)",
         # a run set of four came out as a figure of two and said nothing.
         "fscount": "FluidServe (pref. by count)",
         "fsnoaff": "FluidServe (class pref. off)",
+        # EXP-108/109. The per-token form of the agent class's promise: the
+        # SAME policies as slo / polyserve / vllmcache above, on a workload file
+        # that promises 75 ms per token instead of restating a 30 s end-to-end
+        # budget. The t75 suffix is in the arm name so that two sets of numbers
+        # which cannot share a table do not look like repeats of each other, and
+        # it has to be here too or the arm is dropped from this figure without a
+        # message.
+        "fsv3capgnofrct75": "FluidServe v0.4",
+        "llmdslot75": "llm-d",
+        "polyservept75": "PolyServe (paper mechanisms)",
+        "slot75": "Llumnix SLO",
+        "vllmcachet75": "vLLM router",
         # EXP-98.
         "fscorr": "FluidServe (per-inst. corr.)",
         "fspacecap": "FluidServe (pace cap)",

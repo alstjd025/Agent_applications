@@ -1109,11 +1109,28 @@ class MotivationExperimentRunner:
                           bar_format="{desc}: {n}/{total} submitted, {postfix}")
 
         pending = set()
+        # task id and submit time per in-flight future, so that a request
+        # abandoned by the post-duration grace is recorded against the task it
+        # actually was. Without it those rows carry task_id "unknown" and drop
+        # out of every per-class breakdown, which is worse than not having them:
+        # they still count in the arrival denominator.
+        futinfo = {}
         experiment_start = time.monotonic()
         idx = 0  # index of the next arrival to submit
 
         try:
-            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            # NOT `with ThreadPoolExecutor(...)`. Exiting a with-block calls
+            # shutdown(wait=True), which joins every worker thread -- including
+            # the ones the post-duration grace has just abandoned. The grace
+            # writes its grace_cut rows, calls shutdown(wait=False), and the
+            # with-block then undoes that and waits anyway. That is why
+            # --post-duration-grace had no effect on this path even after it was
+            # wired in: the flag fired and the block behind it waited. The rate
+            # and poisson paths build the executor exactly like this, WITHOUT a
+            # with-block, which is why the flag works there -- the same code in
+            # three places, one of which behaved differently.
+            ex = ThreadPoolExecutor(max_workers=max_workers)
+            try:
                 while True:
                     now = time.monotonic()
                     elapsed = now - experiment_start
@@ -1126,6 +1143,8 @@ class MotivationExperimentRunner:
                             break
                         fut = ex.submit(self.run_single_job, task)
                         pending.add(fut)
+                        futinfo[fut] = (self.workload.task_log_info(task).task_id,
+                                        time.time())
                         stats["submitted"] += 1
                         idx += 1
                         elapsed = time.monotonic() - experiment_start
@@ -1134,6 +1153,18 @@ class MotivationExperimentRunner:
                     # in-flight jobs observe the termination event.
                     if idx >= n:
                         self.signal_server_terminated()
+                        # Bounded drain: see --post-duration-grace. Leaving the
+                        # `with ThreadPoolExecutor` block calls shutdown(wait=True),
+                        # which waits for EVERY in-flight request however long it
+                        # takes -- and this mode never called the grace cut, so
+                        # the flag was accepted, written into run_config, and had
+                        # no effect. A policy that does not reject then never
+                        # ends: the vLLM router's hour ran 293 minutes on
+                        # 2026-09-01, then 171 more after the flag was added, and
+                        # its runner outlived the driver's deadline both times.
+                        if self.post_duration_grace > 0:
+                            self._grace_cut_pending(ex, pending, futinfo, stats)
+                            pending = set()
                         break
 
                     if pending:
@@ -1158,6 +1189,12 @@ class MotivationExperimentRunner:
                             f"{stats['server_terminated']} srv-kill"
                         )
                         self._pbar.refresh()
+            finally:
+                # Join the workers only when no grace was asked for. With a
+                # grace the abandoned threads are left to be reaped by the next
+                # condition's cold restart, which is what the flag's help text
+                # promises and what the other two paths already do.
+                ex.shutdown(wait=(self.post_duration_grace <= 0))
         finally:
             time.sleep(3)
             if self._pbar:

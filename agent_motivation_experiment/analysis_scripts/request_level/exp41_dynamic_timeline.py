@@ -131,6 +131,14 @@ def main():
     # swe columns are different quantities, which the labels must say.
     ap.add_argument("--series", nargs="*", default=[],
                     help="label|colour|linestyle|glob[|swe-rule], repeatable")
+    # A request still in flight when the run ends leaves BOTH attainment
+    # denominators, so the last windows of a backlogged arm keep only the
+    # requests that finished -- the fast ones -- and read far too high. On
+    # EXP-54 that drew a near-vertical rise at minute 60 for the arm that was
+    # doing worst. Cut every arm at the same minute, chosen from
+    # in_flight_at_end.py, and say in the caption where the cut is.
+    ap.add_argument("--cut-min", type=float, default=None,
+                    help="drop arrivals after this many minutes, every series alike")
     ap.add_argument("--out-dir", required=True)
     a = ap.parse_args()
     os.makedirs(a.out_dir, exist_ok=True)
@@ -191,6 +199,11 @@ def main():
         r.loc[m, "violate_offered"] = (miss[m] | r.loc[m, "rejected"]
                                        | r.loc[m, "errored"])
         print(f"swe re-scored for {arm!r}: {rule}")
+    if a.cut_min is not None:
+        for k in list(data):
+            data[k] = data[k][data[k]["rel"] < a.cut_min * 60.0]
+        print(f"cut at {a.cut_min:.0f} min: every series trimmed alike "
+              f"(rows now {{k: len(v) for k, v in data.items()}})")
     dur = min(r["rel"].max() for r in data.values())
 
     with plt.rc_context(PAPER_STYLE):

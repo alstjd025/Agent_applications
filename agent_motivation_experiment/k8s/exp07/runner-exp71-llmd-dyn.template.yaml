@@ -97,7 +97,7 @@ spec:
                 --priority-mode deadline \
                 --max-tokens "${MAX_TOKENS}" \
                 --model meta-llama/Meta-Llama-3.1-70B-Instruct \
-                --post-duration-grace 60 \
+                --post-duration-grace 600 \
                 --output-dir /work/results \
                 --session-name "__SESSION__" \
                 --metrics-interval 1.0

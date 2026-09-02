@@ -54,6 +54,11 @@ from exp22_fluidserve import PAPER_STYLE, arm_of  # noqa: E402
 # check below turns that from something to notice into something that fails.
 ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
              "fluidserve", "fspfx", "fspfxb",
+             # EXP-108/109. The per-token form of the agent class's promise.
+             # Registered before the figures are drawn, because the check below
+             # aborts on an unregistered arm and that abort is the point.
+             "fsv3capgnofrct75", "llmdslot75", "polyservept75",
+             "slot75", "vllmcachet75",
              # EXP-73's ladder. Registered before that sweep's engine-layer
              # figures are drawn rather than after, because the check below
              # aborts on an unregistered arm and the abort is the point: an arm
@@ -77,7 +82,10 @@ ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
              "fsnaboth",
              # EXP-100.
              "fsdead"]
-ARM_LABEL = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
+ARM_LABEL = {"fsv3capgnofrct75": "FluidServe v0.4", "llmdslot75": "llm-d",
+             "polyservept75": "PolyServe (paper mech.)",
+             "slot75": "Llumnix SLO", "vllmcachet75": "vLLM router",
+             "polyserve": "PolyServe", "slo": "Llumnix SLO",
              "loadbalance": "Llumnix", "llmdslo": "llm-d",
              "fspnopend": "FluidServe\n(holding off)",
              "fspnoaff": "FluidServe\n(class pref. off)",
