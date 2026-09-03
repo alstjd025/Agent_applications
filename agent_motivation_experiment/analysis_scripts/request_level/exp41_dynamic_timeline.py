@@ -206,6 +206,9 @@ def main():
               f"(rows now {{k: len(v) for k, v in data.items()}})")
     dur = min(r["rel"].max() for r in data.values())
 
+    # Per-series offered-rate curves, kept so panel A's title can state whether
+    # the series really do share a trace instead of assuming it.
+    _panelA_rates = {}
     with plt.rc_context(PAPER_STYLE):
         fig, ax = plt.subplots(4, 2, figsize=(11.0, 10.6), sharex=True)
         ax = ax.ravel()
@@ -229,17 +232,19 @@ def main():
                     sub = g[g["class"] == cl]
                     per_off[cl].append(attain(sub, "violate_offered"))
                     per_adm[cl].append(attain(sub, "violate_served"))
-            # A: the load. Drawn once per arm; they see the same trace, so the
-            # two lines lying on top of each other is the check that they did.
+            # A: the load. Drawn once per arm. Whether the series share a trace
+            # is CHECKED below rather than asserted in the title -- see the note
+            # where the title is built.
             b = (r["rel"] // STEP).astype(int)
             # Panels where the arm is already carried by colour are drawn
             # SOLID. The registered line style is used only in E and F, where
             # colour encodes the class and the style is the only thing left to
             # separate the policies. Mixing the two conventions made a reader
             # ask whether a dashed attainment line meant a different quantity.
-            ax[0].plot(np.array(sorted(b.unique())) * STEP / 60.0,
-                       b.value_counts().sort_index().values / STEP,
-                       color=c, lw=0.7, alpha=0.8, label=lab)
+            _bx = np.array(sorted(b.unique())) * STEP / 60.0
+            _by = b.value_counts().sort_index().values / STEP
+            _panelA_rates[lab] = _by
+            ax[0].plot(_bx, _by, color=c, lw=0.7, alpha=0.8, label=lab)
             ax[1].plot(x, rej, color=c, label=lab)
             ax[2].plot(x, off, color=c, label=lab)
             ax[3].plot(x, adm, color=c, label=lab)
@@ -252,7 +257,41 @@ def main():
                 ax[7].plot(eng[0], eng[1], color=c, label=f"{lab} batch")
                 ax[7].plot(eng[0], eng[2] * 20, color=c, ls=":", lw=0.8, alpha=0.6)
 
-        titles = [f"A. offered rate (30 s bins) — all {len(data)} arms see the same trace",
+        # Panel A asserted that every series replays the same trace. That holds
+        # when the figure compares policies and fails when it compares one policy
+        # across two traces -- EXP-113 draws Qwen2.5-72B on a thinned hour beside
+        # Llama-3.1-70B on the unthinned one, and the panel was captioned "all 3
+        # arms see the same trace" over two visibly different rate curves. The
+        # claim is now read off the curves that were actually drawn.
+        # What this compares is the arrivals the client ACTUALLY ISSUED, which is
+        # not the same thing as the trace file it was given. An arm that does not
+        # reject back-pressures the load generator: its workers stay bound to
+        # in-flight requests and it falls behind the schedule, then catches up.
+        # EXP-113 measured exactly that -- the four arms replay one file, and in
+        # minutes 51-54 the vLLM router issued 704/700/551/702 arrivals where the
+        # other three issued about 1,700 each, and its run ran 149 s longer. So
+        # the warning below says the realised streams differ, which is true and
+        # is the thing a reader must know before comparing offered denominators;
+        # it does NOT claim the trace files differ. The last tenth of the bins is
+        # excluded because the run boundary truncates it for every arm.
+        _rs = [np.asarray(v, dtype=float) for v in _panelA_rates.values()]
+        same_trace = True
+        if len(_rs) > 1:
+            n = min(len(r) for r in _rs)
+            n = max(1, int(n * 0.9))
+            base = _rs[0][:n]
+            scale = max(1.0, float(np.nanmax(base)))
+            for r in _rs[1:]:
+                if float(np.nanmax(np.abs(r[:n] - base))) > 0.05 * scale:
+                    same_trace = False
+                    break
+        _a_title = (f"A. offered rate (30 s bins) — all {len(data)} arms see the same trace"
+                    if same_trace else
+                    # Short enough not to run into panel B's title. The reason a
+                    # same-file replay can still differ is in the comment above
+                    # and in the experiment record, not on the canvas.
+                    "A. offered rate (30 s bins) — REALISED ARRIVALS DIFFER")
+        titles = [_a_title,
                   "B. rejection rate — what separates C from D",
                   f"C. attainment, OFFERED denominator: rejection counts as a "
                   f"violation ({WIN:.0f} s window)",

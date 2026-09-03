@@ -26,6 +26,9 @@ spec:
           workingDir: /work
           env:
             - { name: NVIDIA_VISIBLE_DEVICES, value: "void" }
+            - name: MODEL_ID
+              valueFrom:
+                configMapKeyRef: { name: llumnix-model, key: MODEL_ID }
             - { name: HF_HOME, value: /hf-cache }
             - { name: HF_HUB_OFFLINE, value: "1" }
             - { name: HF_DATASETS_OFFLINE, value: "1" }
@@ -57,7 +60,7 @@ spec:
                 --restart-per-condition \
                 --transcript-file "${TRANSCRIPT}" \
                 --disable-timeouts \
-                --model meta-llama/Meta-Llama-3.1-70B-Instruct \
+                --model "${MODEL_ID}" \
                 --warmup-rpm 60 --warmup-sec 60 \
                 --output-dir /work/results \
                 --session-name "__SESSION__" \

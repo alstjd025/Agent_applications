@@ -129,8 +129,25 @@ def main():
         jit = args.jitter_ms / 1000.0
         out = [(t + rng.uniform(0.0, jit), opt) for t, opt in out]
     out.sort(key=lambda x: x[0])
-    z = out[0][0]
-    out = [(t - z, opt) for t, opt in out]
+    # Re-zeroing the OUTPUT is wrong for thinning. Thinning is defined as leaving
+    # the timeline and the burst locations where they were -- that is the reason
+    # to prefer it over stretching -- but when the FIRST arrival is one of the
+    # ones dropped, subtracting the new first arrival shifts every surviving
+    # arrival earlier by that gap, while the phase and segment labels travel with
+    # their rows and do not move. The trace's warmup and its mix-shift schedule
+    # would then sit against a clock that had been pulled forward. The gap, and
+    # so the error, grows as the factor falls. Upscaling and stretching both
+    # already start at zero, so this only ever mattered for thin.
+    #
+    # It did NOT bite at factor 0.644 on the canonical hour traces, because their
+    # first arrival survived and the subtraction was zero. What moved the
+    # measure-phase boundary there from 60.0518 s to 59.9548 s was two other
+    # things, both correct: the INPUT re-zero of 0.1197 s that every scaled trace
+    # gets, and the original boundary row being thinned away so that the next
+    # measure row, 22.7 ms later, became the first.
+    if not (args.factor < 1.0 and args.down_method == "thin"):
+        z = out[0][0]
+        out = [(t - z, opt) for t, opt in out]
 
     with open(args.output, "w", newline="") as f:
         w = csv.writer(f)

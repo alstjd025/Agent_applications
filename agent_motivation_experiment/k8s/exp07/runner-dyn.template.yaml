@@ -56,6 +56,9 @@ spec:
           workingDir: /work
           env:
             - { name: NVIDIA_VISIBLE_DEVICES, value: "void" }
+            - name: MODEL_ID
+              valueFrom:
+                configMapKeyRef: { name: llumnix-model, key: MODEL_ID }
             - { name: HF_HOME, value: /hf-cache }
             - { name: HF_HUB_OFFLINE, value: "1" }
             - { name: HF_DATASETS_OFFLINE, value: "1" }
@@ -107,7 +110,7 @@ spec:
                 --priority-mode deadline \
                 --max-tokens "${MAX_TOKENS}" \
                 --restart-timeout 1200 \
-                --model meta-llama/Meta-Llama-3.1-70B-Instruct \
+                --model "${MODEL_ID}" \
                 --output-dir /work/results \
                 --session-name "__SESSION__" \
                 --metrics-interval 1.0

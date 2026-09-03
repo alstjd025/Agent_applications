@@ -1,10 +1,10 @@
 ---
-# EXP-14: mixed workload (chat + deep-research + SWE) rate sweep.
+# EXP-27: rate x mix sweep with the shortened swe workload.
 # mixed_request_level_poisson delegates to the three request-level workloads;
 # MIX_JSON sets the request-count ratio. 12 procs x 2048 threads (the SWE
 # transcript subset is 170MB resident per process). Requires the no-timeout
 # gateway (patch-gateway-timeout.sh) + 64Gi, admission off.
-# Placeholders: __JOBNAME__ __SESSION__ __RATES__ __DURMIN__ __MIXJSON__
+# Placeholders: __JOBNAME__ __SESSION__ __RATES__ __DURMIN__ __ARM__ __WCFG__
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -16,7 +16,7 @@ spec:
   template:
     metadata:
       labels:
-        app: bench-runner-exp14
+        app: bench-runner-exp21
     spec:
       serviceAccountName: bench-runner
       restartPolicy: Never
@@ -35,8 +35,16 @@ spec:
             - { name: RATE_LIST, value: "__RATES__" }
             - { name: DURATION_MIN, value: "__DURMIN__" }
             - { name: LOAD_PROCS, value: "12" }
-            - { name: MIX_JSON, value: '__MIXJSON__' }
-            - { name: TRANSCRIPT, value: "/work/workloads/codingagent_request_level_poisson/data/transcript_swe_calls_mix1500.jsonl" }
+            - { name: ARM, value: "__ARM__" }
+            - { name: TRANSCRIPT, value: "/work/workloads/codingagent_request_level_poisson/data/transcript_swe_short7k_mix1500.jsonl" }
+            - { name: WCFG_PATH, value: "__WCFG__" }
+            # Output-token cap. Unset, agent.py falls back to DEFAULT_MAX_TOKENS
+            # = 2048, and the deep-research class was being cut there: with the
+            # seven-section report structure the model reached section two and
+            # stopped mid-word, so its length was set by the cap rather than by
+            # the material. chat (p99 1,440) and the agent class (p99 859) end on
+            # their own well below it and are unaffected by raising it.
+            - { name: MAX_TOKENS, value: "4096" }
             - { name: RESULT_UID, value: "3092" }
             - { name: RESULT_GID, value: "1999" }
           command: ["/bin/bash", "-lc"]
@@ -49,11 +57,10 @@ spec:
               "$PYBIN" -c "import langchain_openai, pandas, pyarrow, tiktoken" \
                 && echo "[runner] venv deps ok" || { echo "[runner] venv missing deps"; exit 1; }
               [ -s "${TRANSCRIPT}" ] || { echo "[runner] transcript missing: ${TRANSCRIPT}"; exit 1; }
-              WCFG="{\"mix\": ${MIX_JSON},
-                     \"chat_config\": {\"num_conversations\": 1000},
-                     \"deepresearch_config\": {},
-                     \"swe_config\": {\"transcript_file\": \"${TRANSCRIPT}\"}}"
-              echo "[runner] exp14 mix sweep: mix=${MIX_JSON} rates=${RATE_LIST} rpm dur=${DURATION_MIN}min"
+              WCFG="${WCFG_PATH}"
+              [ -s "$WCFG" ] || { echo "[runner] missing $WCFG"; exit 1; }
+              echo "[runner] exp21 sweep: arm=${ARM} rates=${RATE_LIST} rpm dur=${DURATION_MIN}min"
+              echo "[runner] slo/tier keys: $(grep -A4 '"slo"' "$WCFG" | tr -d ' \n')"
               "$PYBIN" run_experiment.py \
                 --engine llumnix --in-cluster \
                 --workload mixed_request_level_poisson \
@@ -62,9 +69,10 @@ spec:
                 --duration-min "${DURATION_MIN}" \
                 --load-procs "${LOAD_PROCS}" \
                 --load-threads 2048 \
-                --restart-per-condition \
                 --disable-timeouts \
                 --workload-config "${WCFG}" \
+                --priority-mode deadline \
+                --max-tokens "${MAX_TOKENS}" \
                 --model "${MODEL_ID}" \
                 --warmup-rpm 60 --warmup-sec 60 \
                 --post-duration-grace 60 \

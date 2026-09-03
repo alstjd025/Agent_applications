@@ -24,6 +24,9 @@ spec:
           workingDir: /work
           env:
             - { name: NVIDIA_VISIBLE_DEVICES, value: "void" }
+            - name: MODEL_ID
+              valueFrom:
+                configMapKeyRef: { name: llumnix-model, key: MODEL_ID }
             - { name: HF_HOME, value: /hf-cache }
             - { name: HF_HUB_OFFLINE, value: "1" }
             - { name: HF_DATASETS_OFFLINE, value: "1" }
@@ -35,7 +38,7 @@ spec:
             - { name: NUM_CONV, value: "1000" }
             - { name: SESSION, value: "__SESSION__" }
             - { name: RESTART_PER_CONDITION, value: "1" }
-            - { name: EXTRA_ARGS, value: "--model meta-llama/Meta-Llama-3.1-70B-Instruct --load-threads 1024 --warmup-rpm 1200 --warmup-sec 60" }
+            - { name: EXTRA_ARGS, value: "--load-threads 1024 --warmup-rpm 1200 --warmup-sec 60" }
             - { name: RESULT_UID, value: "3092" }
             - { name: RESULT_GID, value: "1999" }
           command: ["/bin/bash", "-lc"]
@@ -61,6 +64,7 @@ spec:
                 --output-dir /work/results \
                 --session-name "${SESSION}" \
                 --metrics-interval 1.0 \
+                --model "${MODEL_ID}" \
                 ${RESTART_FLAG} ${EXTRA_ARGS}
               rc=$?
               chown -R "${RESULT_UID}:${RESULT_GID}" /work/results 2>/dev/null || true
