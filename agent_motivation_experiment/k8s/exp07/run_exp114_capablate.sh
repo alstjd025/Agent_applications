@@ -204,6 +204,28 @@ set_arm() {  # $1 = fluidserve | polyserve | polyservep* | slo | loadbalance
     # their modelled service rate and removed 77,675 feasible placements from
     # candidate lists while four engines sat idle. Every other flag is pinned
     # identically to fsv3capgnofrct75, so the pair differs in one flag.
+    # EXP-114. The adopted v0.4 configuration with the FIRST-TOKEN DEADLINE made
+    # a feasibility condition (--fluidserve-deadline-feasible). Without it
+    # `feasible` is pace, harm-to-incumbents and memory only, so the routing
+    # decision never asks whether a placement can deliver a first token inside
+    # the budget -- and on this fleet that is the promise that breaks: chat is
+    # 76.9% of arrivals and 53.6% of it misses a 5 s time-to-first-token while
+    # deepresearch and swe pass at 93.9% and 96.1%.
+    #
+    # The flag was measured twice on four 70B instances and adopted neither time
+    # (EXP-87 static, EXP-100 on the hour), both times inside the control's
+    # repeat spread. Those experiments targeted deepresearch, which is 15% of
+    # arrivals and had somewhere else to go; EXP-100's own conclusion is that the
+    # test moves which engine carries the queue rather than shrinking it. What is
+    # different here is the class that breaks and how much of the fleet is idle
+    # beside it, so the earlier verdict does not carry over by itself.
+    fsv3capgnofrct75dl) policy=fluidserve; export FS_PREFIX=true FS_FORCE_MARGIN=false \
+                                          FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false \
+                                          FS_AFFINITY_METRIC=count FS_PER_INSTANCE_CORR=true \
+                                          FS_MEMORY_PACE_CAP=true FS_PREFILL_INTERLEAVE=true \
+                                          FS_INSTANCE_CAP=true FS_CAP_WINDOW_MULT=3.0 FS_FORCE=false \
+                                          FS_DEADLINE_FEASIBLE=true \
+                                          FS_SWE_TBT_MS=75 ;;
     fsv3gnofrct75nocap) policy=fluidserve; export FS_PREFIX=true FS_FORCE_MARGIN=false \
                                           FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false \
                                           FS_AFFINITY_METRIC=count FS_PER_INSTANCE_CORR=true \
@@ -470,6 +492,7 @@ declare -A ARMMIX=(
   # that states 75, which is what they read as the budget.
   [fsv3capgnofrct75]=t75
   [fsv3gnofrct75nocap]=t75
+  [fsv3capgnofrct75dl]=t75
   [polyservept75]=t75fair
   [slot75]=t75fair
 )
