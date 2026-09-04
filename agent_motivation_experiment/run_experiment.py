@@ -1677,8 +1677,18 @@ def main():
                              "neutral-0.neutral under --in-cluster).")
     parser.add_argument("--metrics-scheduler-host", type=str, default=None)
     parser.add_argument("--metrics-gateway-host", type=str, default=None)
-    parser.add_argument("--engine-ports", type=str, default="8000,8001,8002,8003",
-                        help="Comma-separated vLLM engine metrics ports.")
+    # NOT a literal default. The fleet's size is a property of the deployment,
+    # and this argument is what decides which engines get scraped at all: with a
+    # literal four, an eight-instance fleet is measured as four and the loss is
+    # silent -- every request-level number stays correct while half the engine
+    # series simply do not exist. The value travels from
+    # configmap/llumnix-model (written by ms_dev/scripts/switch_model.py) into
+    # ENGINE_PORTS in every runner template; the historical four is the fallback
+    # for a shell that does not set it.
+    parser.add_argument("--engine-ports", type=str,
+                        default=os.environ.get("ENGINE_PORTS") or "8000,8001,8002,8003",
+                        help="Comma-separated vLLM engine metrics ports. Defaults to "
+                             "$ENGINE_PORTS, else the historical 8000..8003.")
     parser.add_argument("--scheduler-port", type=int, default=8088)
     parser.add_argument("--gateway-port", type=int, default=8089)
     parser.add_argument("--no-migration-log-capture", action="store_true",
@@ -2047,6 +2057,10 @@ def main():
         engine_ports = tuple(
             int(p) for p in str(args.engine_ports).split(",") if p.strip()
         )
+        print(f"[llumnix] engine ports: {','.join(str(p) for p in engine_ports)} "
+              f"({len(engine_ports)} instances, "
+              f"{'from $ENGINE_PORTS' if os.environ.get('ENGINE_PORTS') else 'DEFAULT -- no $ENGINE_PORTS set'})",
+              flush=True)
         llumnix_cfg = {
             "engine_host": eng_host,
             "scheduler_host": sch_host,

@@ -31,7 +31,25 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-ENGINE_PORTS = (8000, 8001, 8002, 8003)
+# The fleet's size is a property of the run, not of this file. A literal
+# 8000..8003 here drops half of an eight-instance fleet from every panel with
+# nothing saying so, so the ports are read off the run's own server_metrics
+# directory; $ENGINE_PORTS, then the historical four, are the fallbacks for a
+# caller that has no run directory in hand.
+def engine_ports_of(run=None):
+    if run:
+        found = sorted(
+            int(os.path.basename(f)[len("engine_"):-len(".jsonl")])
+            for f in glob.glob(os.path.join(run, "server_metrics", "engine_*.jsonl")))
+        if found:
+            return tuple(found)
+    raw = os.environ.get("ENGINE_PORTS", "").strip()
+    if raw:
+        return tuple(int(p) for p in raw.split(",") if p.strip())
+    return (8000, 8001, 8002, 8003)
+
+
+ENGINE_PORTS = engine_ports_of()
 SMOOTH = 3
 
 PAPER = {"font.family": "serif", "font.size": 9, "axes.labelsize": 10,

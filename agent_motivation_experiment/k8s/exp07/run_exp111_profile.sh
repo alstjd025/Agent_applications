@@ -73,19 +73,26 @@ set_policy() {
 # returned in ten seconds against the model that was being replaced. Ask what is
 # being served.
 wait_engine() {
+  # Which ports to require. Read from configmap/llumnix-model rather than fixed
+  # at four: waiting for four ports of an eight-instance fleet returns as soon as
+  # half of it is up, and the measurement then runs against a fleet that is still
+  # loading the other half.
+  local EPORTS
+  EPORTS=$(kubectl -n $NS get cm llumnix-model -o jsonpath='{.data.ENGINE_PORTS}' 2>/dev/null | tr ',' ' ')
+  [ -n "$EPORTS" ] || EPORTS="8000 8001 8002 8003"
   local i ip ok got
   for i in $(seq 1 240); do
     ip=$(kubectl -n $NS get pod neutral-0 -o jsonpath='{.status.podIP}' 2>/dev/null)
     ok=0
     if [ -n "$ip" ]; then
       ok=1
-      for p in 8000 8001 8002 8003; do
+      for p in $EPORTS; do
         got=$(curl -sf -m 3 "http://$ip:$p/v1/models" 2>/dev/null \
               | python3 -c "import json,sys;print(json.load(sys.stdin)['data'][0]['id'])" 2>/dev/null)
         [ "$got" = "$MODEL" ] || ok=0
       done
     fi
-    [ "$ok" = "1" ] && { say "engine serving $MODEL on all four ports after $((i*15))s"; return 0; }
+    [ "$ok" = "1" ] && { say "engine serving $MODEL on all $(echo $EPORTS | wc -w) ports after $((i*15))s"; return 0; }
     sleep 15
   done
   say "ABORT: engine did not serve $MODEL within 60 minutes"; return 1

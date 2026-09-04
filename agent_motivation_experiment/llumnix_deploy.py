@@ -16,11 +16,27 @@ Facts about this deployment (deploy/neutral/full-mode-scheduling/load-balance):
   - redis (CMS store) is left running so instance discovery state is coherent.
 """
 
+import os
 import subprocess
 import time
 from typing import Optional
 
 import requests
+
+
+# The fleet's size is a property of the deployment, not of this file. It arrives
+# as ENGINE_PORTS (written into configmap/llumnix-model by
+# ms_dev/scripts/switch_model.py and wired into every runner template), because
+# the alternative -- a literal 8000..8003 in each reader -- means a fleet of
+# eight is scraped as four while every performance number still looks normal.
+# The historical four is the fallback so a shell without the variable keeps
+# behaving as it did.
+def default_engine_ports():
+    raw = os.environ.get("ENGINE_PORTS", "").strip()
+    if not raw:
+        return (8000, 8001, 8002, 8003)
+    return tuple(int(p) for p in raw.split(",") if p.strip())
+
 
 
 def _kubectl(args, timeout=120, check=False):
@@ -129,7 +145,7 @@ def restart_llumnix(
     gateway_probe_url: Optional[str] = None,
     wait_timeout: int = 600,
     engine_host: str = "neutral-0.neutral",
-    engine_ports=(8000, 8001, 8002, 8003),
+    engine_ports=None,
 ) -> dict:
     """Cold-restart the engine (+ optionally scheduler/gateway) and wait ready.
 
@@ -137,6 +153,7 @@ def restart_llumnix(
     kubectl invocation errors for the delete/restart trigger; readiness
     timeouts are reported as ok=False so the caller can decide.
     """
+    engine_ports = tuple(engine_ports) if engine_ports else default_engine_ports()
     t0 = time.monotonic()
     result = {"ok": True, "phases": {}}
 

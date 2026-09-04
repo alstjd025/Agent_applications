@@ -35,6 +35,16 @@ spec:
             - name: MODEL_ID
               valueFrom:
                 configMapKeyRef: { name: llumnix-model, key: MODEL_ID }
+            # How many engine instances this fleet has. Everything that reads the
+            # fleet used to carry its own copy of "8000,8001,8002,8003", so a
+            # fleet of eight would have been scraped as four with nothing saying
+            # so -- the performance numbers look normal and half the engine
+            # series are simply absent. This key is required, not optional: a
+            # ConfigMap without it stops the pod instead of quietly measuring a
+            # fleet of a size nobody chose.
+            - name: ENGINE_PORTS
+              valueFrom:
+                configMapKeyRef: { name: llumnix-model, key: ENGINE_PORTS }
             - { name: HF_HOME, value: /hf-cache }
             - { name: HF_HUB_OFFLINE, value: "1" }
             - { name: HF_DATASETS_OFFLINE, value: "1" }

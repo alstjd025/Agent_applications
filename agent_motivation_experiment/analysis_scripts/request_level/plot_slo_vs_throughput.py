@@ -60,7 +60,24 @@ _spec = _ilu.spec_from_file_location(
                             "slo_sliding_window.py"))
 _slomod = _ilu.module_from_spec(_spec); _spec.loader.exec_module(_slomod)
 _slo_gw_timeout = _slomod.gw_timeout_mask
-ENGINE_PORTS = (8000, 8001, 8002, 8003)
+# The fleet's size is a property of the run, not of this file. A literal
+# 8000..8003 drops half of an eight-instance fleet from every panel with nothing
+# saying so, so the ports come from the run's own server_metrics directory;
+# $ENGINE_PORTS, then the historical four, are the fallbacks.
+def engine_ports_of(run=None):
+    if run:
+        found = sorted(
+            int(os.path.basename(f)[len("engine_"):-len(".jsonl")])
+            for f in glob.glob(os.path.join(run, "server_metrics", "engine_*.jsonl")))
+        if found:
+            return tuple(found)
+    raw = os.environ.get("ENGINE_PORTS", "").strip()
+    if raw:
+        return tuple(int(p) for p in raw.split(",") if p.strip())
+    return (8000, 8001, 8002, 8003)
+
+
+ENGINE_PORTS = engine_ports_of()
 
 PAPER = {"font.family": "serif", "font.size": 9, "axes.labelsize": 10,
          "axes.titlesize": 10, "legend.fontsize": 8, "legend.frameon": False,

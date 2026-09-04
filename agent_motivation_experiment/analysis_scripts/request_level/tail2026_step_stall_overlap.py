@@ -148,7 +148,7 @@ def describe(tag, dur):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True)
-    ap.add_argument("--ports", default="8000,8001,8002,8003")
+    ap.add_argument("--ports", default=os.environ.get("ENGINE_PORTS") or "8000,8001,8002,8003")
     ap.add_argument("--start-frac", type=float, default=0.4)
     ap.add_argument("--window-s", type=float, default=60.0)
     ap.add_argument("--tol-ms", type=float, default=3.0)

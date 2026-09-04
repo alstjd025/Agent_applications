@@ -42,6 +42,23 @@ PAPER_STYLE = {
 }
 
 
+# The fleet's size is a property of the run, not of this file. A literal
+# 8000..8003 drops half of an eight-instance fleet from every panel with nothing
+# saying so, so the ports come from the run's own server_metrics directory;
+# $ENGINE_PORTS, then the historical four, are the fallbacks.
+def engine_ports_of(run=None):
+    if run:
+        found = sorted(
+            int(os.path.basename(f)[len("engine_"):-len(".jsonl")])
+            for f in glob.glob(os.path.join(run, "server_metrics", "engine_*.jsonl")))
+        if found:
+            return tuple(found)
+    raw = os.environ.get("ENGINE_PORTS", "").strip()
+    if raw:
+        return tuple(int(p) for p in raw.split(",") if p.strip())
+    return (8000, 8001, 8002, 8003)
+
+
 def _series(run_dir, fname, key, agg="sum"):
     """Return (t_rel[], value[]) for a metric key across a server_metrics file.
 
@@ -66,9 +83,9 @@ def _series(run_dir, fname, key, agg="sum"):
 
 
 def _engine_agg(run_dir, key, agg):
-    """Aggregate a vllm:* key across the 4 engine files, aligned by tick index."""
+    """Aggregate a vllm:* key across the engine files, aligned by tick index."""
     per = []
-    for port in (8000, 8001, 8002, 8003):
+    for port in engine_ports_of(run_dir):
         t, v = _series(run_dir, f"engine_{port}.jsonl", key, agg="max")
         per.append((t, v))
     base_t = max((p[0] for p in per if len(p[0])), key=len, default=np.array([]))

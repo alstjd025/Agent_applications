@@ -115,7 +115,23 @@ ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe (prefix off)",
         # EXP-100.
         "fsdead": "FluidServe (+ first-token deadline)"}
 # One colour per engine, held across every panel and both figures.
-ENG_C = {8000: "#1f77b4", 8001: "#ff7f0e", 8002: "#2ca02c", 8003: "#d62728"}
+#
+# NOT a fixed table of four. The fleet's size is a property of the deployment
+# (four instances at TP=2, or eight at TP=1), and a four-entry table makes this
+# script raise KeyError on port 8004 -- loud, but only after the run is over.
+# The colours are assigned in port order from a ten-colour cycle, so engine 8000
+# keeps the blue it has had in every earlier figure and the fleet can grow.
+_ENG_CYCLE = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+              "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+
+
+def eng_colours(ports):
+    ports = sorted(ports)
+    return {p: _ENG_CYCLE[i % len(_ENG_CYCLE)] for i, p in enumerate(ports)}
+
+
+# Populated from the ports the runs actually contain, before anything plots.
+ENG_C = {}
 WIN = 60.0  # seconds per point on the engine series
 
 RUNNING = "vllm:num_requests_running"
@@ -247,7 +263,7 @@ def fig_timeline(data, eng, variant, out_dir, exp_title="EXP-41"):
         h = [plt.Line2D([], [], color=ENG_C[p], lw=1.2) for p in sorted(ENG_C)]
         ax[0][0].legend(h, [f"engine {p}" for p in sorted(ENG_C)],
                         fontsize=6.2, ncol=4, loc="lower left")
-        fig.suptitle(f"{exp_title} {variant} — the four engines over the hour, "
+        fig.suptitle(f"{exp_title} {variant} — the {len(ENG_C)} engines over the hour, "
                      f"{WIN:.0f} s windows (dotted on row B is the window maximum)",
                      fontsize=9, y=1.005)
         fig.tight_layout()
@@ -428,6 +444,18 @@ def main():
 
     data = {arm: load_run(d) for arm, d in runs.items()}
     eng = {arm: engine_series(d) for arm, d in runs.items()}
+
+    # The fleet's size is read off the runs, not assumed. Every panel and both
+    # figures then use the same colour per port. A run whose server_metrics hold
+    # fewer engine files than the fleet has instances is the failure this is
+    # meant to make visible, so the count is printed rather than left implicit.
+    global ENG_C
+    found = sorted({p for e in eng.values() for p in e})
+    ENG_C = eng_colours(found)
+    print(f"engines found in the runs: {len(found)} -> {found}")
+    for arm, e in eng.items():
+        if sorted(e) != found:
+            print(f"  WARNING {arm} has {sorted(e)}, not the same set as the others")
 
     print("\nper-engine summary")
     print(f"{'arm':>11} {'port':>6} {'batch':>7} {'KV%':>6} {'KVmax':>6} {'queue':>6} "

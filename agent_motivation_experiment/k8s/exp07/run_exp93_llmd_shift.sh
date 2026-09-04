@@ -48,7 +48,13 @@ DYN_TRACE=/work/traces/dynamic/canonical/dyn60_shift_m2Am1B_b1045.csv
 DYN_WCFG=/work/workload_configs/mix_dyn60_shift_m2Am1B_b1045_slofair.json
 ENVOY_LOG=/home/nxclab/tools/llmd-envoy/envoy_access.log
 META="$HOSTWORK/results/exp66_meta"
-ENGINE_PORTS="8000 8001 8002 8003"
+# The fleet's size comes from configmap/llumnix-model (written by
+# ms_dev/scripts/switch_model.py), not from a literal here: with a literal four,
+# an eight-instance fleet gets four endpoints registered with llm-d and half the
+# fleet is simply never routed to, which looks like a policy result.
+ENGINE_PORTS=$(kubectl -n llumnix get cm llumnix-model -o jsonpath='{.data.ENGINE_PORTS}' 2>/dev/null | tr ',' ' ')
+[ -n "$ENGINE_PORTS" ] || ENGINE_PORTS="8000 8001 8002 8003"
+echo "[driver] engine ports: $ENGINE_PORTS"
 
 # EXP-53's eight rates, in rpm. Kept in this order so a partial run is a prefix
 # of the full one and the low rates, which are the cheap ones, land first.

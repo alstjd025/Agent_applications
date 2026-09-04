@@ -341,21 +341,37 @@ class ScrapeTarget:
         self.wanted = wanted
 
 
+
+# The fleet's size is a property of the deployment, not of this file. It arrives
+# as ENGINE_PORTS (written into configmap/llumnix-model by
+# ms_dev/scripts/switch_model.py and wired into every runner template), because
+# the alternative -- a literal 8000..8003 in each reader -- means a fleet of
+# eight is scraped as four while every performance number still looks normal.
+# The historical four is the fallback so a shell without the variable keeps
+# behaving as it did.
+def default_engine_ports():
+    raw = os.environ.get("ENGINE_PORTS", "").strip()
+    if not raw:
+        return (8000, 8001, 8002, 8003)
+    return tuple(int(p) for p in raw.split(",") if p.strip())
+
+
 def default_llumnix_targets(
     engine_host: str = "localhost",
     scheduler_host: str = "localhost",
     gateway_host: str = "localhost",
-    engine_ports=(8000, 8001, 8002, 8003),
+    engine_ports=None,
     scheduler_port: int = 8088,
     gateway_port: int = 8089,
 ) -> List[ScrapeTarget]:
-    """Build the canonical target list for the 4×TP2 neutral deployment.
+    """Build the canonical target list for the neutral deployment.
 
     Hosts are per-layer so this works both from the host via a single
     port-forward (all three = localhost, different ports) and from an
     in-cluster runner pod via k8s DNS (engine=neutral-0.neutral,
     scheduler=scheduler, gateway=gateway — restart-stable names).
     """
+    engine_ports = tuple(engine_ports) if engine_ports else default_engine_ports()
     targets: List[ScrapeTarget] = []
     for p in engine_ports:
         targets.append(ScrapeTarget(f"engine_{p}", f"http://{engine_host}:{p}/metrics", ENGINE_METRICS))

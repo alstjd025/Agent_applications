@@ -73,7 +73,24 @@ NBIN = len(EDGES) - 1
 BATCH_EDGES = np.arange(0.0, 420.0, 10.0)
 NBB = len(BATCH_EDGES) - 1  # last bucket 400-410; anything above clips into it
 
-ENGINES = (8000, 8001, 8002, 8003)
+# The fleet's size is a property of the run, not of this file. A literal
+# 8000..8003 drops half of an eight-instance fleet from every panel with nothing
+# saying so, so the ports come from the run's own server_metrics directory;
+# $ENGINE_PORTS, then the historical four, are the fallbacks.
+def engine_ports_of(run=None):
+    if run:
+        found = sorted(
+            int(os.path.basename(f)[len("engine_"):-len(".jsonl")])
+            for f in glob.glob(os.path.join(run, "server_metrics", "engine_*.jsonl")))
+        if found:
+            return tuple(found)
+    raw = os.environ.get("ENGINE_PORTS", "").strip()
+    if raw:
+        return tuple(int(p) for p in raw.split(",") if p.strip())
+    return (8000, 8001, 8002, 8003)
+
+
+ENGINES = engine_ports_of()
 GAUGE = {
     "batch": "vllm:num_requests_running",
     "queue": "vllm:num_requests_waiting",

@@ -29,7 +29,25 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-ENGINE_PORTS = (8000, 8001, 8002, 8003)
+# The fleet's size is a property of the run, not of this file. A literal
+# 8000..8003 here drops half of an eight-instance fleet from every panel with
+# nothing saying so, so the ports are read off the run's own server_metrics
+# directory; $ENGINE_PORTS, then the historical four, are the fallbacks for a
+# caller that has no run directory in hand.
+def engine_ports_of(run=None):
+    if run:
+        found = sorted(
+            int(os.path.basename(f)[len("engine_"):-len(".jsonl")])
+            for f in glob.glob(os.path.join(run, "server_metrics", "engine_*.jsonl")))
+        if found:
+            return tuple(found)
+    raw = os.environ.get("ENGINE_PORTS", "").strip()
+    if raw:
+        return tuple(int(p) for p in raw.split(",") if p.strip())
+    return (8000, 8001, 8002, 8003)
+
+
+ENGINE_PORTS = engine_ports_of()
 SMOOTH = 3
 PAPER = {"font.family": "serif", "font.size": 9, "axes.labelsize": 10,
          "axes.titlesize": 9.5, "legend.fontsize": 7, "legend.frameon": False,
@@ -146,13 +164,14 @@ def plot_llumnix(run, rpm, out_dir, tag=None, rate_div=60.0):
 def plot_engine(run, rpm, out_dir, tag=None, rate_div=60.0):
     reqps = rpm / rate_div
     tag = tag or f"rpm_{rpm:g}"
-    recs = {p: _load(os.path.join(run, "server_metrics", f"engine_{p}.jsonl")) for p in ENGINE_PORTS}
-    colors = plt.cm.tab10(np.arange(4))
+    ports = engine_ports_of(run)
+    recs = {p: _load(os.path.join(run, "server_metrics", f"engine_{p}.jsonl")) for p in ports}
+    colors = plt.cm.tab10(np.arange(len(ports)) % 10)
     with plt.rc_context(PAPER):
         fig, ax = plt.subplots(2, 3, figsize=(16, 8))
 
         def per_engine_gauge(axis, key, ylabel, title, scale=1.0):
-            for c, p in zip(colors, ENGINE_PORTS):
+            for c, p in zip(colors, ports):
                 t, v, _ = gauge_recs(recs[p], key)
                 if len(t):
                     axis.plot(t, v * scale, color=c, lw=1.0, label=f"eng {p}")
@@ -171,7 +190,7 @@ def plot_engine(run, rpm, out_dir, tag=None, rate_div=60.0):
         for key, col, lab in (("vllm:prompt_tokens_total", "#9467bd", "prefill (prompt) tok/s"),
                               ("vllm:generation_tokens_total", "#2ca02c", "decode (generation) tok/s")):
             agg_t, agg = None, None
-            for p in ENGINE_PORTS:
+            for p in ports:
                 t, r, _ = rate_recs(recs[p], key)
                 if len(t):
                     if agg is None:
@@ -186,7 +205,7 @@ def plot_engine(run, rpm, out_dir, tag=None, rate_div=60.0):
         # E. KV cache hit rate (prefix_cache_hits/queries) if captured
         e = ax[1, 1]
         any_hit = False
-        for c, p in zip(colors, ENGINE_PORTS):
+        for c, p in zip(colors, ports):
             ht, hv, _ = rate_recs(recs[p], "vllm:prefix_cache_hits_total")
             qt, qv, _ = rate_recs(recs[p], "vllm:prefix_cache_queries_total")
             if len(hv) and len(qv):
@@ -203,7 +222,7 @@ def plot_engine(run, rpm, out_dir, tag=None, rate_div=60.0):
         # F. queueing time (avg = d(queue_time_sum)/d(count)) if captured
         f = ax[1, 2]
         any_q = False
-        for c, p in zip(colors, ENGINE_PORTS):
+        for c, p in zip(colors, ports):
             st, sv, t0 = gauge_recs(recs[p], "vllm:request_queue_time_seconds_sum")
             ntc, nvc, _ = gauge_recs(recs[p], "vllm:request_queue_time_seconds_count", t0)
             if len(sv) > 2 and len(nvc) > 2:
@@ -266,12 +285,13 @@ def plot_tokens(run, rpm, out_dir, tag=None, rate_div=60.0):
     """
     reqps = rpm / rate_div
     tag = tag or f"rpm_{rpm:g}"
+    ports = engine_ports_of(run)
     recs = {p: _load(os.path.join(run, "server_metrics", f"engine_{p}.jsonl"))
-            for p in ENGINE_PORTS}
+            for p in ports}
     with plt.rc_context(PAPER):
-        fig, axes = plt.subplots(4, len(ENGINE_PORTS), figsize=(16, 11),
+        fig, axes = plt.subplots(4, len(ports), figsize=(4.0 * len(ports), 11),
                                  sharex=True)
-        for col, p in enumerate(ENGINE_PORTS):
+        for col, p in enumerate(ports):
             rows = (
                 ("rate", "vllm:prompt_tokens_total", None,
                  "prefill tok/s\n(incl. cache hits)", "#9467bd", 1.0),
