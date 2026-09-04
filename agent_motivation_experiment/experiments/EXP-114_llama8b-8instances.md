@@ -754,3 +754,214 @@ output processor"*). **프런트엔드가 하나면 응답이 어디로 가든 �
 | 스케줄러 | `instance_status` 8개, 파드 안정 |
 | 클러스터 | 비어 있음 |
 | 잡아 둔 증거 | `/home/nxclab/tools/vllm_terminated.log` (5,966줄, 종료된 컨테이너 로그), `/home/nxclab/tools/podwatch.log` (5초 간격 파드 상태) |
+
+---
+
+## 12. 원인이 확정됐다 — 그리고 §11에서 유도했던 기전은 틀렸다 (2026-09-04 20:40 KST)
+
+### 12.1 철회 — "`client_count`가 llumlet 주소를 덧붙이기 전에 세어진다"
+
+§11이 `vllm/v1/engine/core.py:742`의 `self.client_count = len(addresses.outputs)`가
+`add_llumlet_address`(같은 파일 771행)보다 먼저 실행되는 것을 원인으로 지목했다. **그
+순서 자체는 사실이지만 원인이 아니다** — `self.client_count`는 그 파일에서 **한 번 대입되고
+어디에서도 읽히지 않는다**(`grep -n "self\.client_count" core.py` 결과가 742행 하나뿐이다).
+읽히지 않는 값은 아무것도 잘못되게 만들 수 없다.
+
+**틀린 이유**: 이름이 같은 두 양을 같은 것으로 읽었다. API 서버 쪽의 `client_count`
+(`v1/utils.py:202`가 `client_config`에 실어 보내는 API 서버 프로세스 개수)와 엔진 코어의
+`self.client_count`는 **다른 것**이고, 후자는 죽은 대입이다. CLAUDE.md 함정 D의 "같은 이름의
+두 양을 같은 정의로 만들어졌는지 확인하지 않은 것"(§32·§40·§55와 같은 계열)이 한 번 더 났다.
+
+### 12.2 진짜 원인 — llumlet이 자기 소켓 번호를 상수 1로 박고 있다
+
+코드 다섯 자리로 사슬이 닫힌다. **다섯 자리 전부 실제로 읽었다.**
+
+| # | 파일:행 | 무엇 |
+|---|---|---|
+| 1 | `vllm/v1/engine/utils.py:795-801` | `addresses.outputs`가 **API 서버 프로세스 수만큼** 만들어진다 — `for _ in range(num_api_servers)` |
+| 2 | `llumnix/engine_client/utils.py:75` | llumlet이 자기 출력 주소를 그 리스트에 **append**한다 → llumlet의 인덱스 = **API 서버 개수 N** |
+| 3 | `llumnix/engine_client/vllm_v1/engine_client.py:36,51` | 그런데 `VLLMEngineClient`의 `client_index` **기본값이 상수 1**이고, `llumnix/llumlet.py:126`의 `create_engine_client(...)`가 그 인자를 **넘기지 않는다** |
+| 4 | `vllm/v1/engine/core_client.py:948` | utility 요청에 `self.client_index`가 그대로 실려 나간다 |
+| 5 | `vllm/v1/engine/core.py:1085,1097,1269` | 엔진 코어가 그 값을 그대로 `sockets[client_index]`로 되돌려 보낸다 |
+
+**API 서버가 하나면 llumlet의 인덱스가 1이라 상수 1이 우연히 맞는다**(0 = API 서버,
+1 = llumlet). **넷이면 llumlet은 인덱스 4에 있는데 1이라고 말하므로**, 엔진 코어가 llumlet의
+`get_instance_status` 응답을 `sockets[1]` = `ApiServer_1`로 보낸다. 그 프로세스는 자기가
+발급한 적 없는 `call_id`를 받아 `core_client.py:630`에서 `KeyError`로 죽고, §11에 기록한
+연쇄(런처 `RuntimeError` → `vllm serve` exit 0 → kubelet 재시작 → LWS 그룹 재생성 2분 45초
+주기)가 그대로 이어진다. **§11의 로그와 정확히 맞는다.**
+
+### 12.3 고친 것 — vLLM이 아니라 llumnix, 대입 한 줄
+
+```python
+# 전
+self.client_index = client_index                                   # 상수 1
+# 후
+_n_api = getattr(vllm_config.parallel_config, "_api_process_count", None)
+self.client_index = int(_n_api) if _n_api else client_index
+```
+
+**API 서버 개수가 엔진 코어까지 온다는 것이 이 수정을 가능하게 한다** —
+`entrypoints/cli/serve.py:173`의 `engine_args._api_process_count = num_api_servers`가
+`vllm_config.parallel_config`에 실려 `launch_core_engines(vllm_config, ..., num_api_servers)`로
+내려가고, llumlet은 **그 엔진 코어에서 fork되므로** 같은 config를 본다. 그리고 1의
+`num_api_servers`와 `_api_process_count`가 같은 인자(`args.api_server_count`)에서 오므로
+**리스트 길이와 이 값이 정의상 같다.**
+
+**위험이 §11에 적어 둔 것보다 훨씬 낮다.** §11은 엔진 코어의 출력 라우팅
+(`core.py:1253-1269`의 `sockets[client_index]`)을 고쳐야 한다고 적었는데 **vLLM은 한 줄도
+건드리지 않는다.** 바뀌는 것은 llumlet이 자기 요청에 찍는 번호 하나뿐이고,
+**`--api-server-count 1`에서는 새 식이 1로 평가되어 지금 상수와 같은 값**이다. 지금까지의
+모든 조건이 API 서버 하나로 돌았으므로 **이 수정은 이미 잰 어떤 조건의 뜻도 바꿀 수 없다.**
+count=1 회귀 검사는 그래서 구조로 보장되고, 측정은 그 확인이다.
+
+### 12.4 어떻게 넣었나 — 이미지가 바뀌면 조용히 넘어가지 않고 멈춘다
+
+고칠 파일은 이미지 안의
+`/usr/local/lib/python3.12/dist-packages/llumnix/engine_client/vllm_v1/engine_client.py`이고,
+**설치된 패키지의 하위 모듈이라 `PYTHONPATH` 앞치기로는 가릴 수 없다**(`llumnix.__path__`가
+dist-packages를 가리키므로 `llumnix.engine_client.…`는 언제나 그쪽에서 온다). 그래서
+**기동 스크립트가 컨테이너 안에서 그 파일을 고친다.**
+
+- 스크립트: `patches/vllm-sched/llumnix_client_index_fix.py`(이미 마운트된
+  `/opt/llumnix-sched`에 들어간다 — LWS에 새 볼륨을 더하지 않으므로 `switch_model.py`·
+  `set_api_server_count.py`의 spec 재작성이 그것을 떨어뜨릴 여지가 없다).
+- 파일 통째 복사가 아니라 **한 줄을 정확히 찾아 바꾼다.** 앵커가 정확히 한 번 나오지 않으면
+  (= 이미지의 llumnix가 바뀌었다는 뜻) **0이 아닌 값으로 끝나고 `|| exit 1`이 컨테이너를
+  죽인다.** 조용히 넘어가면 llumlet이 자기 응답을 남의 프로세스로 보내는 엔진이 뜬다.
+- **쓴 뒤 파일을 다시 읽어 대조하고 `py_compile`까지 돌린다** — 함정 B의 "성공 출력은 그
+  시점에 메모리의 문자열이 바뀌었다는 뜻이지 파일이 바뀌었다는 뜻이 아니다".
+- 두 번 돌려도 안전하다(마커를 보고 그냥 나간다). 파드가 재생성될 때마다 다시 적용된다.
+- 주입은 `set_api_server_count.py`의 `ensure_client_index_fix()`가 하고, 기동 스크립트
+  **맨 앞**에 넣는다 — 엔진 코어가, 따라서 llumlet이 생기기 전이어야 한다.
+
+### 12.5 count=1 회귀 검사 (2026-09-04 20:44 KST 시작)
+
+**왜 이 검사가 있나**: 이 수정은 llumlet이 자기 요청에 찍는 번호를 바꾼다. 그 번호가 틀리면
+응답이 엉뚱한 프로세스로 가는데, **`KeyError`로 죽는 것은 운이 좋은 경우**이고 만약 그 인덱스가
+살아 있는 다른 클라이언트를 가리키면 조용히 틀린 결과가 나온다. 그래서 count=4를 시도하기 전에
+**지금까지의 모든 측정이 이루어진 설정(API 서버 하나)에서 동작이 바뀌지 않았다는 것**을 먼저
+확인한다.
+
+**기동 로그가 값 자체를 확인해 준다** (파드 `a8c9df99`, 2026-09-04 20:42 KST):
+
+```
+[client-index-fix] applied, md5=a8a88fb0ce7ef58b35f51125eca12573
+(EngineCore_DP0 pid=2396) INFO engine_client.py:58]
+    Llumnix engine client index: api_process_count=1 -> client_index=1
+```
+
+**`-> client_index=1`이 대체한 상수와 같은 값이다.** 여덟 포트 전부
+`meta-llama/Llama-3.1-8B-Instruct`를 보고하고 `llumnix:instance_status:*`가 8개다.
+
+**대조군**: `260904_0147_exp114seqr1_fsv3capgnofrct75_t75_rpm_6000` — 수정 전, 같은 arm·같은
+도착률(6,000 rpm = 100 req/s)·같은 지속시간(8분)·같은 좌석 상한(`--max-num-seqs 4096`)·같은
+함대. 채점(`FS_SWE_TBT_MS=75`, 모든 도착 분모까지):
+
+| | offered | admitted | all_arrivals | 거절 | 미완료 | goodput |
+|---|---|---|---|---|---|---|
+| 수정 전 (`exp114seqr1`) | **56.1** | 56.4 | 52.9 | 0.7% | 5.5% | 33,793 tok/s |
+| 수정 후 (`exp114cidxr1`) | (진행 중) | | | | | |
+
+**판정 규칙(실행 전에 적는다)**: 이 워크로드의 반복 간 편차가 1~3점이므로 offered가 대조군의
+±3점 안이면 통과. **벗어나면 이 오버레이는 버린다** — 원인을 찾는 것이 아니라 버린다. 반복이
+각각 하나뿐이므로 "같다"가 아니라 "읽을 수 있는 차이가 없다"로 적는다.
+
+**결과 — 통과.** 같은 arm·도착률·지속시간·좌석 상한·함대, 반복 각 하나:
+
+| | offered | admitted | all_arrivals | 거절 | 미완료 | goodput | 도착 수 |
+|---|---|---|---|---|---|---|---|
+| 수정 전 `exp114seqr1` | 56.1 | 56.4 | 52.9 | 0.7% | 5.5% | 33,793 | 46,174 |
+| 수정 후 `exp114cidxr1` | **57.5** | 57.8 | 53.8 | 0.5% | 6.4% | 34,166 | 46,038 |
+
+offered 차이 **+1.4점**으로 사전에 정한 ±3점 안이고 도착 수도 0.3% 차이다 — **읽을 수 있는
+차이가 없다**(반복이 각각 하나이므로 "같다"고 쓰지 않는다). 엔진 지표 파일 여덟 개가 전부
+생겼고 로그에 `KeyError` 0건, 파드는 재시작 0이다.
+
+### 12.6 count=4가 처음으로 동작한다 (2026-09-04 21:01~21:12 KST)
+
+`python3 ms_dev/scripts/set_api_server_count.py --count 4 --restart`. 파드
+`79bc75d5`(21:01:29 생성) 기준으로 **사전 등록한 셋이 전부 통과했다**:
+
+| 판정 항목 | 사전 등록 | 실측 |
+|---|---|---|
+| llumlet이 고른 인덱스 | 8개가 전부 4 | **`api_process_count=4 -> client_index=4` 정확히 8줄** |
+| `llumnix:instance_status:*` | 8 | **8** (metadata도 8) |
+| `KeyError` / `died with exit code` | 0 | **0** |
+| 파드 생존 | 10분 이상 | **11분 6초, 재시작 0** — 실패 신호였던 2분 45초 주기를 네 번 넘겼다 |
+
+부수 확인: 컨테이너 안의 파일에 `LLUMNIX-FIX(EXP-114)` 마커가 있고(기동 스크립트가 실제로
+적용했다는 뜻), API 서버 프로세스가 약 32개(8 인스턴스 × 4)이며 여덟 포트 전부 서빙한다.
+
+⚠ **로그의 traceback 383건은 이것과 무관하다** — 전부
+`AttributeError: 'KVCacheConfig' object has no attribute 'list'`이고, CLAUDE.md 함정 F에
+"migration을 껐는데도 계속 나오는 별개의 잡음"으로 이미 적혀 있는 그것이다. **분류해서 세지
+않으면 "에러가 383건"으로 읽고 실패로 판정했을 것이다.**
+
+⚠ **`containerStatuses[].ready`를 엔진이 떴다는 신호로 쓰면 안 된다** — 이 컨테이너에는
+readiness probe가 없어서 그 값은 컨테이너 프로세스가 시작됐다는 뜻일 뿐이고, 파드 생성 4초
+만에 `ready=True`가 된다. 엔진이 서빙하는지는 **여덟 포트에 직접 물어야** 알 수 있고, 실제로
+21:01:29에 생성된 파드가 21:03:16에야 여덟 포트를 열었다.
+
+### 12.7 본 측정 — 100 req/s (2026-09-04 21:12 KST 시작)
+
+`exp114api4r1`, arm `fsv3capgnofrct75`, 6,000 rpm, 8분. **비교 대상 둘이 count=1의 같은
+설정이므로 다른 것은 프런트엔드 프로세스 개수뿐이다.**
+
+**결과 — 진단이 맞았고 효과가 크다.** 같은 arm·도착률·지속시간·좌석 상한·함대, 다른 것은
+프런트엔드 프로세스 개수뿐이다(반복 각 하나).
+
+| | offered | admitted | all_arrivals | 거절 | 미완료 | goodput | 도착 수 |
+|---|---|---|---|---|---|---|---|
+| count=1, 수정 전 | 56.1 | 56.4 | 52.9 | 0.7% | 5.5% | 33,793 | 46,174 |
+| count=1, 수정 후 | 57.5 | 57.8 | 53.8 | 0.5% | 6.4% | 34,166 | 46,038 |
+| **count=4** | **99.3** | **100.0** | **98.1** | 0.6% | 1.2% | **54,263** | 46,095 |
+
+**거절률은 사실상 안 움직이고(0.5 → 0.6%) 도착 수도 0.1% 차이인데 달성률이 41.8점 오른다** —
+정책의 결정이 달라진 것이 아니라, **정책이 받아들이기로 한 요청을 시스템이 실제로 지킬 수 있게
+된 것**이다. token goodput이 34,166 → 54,263 tok/s로 59% 오른다.
+
+### 12.8 기전 — 첫토큰 시간을 세 구간으로 나눠 보면 사라진 것이 어느 구간인지 보인다
+
+vLLM의 세 타이머는 원점이 다르므로 그 차이가 곧 구간이 된다:
+
+```
+vllm:time_to_first_token   iteration_timestamp − arrival_time   (API 서버 시계)
+vllm:request_queue_time    scheduled_ts − queued_ts             (엔진 코어 이벤트)
+vllm:request_prefill_time  first_token_ts − scheduled_ts        (엔진 코어 이벤트)
+잔차 = TTFT − (queue + prefill)  =  API 서버가 요청을 받고 엔진 코어가 그것을 큐에 넣기까지
+```
+
+도구는 `analysis_scripts/request_level/exp114_frontend_segment.py`. 부하 창으로 자른 **카운터
+증분**으로 평균을 낸다(전 구간 평균은 유휴 구간을 섞는다 — 함정 E).
+
+| | 포트 | 요청 수 | TTFT | queue | prefill | **잔차** |
+|---|---|---|---|---|---|---|
+| **count=1** | 8004 | 15,081 | **11,743 ms** | 13.5 | 69.3 | **11,660 ms (TTFT의 99.3%)** |
+| | 8005 | 18,981 | **17,357 ms** | 15.5 | 75.4 | **17,266 ms (99.5%)** |
+| | 나머지 여섯 | 14~3,686 | 44~409 ms | 0.6~234 | 42~183 | 0.6~8.6 ms |
+| **count=4** | 8003 | 24,792 | **131 ms** | 17.2 | 93.8 | **20.1 ms** |
+| | 8007 | 11,809 | **39 ms** | 5.0 | 27.9 | **5.7 ms** |
+| | 나머지 여섯 | 8~3,690 | 59~357 ms | 0.3~203 | 48~163 | −3.7~9.0 ms |
+
+**함대 전체에서 잔차의 최댓값이 17,266 ms에서 20 ms로 내려간다 — 860배다.** 함대 평균 TTFT는
+3,787 → 154 ms.
+
+**그리고 집중은 그대로다.** count=4에서도 요청의 대부분이 두 엔진(8003 24,792 / 8007 11,809 =
+전체의 79%)에 몰린다 — count=1의 8004+8005와 같은 모양이다. **정책은 같은 일을 하고 있고,
+달라진 것은 그 두 엔진 앞의 HTTP 프런트엔드가 하나였다가 넷이 된 것뿐이다.** 그래서 이 실험은
+"클래스를 모으는 것이 나빴다"가 아니라 **"인스턴스당 프런트엔드 프로세스가 하나면 모으는 정책은
+자기 이득을 실현할 수 없다"**를 보인다.
+
+⚠ **인용할 때 같이 적을 것 넷**:
+1. **조건마다 반복이 하나다.** 다만 차이(41.8점)가 이 워크로드의 반복 간 편차(1~3점)의 열 배가
+   넘고, 세 조건의 도착 수가 0.3% 안에서 같다.
+2. **어느 엔진이 chat을 맡는지는 run마다 다르다**(8004/8005 → 8003/8007). 조건 사이에 엔진
+   cold restart가 있으므로 포트 번호로 짝지어 읽으면 안 되고, **몰린 엔진끼리** 짝지어 읽는다.
+3. **잔차 몇 ms는 이 분해의 잡음 바닥이다** — 세 카운터가 서로 다른 시점에 증가하므로 평균
+   수준에서 작은 음수(−3.7 ms)도 나온다. **읽을 수 있는 것은 밀리초 대 초의 차이이지 5 ms와
+   20 ms의 차이가 아니다.**
+4. **`vllm:request_prefill_time_seconds_sum`이 일부 엔진에서 망가진다** — count=1의 8005에서
+   요청당 6,460초라는 값이 들어 있다. 전 구간 평균으로 읽으면 그 엔진의 잔차가
+   **−6,443,759 ms**가 되어 부호가 뒤집힌다. 스크립트가 비물리적 증분을 버리고 **버린 비율을
+   같이 출력한다**(8005는 6.2%).
