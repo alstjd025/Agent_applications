@@ -340,9 +340,15 @@ def main():
         # unwrapped source line naming seven run directories once widened the
         # saved image to 8,870 px while the axes stayed at a third of that.
         import textwrap
+        # "one run each" was a literal, and it went on being printed after the
+        # figure started carrying two repeats per arm -- the caption asserted
+        # something the panels contradicted. Count what was actually drawn.
+        _runs_note = ("one run each" if len(data) == len(set(
+            lab.rsplit(" r", 1)[0] for lab in data)) else
+            f"{len(data)} runs")
         fig.suptitle(textwrap.fill(
             f"{a.title} {a.variant} — one hour of moving load, {who}, "
-            f"stock FIFO (one run each). {src}", 150), fontsize=8.5, y=1.03)
+            f"stock FIFO ({_runs_note}). {src}", 150), fontsize=8.5, y=1.03)
         fig.tight_layout()
         # Shared with exp41_engine_view so the two figures of one run agree on
         # their names. A title naming two experiments -- "EXP-54/57", which is

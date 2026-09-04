@@ -40,17 +40,23 @@ pick() {  # newest non-PRERUN, merged run matching $1
 #   A. the five policies on the SAME thinned hour -- the policy comparison.
 #   B. FluidServe on Qwen beside FluidServe on Llama -- the model comparison,
 #      and the only set where the series deliberately replay different traces.
-Q_FS=$(pick 'results/*exp113r1_fsv3capgnofrct75_shiftq')
-Q_PS=$(pick 'results/*exp113r1_polyservept75_shiftq')
-Q_SL=$(pick 'results/*exp113r1_slot75_shiftq')
-Q_VL=$(pick 'results/*exp113r1_vllmcachet75_shiftq')
-Q_LD=$(pick 'results/*exp113r1_llmdslot75_shiftq')
+for rep in 1 2; do
+  eval "Q_FS$rep=\$(pick 'results/*exp113r${rep}_fsv3capgnofrct75_shiftq')"
+  eval "Q_PS$rep=\$(pick 'results/*exp113r${rep}_polyservept75_shiftq')"
+  eval "Q_SL$rep=\$(pick 'results/*exp113r${rep}_slot75_shiftq')"
+  eval "Q_VL$rep=\$(pick 'results/*exp113r${rep}_vllmcachet75_shiftq')"
+  eval "Q_LD$rep=\$(pick 'results/*exp113r${rep}_llmdslot75_shiftq')"
+done
+Q_FS=$Q_FS1
 L1=$(pick 'results/*exp109r1_fsv3capgnofrct75_shift')
 L2=$(pick 'results/*exp109r2_fsv3capgnofrct75_shift')
 
 echo "=== run selection"
-for pair in "Qwen FluidServe|$Q_FS" "Qwen PolyServe|$Q_PS" "Qwen Llumnix SLO|$Q_SL" \
-            "Qwen vLLM router|$Q_VL" "Qwen llm-d|$Q_LD" \
+for pair in "Qwen FluidServe r1|$Q_FS1" "Qwen FluidServe r2|$Q_FS2" \
+            "Qwen PolyServe r1|$Q_PS1" "Qwen PolyServe r2|$Q_PS2" \
+            "Qwen Llumnix SLO r1|$Q_SL1" "Qwen Llumnix SLO r2|$Q_SL2" \
+            "Qwen vLLM router r1|$Q_VL1" "Qwen vLLM router r2|$Q_VL2" \
+            "Qwen llm-d r1|$Q_LD1" "Qwen llm-d r2|$Q_LD2" \
             "Llama FluidServe r1|$L1" "Llama FluidServe r2|$L2"; do
   n=${pair%%|*}; d=${pair#*|}
   [ -n "$d" ] && printf "  %-20s %s\n" "$n" "$(basename "$d")" || printf "  %-20s MISSING\n" "$n"
@@ -59,7 +65,8 @@ done
 
 echo
 echo "=== engine attribution (per-request -> engine, built once per run)"
-for d in "$Q_FS" "$Q_PS" "$Q_SL" "$Q_VL" "$Q_LD" "$L1" "$L2"; do
+for d in "$Q_FS1" "$Q_FS2" "$Q_PS1" "$Q_PS2" "$Q_SL1" "$Q_SL2" \
+           "$Q_VL1" "$Q_VL2" "$Q_LD1" "$Q_LD2" "$L1" "$L2"; do
   [ -n "$d" ] || continue
   [ -f "$d/analysis/request_engine.csv" ] && continue
   python3 "$R/build_request_engine_map.py" "$d" >/dev/null 2>&1 \
@@ -76,11 +83,20 @@ add() {  # label colour style dir [arm-key]
 }
 # Arm colours are the repository's fixed ones so a colour means the same policy
 # in every figure.
-add "FluidServe"  "#1f77b4" "-"  "$Q_FS" fsv3capgnofrct75
-add "llm-d"       "#8c564b" "--" "$Q_LD" llmdslot75
-add "PolyServe"   "#d62728" "-." "$Q_PS" polyservept75
-add "Llumnix SLO" "#2ca02c" ":"  "$Q_SL" slot75
-add "vLLM router" "#7f7f7f" "-"  "$Q_VL" vllmcachet75
+# Both repeats are drawn, the second in the lighter shade of the same hue, so a
+# reader sees the between-repeat movement instead of an average that hides it.
+# The arm KEY for the engine-layer figure goes to repeat 1 only: that figure
+# takes one run per arm.
+add "FluidServe r1"  "#1f77b4" "-"  "$Q_FS1" fsv3capgnofrct75
+add "FluidServe r2"  "#aec7e8" "-"  "$Q_FS2" ""
+add "llm-d r1"       "#8c564b" "--" "$Q_LD1" llmdslot75
+add "llm-d r2"       "#c49c94" "--" "$Q_LD2" ""
+add "PolyServe r1"   "#d62728" "-." "$Q_PS1" polyservept75
+add "PolyServe r2"   "#ff9896" "-." "$Q_PS2" ""
+add "Llumnix SLO r1" "#2ca02c" ":"  "$Q_SL1" slot75
+add "Llumnix SLO r2" "#98df8a" ":"  "$Q_SL2" ""
+add "vLLM router r1" "#7f7f7f" "-"  "$Q_VL1" vllmcachet75
+add "vLLM router r2" "#c7c7c7" "-"  "$Q_VL2" ""
 
 echo
 echo "=== [A] in-flight-at-end, which decides where every series must be cut"
@@ -89,7 +105,7 @@ python3 "$R/in_flight_at_end.py" "${RUNS[@]}" 2>&1 | tail -10
 echo
 echo "=== [A] attainment and rate over the hour, five policies"
 python3 "$R/exp41_dynamic_timeline.py" --variant shiftq --out-dir "$OUT" --cut-min 60 \
-  --title "EXP-113: five control planes on the thinned mix-shift hour, Qwen2.5-72B; agent class promised TTFT 7 s + 75 ms/token" \
+  --title "EXP-113: five control planes on the thinned mix-shift hour, Qwen2.5-72B, two repeats each; agent class promised TTFT 7 s + 75 ms/token" \
   --series "${SERIES[@]}" && echo "  ok" || echo "  FAILED"
 
 echo
@@ -123,7 +139,8 @@ python3 "$R/separation_measures.py" "${RUNS[@]}" 2>&1 | tail -12
 # where the series are SUPPOSED to differ, and the script now says so in the
 # title instead of asserting they are the same.
 if [ -n "$L1" ] || [ -n "$L2" ]; then
-  MSER=("FluidServe on Qwen2.5-72B|#1f77b4|-|$Q_FS|tok:7:75")
+  MSER=("FluidServe on Qwen2.5-72B r1|#1f77b4|-|$Q_FS1|tok:7:75")
+  [ -n "$Q_FS2" ] && MSER+=("FluidServe on Qwen2.5-72B r2|#aec7e8|-|$Q_FS2|tok:7:75")
   [ -n "$L1" ] && MSER+=("FluidServe on Llama-3.1-70B rep 1|#d62728|--|$L1|tok:7:75")
   [ -n "$L2" ] && MSER+=("FluidServe on Llama-3.1-70B rep 2|#ff9896|--|$L2|tok:7:75")
   echo
