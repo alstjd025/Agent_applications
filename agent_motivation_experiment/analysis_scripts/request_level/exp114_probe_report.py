@@ -92,6 +92,14 @@ def main(run):
     # up perfectly read as one that offered two thirds of the rate -- which is
     # what this script said the first time it ran. The measured window starts
     # warmup_sec after the first arrival.
+    if len(t) < 2:
+        # A run whose metrics.csv is still a header is a run that has not merged
+        # its worker shards yet -- either still going, or dead before the merge.
+        # shards/ still holding files says which.
+        nsh = len(glob.glob(os.path.join(run, "shards", "*")))
+        print(f"  no arrivals recorded yet ({len(t)} rows); "
+              f"shards/ holds {nsh} files -- the run has not merged")
+        return
     t0 = float(t.iloc[0]) + warm_s
     tm = t[t >= t0]
     span = float(tm.iloc[-1] - tm.iloc[0]) if len(tm) > 1 else 0.0
@@ -121,7 +129,20 @@ def main(run):
         rej = 0
         if "is_rejected" in dfm.columns:
             rej = int(dfm["is_rejected"].astype(str).isin(("True", "true", "1")).sum())
+        # Cut requests are NOT client failures and they are not errors on the
+        # request row: is_error lives on the job_summary row, which is why this
+        # script first read a condition with 1,027 cut requests as "1 error".
+        # They are the requests still streaming when the load window closed, so
+        # their count tracks the fleet's concurrency (830 in flight at 120 req/s)
+        # rather than anything going wrong. They matter here because at high
+        # rates they grow, and because their output_tokens is a lower bound
+        # rather than a length.
+        cut = 0
+        if "is_server_terminated" in dfm.columns:
+            cut = int(dfm["is_server_terminated"].astype(str)
+                      .isin(("True", "true", "1")).sum())
         print(f"  rejected {rej:,} ({100.0*rej/max(len(dfm),1):.1f}%)   "
+              f"cut at window close {cut:,} ({100.0*cut/max(len(dfm),1):.1f}%)   "
               f"error rows {len(err):,} ({100.0*len(err)/max(len(dfm),1):.1f}%)")
         for k, n in kinds.most_common(5):
             print(f"    {n:>7,}  {k}")
