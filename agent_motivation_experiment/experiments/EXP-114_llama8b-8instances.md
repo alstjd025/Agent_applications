@@ -654,3 +654,103 @@ TTFT는 17초다.** 같은 run 안에서 배치 최고 301·281인 엔진은 TTF
 
 **남은 것**: count=4에서 Llumlet이 왜 안 뜨는지. 그것이 풀려야 여덟 대에서 **정책을 재는**
 실험이 된다. 지금 상태로 잰 것은 인스턴스당 프런트엔드 하나가 먼저 막히는 구간이다.
+
+### 2026-09-04 저녁 — `--api-server-count > 1`이 왜 안 되는지 끝까지 갔다
+
+앞 절이 "Llumlet이 안 뜬다"고 적었는데 **틀렸다.** 환경변수 export를 넣은 뒤에는
+**Llumlet이 정상으로 뜬다** (`llumlet.py:83 Llumlet process starting with PID`,
+`:245 Llumlet rpc server started on port`, 인스턴스 여덟 개 분량). 앞서 "0줄"로 읽은 것은
+아직 기동 중인 파드를 너무 일찍 본 것이다. 정상인 count=1 파드에서 같은 줄이 **288개** 나오는
+것으로 로거가 멀쩡함을 확인했다.
+
+**진짜 증상은 파드가 2분 45초마다 통째로 재생성되는 것이었다.** 그래서 CMS 키가 나타났다
+사라지고(`instance_metadata` 0 → 8 → 0), `instance_status`는 끝내 0이며, 스케줄러가 아무것도
+못 본다.
+
+**가설 하나는 반증됐다.** liveness probe(`/health`, 3회 × 30초)가 흔들려 컨테이너를 죽이고
+LWS의 `RecreateGroupOnPodRestart`가 그룹을 지운다고 보고 `failureThreshold`를 30(900초)으로
+올렸는데 **주기가 그대로였다.**
+
+**LWS 컨트롤러가 직접 답을 준다:**
+
+```
+reason=RecreateGroup action=Delete
+note: "Worker pod neutral-0 failed, deleted leader pod neutral-0 to recreate group 0"
+```
+
+**파드를 5초 간격으로 찍어 지워지기 직전 상태를 잡았다:**
+
+```
+19:55:48  vllm=ready:True,  restarts:0, state:['running']
+19:55:53  vllm=ready:False, restarts:1, state:['running']/last=terminated:Completed:exit=0
+19:56:26  파드 교체
+```
+
+**`vllm` 컨테이너가 exit code 0, reason `Completed`로 스스로 끝난다.** OOM도 크래시도
+아니다. 종료된 컨테이너의 로그(`kubectl logs --previous`, 5,966줄)가 연쇄를 다 보여준다:
+
+```
+(ApiServer_1) ERROR async_llm.py:547
+  File "vllm/v1/engine/core_client.py", line 630, in _process_utility_output
+    future = utility_results.pop(output.call_id)
+KeyError: 5911085152105140721
+(ApiServer_1) INFO: Shutting down / Application shutdown complete / Finished server process
+ERROR utils.py:288 Exception occurred while running API servers:
+  Process ApiServer_1 died with exit code None
+RuntimeError  ←  run_multi_api_server → wait_for_completion_or_failure (v1/utils.py:275)
+→ `vllm serve` 종료(exit 0) → kubelet 재시작 → LWS가 그룹 재생성
+```
+
+**프런트엔드 하나(`ApiServer_1`, 세 번의 traceback 전부 인덱스 1)가 자기가 보낸 적 없는
+`call_id`의 utility 응답을 받아 `KeyError`로 죽고, 런처가 그것을 보고 종료한다.**
+
+**유력한 기전 (⚠ 유도이고 아직 확정 아님)**: Llumnix가 엔진 코어에 붙인 hook이
+클라이언트 인덱스 공간에 llumlet을 하나 끼워 넣는다.
+
+```python
+# vllm/v1/engine/core.py, EngineCoreProc.__init__
+self.client_count = len(addresses.outputs)        # ← 덧붙이기 전에 센다
+...
+if envs.VLLM_ENABLE_LLUMNIX:
+    self.llumlet_proxy = LlumletProxy(vllm_config, self.scheduler, engine_index)
+    addresses = self.llumlet_proxy.add_llumlet_address(addresses)   # inputs/outputs에 append
+```
+
+`add_llumlet_addresses`(`llumnix/engine_client/utils.py:74-76`)가 목록 **끝에 덧붙이므로**
+count=1이면 `client_count=1`에 소켓 2개, count=4면 `client_count=4`에 소켓 5개가 된다.
+그리고 Llumnix는 `AsyncMPClient`의 **utility 출력 처리기를 자기 것으로 갈아끼운다**
+(`VLLMEngineClient._ensure_output_queue_task` 주석: *"Llumnix does not use the default utility
+output processor"*). **프런트엔드가 하나면 응답이 어디로 가든 맞지만, 넷이면 `client_index`로
+나뉘어야 하는데 llumlet이 인덱스 하나를 차지하면서 어긋난다.**
+→ **확정하려면 `client_index` 배정과 utility 응답의 목적지를 찍어야 한다.**
+
+### ▶ 다음에 할 것 — 선택지 1 (2026-09-04 사용자 결정)
+
+**vLLM 포크의 클라이언트 인덱스 회계를 고친다.** 오버레이 방식(지금 스케줄러 클래스를
+넣는 `PYTHONPATH=/opt/llumnix-sched`와 같은 방식)으로 `vllm/v1/engine/core.py`를 덮어쓴다.
+
+고칠 후보 둘 (어느 쪽인지는 코드를 더 읽고 정한다):
+1. `self.client_count`를 **llumlet 주소를 덧붙인 뒤에** 세게 한다.
+2. llumlet을 클라이언트 인덱스 공간에서 빼고 별도 소켓으로 다룬다.
+
+⚠ **이것은 엔진 코어의 출력 라우팅(`core.py:1253-1269`의 `sockets[client_index]`)에 걸리는
+변경이라 지금까지 중 위험이 가장 크다.** 잘못되면 응답이 엉뚱한 프런트엔드로 가고 **조용히
+틀린 결과**가 나온다. 그래서:
+- **count=1에서 먼저 회귀 검사**를 한다 — 오버레이를 넣고 count=1로 돌려 스케줄러가 8개를
+  보고 짧은 조건 하나가 정상 수치를 내는지. **count=1의 동작이 바뀌면 그 오버레이는 버린다.**
+- 그 다음 count=4에서 ⑴ 파드가 10분 이상 살아남고 ⑵ `instance_status`가 8이고
+  ⑶ `KeyError` 0건인지 본다.
+- 그 다음에야 100 req/s 조건으로 **17초가 사라지는지** 잰다.
+
+### 지금 상태 (compaction 직전)
+
+| | |
+|---|---|
+| 함대 | Llama-3.1-8B × 8, TP=1, **`--max-num-seqs 4096`** |
+| API 서버 | 인스턴스당 **1개** (count=4는 위 이유로 못 씀) |
+| liveness | **3 × 30초 = 90초** (원복 완료) |
+| `LLUMNIX_VLLM_API_SERVER_PORT` | 시작 스크립트에서 export (count=1에도 무해, 값 동일) |
+| discovery | `--dp_size_local 8` |
+| 스케줄러 | `instance_status` 8개, 파드 안정 |
+| 클러스터 | 비어 있음 |
+| 잡아 둔 증거 | `/home/nxclab/tools/vllm_terminated.log` (5,966줄, 종료된 컨테이너 로그), `/home/nxclab/tools/podwatch.log` (5초 간격 파드 상태) |
