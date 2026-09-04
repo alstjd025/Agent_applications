@@ -208,7 +208,7 @@ set_arm() {  # $1 = fluidserve | polyserve | polyservep* | slo | loadbalance
                                           FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false \
                                           FS_AFFINITY_METRIC=count FS_PER_INSTANCE_CORR=true \
                                           FS_MEMORY_PACE_CAP=true FS_PREFILL_INTERLEAVE=true \
-                                          FS_INSTANCE_CAP=false FS_FORCE=false \
+                                          FS_INSTANCE_CAP=false FS_CAP_WINDOW_MULT=3.0 FS_FORCE=false \
                                           FS_SWE_TBT_MS=75 ;;
     fsv3capgnofrct75) policy=fluidserve; export FS_PREFIX=true FS_FORCE_MARGIN=false \
                                           FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false \
