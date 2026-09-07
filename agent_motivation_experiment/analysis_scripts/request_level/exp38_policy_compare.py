@@ -81,8 +81,11 @@ ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
              # EXP-99: the same two changes with the class preference OFF.
              "fsnaboth",
              # EXP-100.
-             "fsdead"]
+             "fsdead",
+             # EXP-114: the v0.4 candidate with the first-token deadline.
+             "fsv3capgnofrct75dl"]
 ARM_LABEL = {"fsv3capgnofrct75": "FluidServe v0.4", "llmdslot75": "llm-d",
+             "fsv3capgnofrct75dl": "FluidServe (deadline)",
              "polyservept75": "PolyServe (paper mech.)",
              "slot75": "Llumnix SLO", "vllmcachet75": "vLLM router",
              "polyserve": "PolyServe", "slo": "Llumnix SLO",

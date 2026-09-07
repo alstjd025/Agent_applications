@@ -60,6 +60,9 @@ ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe (prefix off)",
         "fsa": "FluidServe + margin", "polyserve": "PolyServe",
         "loadbalance": "Llumnix",
         "fspfx": "FluidServe v0.2", "llmdslo": "llm-d",
+        # EXP-114. The v0.4 candidate with the first-token deadline in the
+        # feasibility test, and the t75 llm-d arm it is drawn against.
+        "fsdl": "FluidServe (deadline)", "llmdslot75": "llm-d",
         # EXP-93/97's class-preference arms. `fscount` ranks the feasible
         # instances by how many of the class each holds, `fsnoaff` has no class
         # term at all. Registered here rather than after the figures were drawn,
