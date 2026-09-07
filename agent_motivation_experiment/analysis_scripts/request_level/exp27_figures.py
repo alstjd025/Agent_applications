@@ -50,6 +50,8 @@ ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
          # EXP-107.
          "fsv3cap": "#9467bd", "fsv3nofrc": "#e377c2", "fsv3capnofrc": "#17becf",
          "fsv3capg": "#7b3294", "fsv3capgnofrc": "#0570b0",
+         # EXP-114 cap ablation: the two arms differ in FS_INSTANCE_CAP only.
+         "fsv3capgnofrct75": "#d62728", "fsv3gnofrct75nocap": "#1f77b4",
          "fsnaboth": "#bcbd22",
          "fsdead": "#17becf",
          "fscorr": "#8c564b",
@@ -113,6 +115,8 @@ ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "fsv3capnofrc": "FluidServe v0.3 (cap, force off)",
          "fsv3capg": "FluidServe v0.3 (+ cap, guardrail form)",
          "fsv3capgnofrc": "FluidServe v0.3 (guardrail cap, force off)",
+         "fsv3capgnofrct75": "FluidServe v0.4 (class-instance cap ON)",
+         "fsv3gnofrct75nocap": "FluidServe v0.4 (class-instance cap OFF)",
          "fsdelay": "FluidServe (+ per-inst. delay in deadline test)",
          "fsdeadfix": "FluidServe (+ delay, deadline in feasibility)",
          "fsnaboth": "FluidServe (pref. off + corr. + pace cap)",
@@ -146,6 +150,7 @@ ARM_LS = {"fluidserve": "-", "slo": "--", "polyserve": ":",
           "fsboth": "-", "fsnaboth": "--", "fsdelay": "-", "fsdeadfix": "-", "fsinterleave": "-", "fsv3": "-", "fsv3noaff": "--", "fsv3b40": "-", "fsv3noaffb40": "--", "fsdead": "-", "fscorr": "-", "fspacecap": "-",
           "fsv3cap": "-", "fsv3nofrc": "--", "fsv3capnofrc": "-.",
           "fsv3capg": "-", "fsv3capgnofrc": "-.",
+          "fsv3capgnofrct75": "-", "fsv3gnofrct75nocap": "--",
           "fluidservefifo": "-", "fluidserveqoserve": "--",
           "slofifo": "-.", "sloqoserve": ":",
           "llmdslo": "-", "fspfx": "--", "fspfxb": "-.",
@@ -189,7 +194,12 @@ def mix_of(d):
     nothing, so collect() dropped them and the Llumnix SLO arm was silently
     absent from a figure that named it in the note.
     """
-    m = re.search(r"_(m[123])f?_rpm_", os.path.basename(d))
+    # The workload-configuration key in the directory name. EXP-108 onwards
+    # names it t75 (the per-token form of the agent class's promise) rather
+    # than m1/m2/m3, and a key this function does not recognise makes
+    # collect() drop the run with no message, so every t75 sweep drew
+    # nothing until 2026-09-08.
+    m = re.search(r"_(m[123]|t75)f?(?:air)?_rpm_", os.path.basename(d))
     return m.group(1) if m else None
 
 
@@ -222,7 +232,7 @@ def collect(patterns):
 
 # ---------------------------------------------------------------- sweep figure
 def fig_sweep(df, out, title):
-    mixes = [m for m in ("m1", "m2", "m3") if m in set(df["mix"])]
+    mixes = [m for m in ("m1", "m2", "m3", "t75") if m in set(df["mix"])]
     arms = [a for a in ARM_C if a in set(df["arm"])]
     with plt.rc_context(PAPER_STYLE):
         fig, axes = plt.subplots(1, len(mixes), figsize=(3.6 * len(mixes), 3.4),
