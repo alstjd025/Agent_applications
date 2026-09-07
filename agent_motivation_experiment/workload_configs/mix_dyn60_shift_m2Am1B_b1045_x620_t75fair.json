@@ -1,0 +1,32 @@
+{
+  "_comment": [
+    "EXP-114. Same config as the _q064 file except the arrival plan: the hour upscaled 6.20x with traces/upscale_trace_keepdur.py so it sits where the Llama-70B hour sat relative to this fleet's knee of 173.5 req/s -- band 0.35x-1.61x, mean 0.97x, 46% of minutes above the knee, duration kept at 61 minutes. scale_trace.py could not be used: its upscale path truncates to the original request count and would have made the hour 10 minutes.",
+    "Hour-trace sibling of mix_dyn60_shift_m2Am1B_b1045_t75.json for the policies that read slo.<class>.tbt_ms LITERALLY as the per-token target -- PolyServe, llm-d, Llumnix SLO and the vLLM router -- because none of them can express an end-to-end budget. The agent class's promise is the same in both files, TTFT 7 s + 75 ms per token (FluidServe v0.4 section 1.3); they differ only in how the second half of it is delivered. FluidServe receives 75 through --fluidserve-class-budgets 25:decode:75 and keeps tbt_ms 25 as the TIER KEY its profile lookup and every log line name the class by, so its file must NOT say 75. Giving these policies that file instead would judge the agent class three times tighter than it is promised, which is the defect polyserve-fidelity.md section 9.5 is about. Scoring for both is FS_SWE_TBT_MS=75.",
+    "EXP-113. Identical to mix_dyn60_shift_m2Am1B_b1045_t75fair.json except that class_plan_file names the thinned trace. The runner refuses to start when the workload's class plan and --trace-file disagree, which is what this file exists to satisfy: the two must be the SAME file because the class of each arrival is a column of the trace, not something the config re-derives. The thinning (factor 0.644, the measured Qwen/Llama capacity ratio) changed only which arrivals survive, so every other field here is unchanged -- the SLO block, the chat pool, the transcript and the out_len hints all still describe the same workload."
+  ],
+  "class_plan_file": "/work/traces/dynamic/canonical/dyn60_shift_m2Am1B_b1045_x620.csv",
+  "chat_config": {
+    "num_conversations": 10000
+  },
+  "deepresearch_config": {},
+  "swe_config": {
+    "transcript_file": "/work/workloads/codingagent_request_level_poisson/data/transcript_swe_short7k_mix1500.jsonl"
+  },
+  "slo": {
+    "chat": {
+      "ttft_ms": 5000,
+      "tbt_ms": 50,
+      "out_len": 386
+    },
+    "deepresearch": {
+      "ttft_ms": 10000,
+      "tbt_ms": 100,
+      "out_len": 275
+    },
+    "swe": {
+      "ttft_ms": 7000,
+      "tbt_ms": 75,
+      "out_len": 728
+    }
+  }
+}
