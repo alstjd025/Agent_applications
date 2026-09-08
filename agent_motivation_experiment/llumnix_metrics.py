@@ -149,6 +149,7 @@ SCHEDULER_METRICS = {
     "scheduler_fluidserve_shed_reason_total",
     "scheduler_fluidserve_headroom_tokens",       # per instance
     "scheduler_fluidserve_cap_kv_tokens",         # latency-imposed capacity
+    "scheduler_fluidserve_cap_mem_tokens",        # physical KV pool, the other ceiling
     "scheduler_fluidserve_projected_kv_tokens",
     "scheduler_fluidserve_outflow_tokens",
     "scheduler_fluidserve_observed_step_ms",      # measured iteration time
