@@ -285,6 +285,12 @@ set_arm() {  # $1 = fluidserve | polyserve | polyservep* | slo | loadbalance
                                           FS_MEMORY_PACE_CAP=true FS_PREFILL_INTERLEAVE=true \
                                           FS_INSTANCE_CAP=true FS_CAP_WINDOW_MULT=3.0 FS_FORCE=false \
                                           FS_SWE_TBT_MS=75 ;;
+    fsv3capgnofrct75cc) policy=fluidserve; export FS_PREFIX=true FS_FORCE_MARGIN=false \
+                                          FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false \
+                                          FS_AFFINITY_METRIC=count FS_PER_INSTANCE_CORR=true \
+                                          FS_MEMORY_PACE_CAP=true FS_PREFILL_INTERLEAVE=true \
+                                          FS_INSTANCE_CAP=true FS_CAP_COST=true FS_CAP_WINDOW_MULT=3.0 FS_FORCE=false \
+                                          FS_SWE_TBT_MS=75 ;;
     # Pinned, not left unset: set_scheduler_profiling.py now returns an unset
     # ablation to its compiled default, which for class-harm is true, while every
     # FluidServe condition from EXP-27 pass 2 to EXP-46 ran with it false (§38).
@@ -538,6 +544,7 @@ declare -A ARMMIX=(
   # the file whose swe tbt_ms is the tier key 25; the other two take the file
   # that states 75, which is what they read as the budget.
   [fsv3capgnofrct75]=t75
+  [fsv3capgnofrct75cc]=t75
   [fsv3gnofrct75nocap]=t75
   [fsv3capgnofrct75dl]=t75
   [polyservept75]=t75fair

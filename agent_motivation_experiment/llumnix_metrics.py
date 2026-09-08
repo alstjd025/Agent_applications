@@ -146,6 +146,7 @@ SCHEDULER_METRICS = {
     "scheduler_fluidserve_instcap_excluded_total",
     "scheduler_fluidserve_instcap_blocked_feasible_total",
     "scheduler_fluidserve_instcap_empty_fallback_total",
+    "scheduler_fluidserve_instcap_free_gate_total",   # kept: the gate would cost nothing
     "scheduler_fluidserve_shed_reason_total",
     "scheduler_fluidserve_headroom_tokens",       # per instance
     "scheduler_fluidserve_cap_kv_tokens",         # latency-imposed capacity
