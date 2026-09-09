@@ -51,7 +51,14 @@ ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
          "fsv3cap": "#9467bd", "fsv3nofrc": "#e377c2", "fsv3capnofrc": "#17becf",
          "fsv3capg": "#7b3294", "fsv3capgnofrc": "#0570b0",
          # EXP-114 cap ablation: the two arms differ in FS_INSTANCE_CAP only.
-         "fsv3capgnofrct75": "#d62728", "fsv3gnofrct75nocap": "#1f77b4",
+         # EXP-116 (2026-09-10): fsv3capgnofrct75 moved from #d62728 to the
+         # project's FluidServe blue, and the cap ablation arm to orange,
+         # because the eight-instance static sweep draws this arm beside
+         # polyservept75 and #d62728 is PolyServe's reserved colour. A
+         # figure that gives our arm the baseline's colour misreads at a
+         # glance no matter what the legend says.
+         "fsv3capgnofrct75": "#1f77b4", "fsv3gnofrct75nocap": "#ff7f0e",
+         "polyservept75": "#d62728", "loadbalance": "#7f7f7f",
          "fsv3capgnofrct75cc": "#2ca02c",
          "fsv3capgnofrct75ml": "#9467bd",
          "fsv3capgnofrct75ml85": "#8c564b",
@@ -123,6 +130,8 @@ ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "fsv3capgnofrct75ml": "FluidServe v0.4 (level memory test, 0.95 pool)",
          "fsv3capgnofrct75ml85": "FluidServe v0.4 (level memory test, 0.85 pool)",
          "fsv3gnofrct75nocap": "FluidServe v0.4 (class-instance cap OFF)",
+         "polyservept75": "PolyServe (paper mechanisms, per-token swe)",
+         "loadbalance": "Llumnix load-balance",
          "fsdelay": "FluidServe (+ per-inst. delay in deadline test)",
          "fsdeadfix": "FluidServe (+ delay, deadline in feasibility)",
          "fsnaboth": "FluidServe (pref. off + corr. + pace cap)",
@@ -160,6 +169,7 @@ ARM_LS = {"fluidserve": "-", "slo": "--", "polyserve": ":",
           "fsv3capgnofrct75cc": "-.",
           "fsv3capgnofrct75ml": "-",
           "fsv3capgnofrct75ml85": "--",
+          "polyservept75": ":", "loadbalance": "-.",
           "fluidservefifo": "-", "fluidserveqoserve": "--",
           "slofifo": "-.", "sloqoserve": ":",
           "llmdslo": "-", "fspfx": "--", "fspfxb": "-.",
