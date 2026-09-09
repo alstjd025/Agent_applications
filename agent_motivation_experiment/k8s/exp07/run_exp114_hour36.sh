@@ -484,6 +484,31 @@ set_arm() {
                                           FS_MEMORY_PACE_CAP=true FS_PREFILL_INTERLEAVE=true \
                                           FS_INSTANCE_CAP=true FS_CAP_COST=true FS_CAP_WINDOW_MULT=3.0 FS_FORCE=false \
                                           FS_SWE_TBT_MS=75 ;;
+    # EXP-114. The memory predicate as a level test: kvLogical + cost against
+    # capMem instead of proj + cost. The projection prices departures and not
+    # arrivals, so it forecasts a drain the arrivals then fill -- measured, an
+    # instance moves by 46,087 generated + 158,216 admitted - 204,988 released =
+    # -686 over a horizon while the model predicts -104,647. That optimism is
+    # 5.3% against a 5% safety factor, the two cancel, and 40.6% of routes landed
+    # past the engine's measured 0.973 preemption onset. Every other flag is
+    # written out identically to fsv3capgnofrct75, so the pair differs in one.
+    fsv3capgnofrct75ml) policy=fluidserve; export FS_PREFIX=true FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false \
+                                          FS_AFFINITY_METRIC=count FS_PER_INSTANCE_CORR=true \
+                                          FS_MEMORY_PACE_CAP=true FS_PREFILL_INTERLEAVE=true \
+                                          FS_INSTANCE_CAP=true FS_CAP_WINDOW_MULT=3.0 FS_FORCE=false \
+                                          FS_MEM_LEVEL=true \
+                                          FS_SWE_TBT_MS=75 ;;
+    # The same with the occupancy target lowered from 0.95 to 0.85 of the
+    # physical pool, which is the third point of the sweep: the measured
+    # preemption onset is 0.973-0.998, so 0.95 already sits below it and 0.85
+    # buys more distance at the cost of admissions. Two points give a slope, and
+    # the slope is the exchange rate the decision needs.
+    fsv3capgnofrct75ml85) policy=fluidserve; export FS_PREFIX=true FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false \
+                                          FS_AFFINITY_METRIC=count FS_PER_INSTANCE_CORR=true \
+                                          FS_MEMORY_PACE_CAP=true FS_PREFILL_INTERLEAVE=true \
+                                          FS_INSTANCE_CAP=true FS_CAP_WINDOW_MULT=3.0 FS_FORCE=false \
+                                          FS_MEM_LEVEL=true FS_MEM_SAFETY=0.85 \
+                                          FS_SWE_TBT_MS=75 ;;
     # EXP-114. The control with the first-token deadline made a feasibility
     # condition. Every other flag is written out identically, so the pair differs
     # in exactly one.
@@ -680,7 +705,7 @@ run_cell() {  # $1 arm, $2 variant (ablation|full)
   [ "$variant" = "shift62" ] && qsuf="_x620"
   [ "$variant" = "shift50" ] && qsuf="_x500"
   case "$arm" in
-    fsv3capgnofrct75|fsv3capgnofrct75dl|fsv3capgnofrct75cc)
+    fsv3capgnofrct75|fsv3capgnofrct75dl|fsv3capgnofrct75cc|fsv3capgnofrct75ml|fsv3capgnofrct75ml85)
       wcfg=/work/workload_configs/mix_dyn60_shift_m2Am1B_b1045${qsuf}_t75.json ;;
     polyservept75|slot75|vllmcachet75|llmdslot75)
       wcfg=/work/workload_configs/mix_dyn60_shift_m2Am1B_b1045${qsuf}_t75fair.json ;;
