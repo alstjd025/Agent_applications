@@ -79,6 +79,7 @@ ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe (prefix off)",
         # it has to be here too or the arm is dropped from this figure without a
         # message.
         "fsv3capgnofrct75": "FluidServe v0.4",
+        "fsv3capgnofrct75cc": "FluidServe v0.4 (free gates)",
         "llmdslot75": "llm-d",
         "polyservept75": "PolyServe (paper mechanisms)",
         "slot75": "Llumnix SLO",

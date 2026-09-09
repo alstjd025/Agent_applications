@@ -479,6 +479,11 @@ set_arm() {
                                           FS_MEMORY_PACE_CAP=true FS_PREFILL_INTERLEAVE=true \
                                           FS_INSTANCE_CAP=true FS_CAP_WINDOW_MULT=3.0 FS_FORCE=false \
                                           FS_SWE_TBT_MS=75 ;;
+    fsv3capgnofrct75cc) policy=fluidserve; export FS_PREFIX=true FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false \
+                                          FS_AFFINITY_METRIC=count FS_PER_INSTANCE_CORR=true \
+                                          FS_MEMORY_PACE_CAP=true FS_PREFILL_INTERLEAVE=true \
+                                          FS_INSTANCE_CAP=true FS_CAP_COST=true FS_CAP_WINDOW_MULT=3.0 FS_FORCE=false \
+                                          FS_SWE_TBT_MS=75 ;;
     # EXP-114. The control with the first-token deadline made a feasibility
     # condition. Every other flag is written out identically, so the pair differs
     # in exactly one.
@@ -675,7 +680,7 @@ run_cell() {  # $1 arm, $2 variant (ablation|full)
   [ "$variant" = "shift62" ] && qsuf="_x620"
   [ "$variant" = "shift50" ] && qsuf="_x500"
   case "$arm" in
-    fsv3capgnofrct75|fsv3capgnofrct75dl)
+    fsv3capgnofrct75|fsv3capgnofrct75dl|fsv3capgnofrct75cc)
       wcfg=/work/workload_configs/mix_dyn60_shift_m2Am1B_b1045${qsuf}_t75.json ;;
     polyservept75|slot75|vllmcachet75|llmdslot75)
       wcfg=/work/workload_configs/mix_dyn60_shift_m2Am1B_b1045${qsuf}_t75fair.json ;;
