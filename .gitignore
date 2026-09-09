@@ -3,6 +3,14 @@ __pycache__/
 *.pyc
 *.log
 *.csv
+# ...except the numbers a paper figure draws. The convention in
+# .claude/skills/exp-plot requires a CSV beside every paper figure, written by
+# the same run of the same script, so that the plotted values are re-derivable
+# and diffable against the figure it describes. The blanket rule left every
+# paper figure's numbers unversioned, which is the failure that convention
+# exists to prevent. It stays in force for results/, where one metrics.csv is
+# hundreds of megabytes.
+!agent_motivation_experiment/paper_figures/*.csv
 sglang/
 
 # Experiment run outputs (large: metrics/server_metrics jsonl, agent_logs, plots).

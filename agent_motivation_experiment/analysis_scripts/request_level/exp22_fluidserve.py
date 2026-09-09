@@ -183,6 +183,25 @@ ARM_STYLE = {
                     label="FluidServe, independent shed"),
     "vllmcache": dict(color="#7b3294", ls="-", marker="h",
                       label="vLLM router (cache-aware)"),
+
+    # EXP-109/113/114, the hour-trace arms that promise the agent class per
+    # token (TTFT 7 s + 75 ms/token) instead of end to end. `arm_of` reads the
+    # directory name, so these are distinct keys from the arms above even though
+    # the control planes are the same; registering them matters more than the
+    # colours do, because `fig_engines` and `make_figures` build their arm list
+    # as [k for k in ARM_STYLE if k in slides] and an arm missing from this
+    # table is dropped from every figure with no message. Colours match
+    # paper_figures/paper_style.py so one policy is one colour everywhere.
+    "fsv3capgnofrct75": dict(color="#1f77b4", ls="-", marker="s",
+                             label="FluidServe"),
+    "polyservept75": dict(color="#d62728", ls="-.", marker="o",
+                          label="PolyServe"),
+    "slot75": dict(color="#2ca02c", ls="--", marker="^",
+                   label="Llumnix SLO"),
+    "llmdslot75": dict(color="#8c564b", ls=(0, (6, 1.5)), marker="D",
+                       label="llm-d"),
+    "vllmcachet75": dict(color="#7b3294", ls=":", marker="p",
+                         label="vLLM router (cache-aware)"),
 }
 PAPER_STYLE = {
     "font.family": "serif",
