@@ -59,6 +59,11 @@ ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
              # aborts on an unregistered arm and that abort is the point.
              "fsv3capgnofrct75", "fsv3capgnofrct75cc",
              "fsv3capgnofrct75ml", "fsv3capgnofrct75ml85",
+             # EXP-116/118. The eight-instance static sweep and the first-token
+             # estimate corrections, registered before the runs exist for the
+             # reason given above.
+             "fsv3capgnofrct75dl",
+             "fsv3ft", "fsv3ftq", "fsv3ftboth",
              "llmdslot75", "polyservept75",
              "slot75", "vllmcachet75",
              # EXP-73's ladder. Registered before that sweep's engine-layer
