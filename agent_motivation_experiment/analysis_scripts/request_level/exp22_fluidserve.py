@@ -25,10 +25,23 @@ Aggregation is equal-weight across classes. The workload offers a mix that moves
 over the hour, and a fleet-wide mean weights whichever class happened to be
 served most, which is exactly the composition effect EXP-21 documented.
 
-Scoring rules are EXP-17/21's, unchanged:
+Scoring rules are EXP-17/21's by default:
   chat          mean TTFT <= 5s  and mean TBT <= 50ms
   deepresearch  mean TTFT <= 10s and mean TBT <= 100ms
   swe           end-to-end <= 30s
+
+Each per-token budget can be overridden from the environment -- FS_CHAT_TBT_MS,
+FS_DR_TBT_MS, FS_SWE_TBT_MS -- because the POLICY takes the same three values
+through --fluidserve-class-budgets and a budget that moves in only one of the two
+places makes the scheduler and the analysis judge the same request differently
+while both look ordinary. Each first-token budget can be overridden the same way
+-- FS_CHAT_TTFT_S, FS_DR_TTFT_S, FS_SWE_TTFT_S, in SECONDS -- and there the other
+copy of the budget is not a flag but the workload configuration file: the client
+packs it as priority = ttft_ms*1000 + tbt_ms, the gateway unpacks it in
+DecodePackedSlo, and both FluidServe and PolyServe read the per-request value, so
+the only way to change a first-token budget is to change slo.<class>.ttft_ms in
+the file the run loads. Every override prints a banner naming what may not be put
+in a table with what.
 
 Usage
 -----
@@ -66,6 +79,64 @@ if abs(_SWE_E2E_S - 30.0) > 1e-9:
           f"from this run are not comparable with numbers scored at 30 s.",
           file=sys.stderr)
 
+# EXP-123. The FIRST-TOKEN budgets, in SECONDS, settable for the same reason the
+# per-token ones are: the same number lives in two places and a change to one of
+# them alone leaves the scheduler and the scorer judging the same request against
+# different budgets while both look ordinary. The second place is NOT a flag. No
+# --fluidserve-* flag carries a first-token budget at all: the client packs it
+# into the OpenAI `priority` field as ttft_ms*1000 + tbt_ms
+# (workloads/swe_bench_coding/agent.py, priority_mode=deadline), the gateway
+# unpacks it in types.DecodePackedSlo, and fluidserve.go:566 and polyserve.go
+# read it per request, so the budget can only be moved by editing
+# slo.<class>.ttft_ms in the workload configuration the run loads. A table built
+# from a run must therefore name the workload file as well as these variables.
+#
+# ⚠ THIS OVERRIDE HAS NO DERIVATION BEHIND IT, unlike the per-token one. The
+# crossover footprint T* = C(c_n + rho/R) / ((B - c0)s - C c_kv) that motivates
+# halving the per-token budgets contains the budget only as a per-token quantity
+# in its denominator. Under load the first-token time is dominated by queueing
+# rather than by prefill compute, and queueing is produced by the policy rather
+# than by the hardware -- on the hour trace swe's first-token time is p50
+# 6,589 ms under FluidServe and p50 371 ms under PolyServe on the same fleet
+# under the same 7 s budget -- so there is no hardware ratio to normalise by.
+#
+# WHOLE MILLISECONDS, because the workload configuration states ttft_ms as an
+# integer and the client sends int(round(rel))*1000 + tbt_ms: a scorer using
+# 2.5005 s while the request carried 2500 ms would judge in silence against a
+# budget no request was ever given.
+#
+# Unlike _per_token_budget this announces itself only when the value DIFFERS from
+# the default, because FS_SWE_TTFT_S=7 is written out explicitly by every driver
+# that scores swe in per-token form and a banner saying a value is not itself
+# would train the reader to ignore banners.
+def _first_token_budget(env_key, default_s, cls):
+    raw = os.environ.get(env_key)
+    if not raw:
+        return default_s
+    try:
+        val = float(raw)
+    except ValueError:
+        raise SystemExit(f"{env_key}={raw!r} is not a number")
+    if val <= 0 or abs(val * 1000.0 - round(val * 1000.0)) > 1e-6:
+        raise SystemExit(
+            f"{env_key}={raw} must be a positive number of seconds that is a "
+            f"whole number of MILLISECONDS. The workload configuration states "
+            f"slo.<class>.ttft_ms as an integer and the client sends "
+            f"int(round(ttft_ms))*1000 + tbt_ms as the packed priority, so a "
+            f"budget the requests cannot carry is a budget only the scorer "
+            f"believes in.")
+    val = round(val * 1000.0) / 1000.0
+    if abs(val - default_s) > 1e-9:
+        print(f"!! {env_key}={raw}: {cls} is being scored against a {val:g} s "
+              f"first-token budget, NOT the standard {default_s:g} s. The run "
+              f"must have been produced with a workload configuration whose "
+              f"slo.{cls}.ttft_ms is {round(val * 1000):d}; numbers scored this "
+              f"way cannot sit in a table with numbers scored at {default_s:g} s, "
+              f"and any citation must name the budget beside the figure.",
+              file=sys.stderr)
+    return val
+
+
 # FS_SWE_TBT_MS switches swe to the per-token FORM (TTFT + mean per-token time,
 # like chat and deepresearch) instead of an end-to-end budget. This mirrors the
 # scheduler-side env of the same name (set_scheduler_profiling.py builds
@@ -76,8 +147,14 @@ if abs(_SWE_E2E_S - 30.0) > 1e-9:
 _SWE_TBT_MS = os.environ.get("FS_SWE_TBT_MS")
 if _SWE_TBT_MS is not None and abs(_SWE_E2E_S - 30.0) > 1e-9:
     raise SystemExit("FS_SWE_TBT_MS and FS_SWE_E2E_S are both set; pick one form")
+if _SWE_TBT_MS is None and os.environ.get("FS_SWE_TTFT_S"):
+    raise SystemExit(
+        "FS_SWE_TTFT_S is set but FS_SWE_TBT_MS is not. swe is then scored on "
+        "its end-to-end budget, in which a first-token budget plays no part, so "
+        "the variable would be accepted and ignored -- set FS_SWE_TBT_MS to put "
+        "swe in per-token form, or unset FS_SWE_TTFT_S.")
 if _SWE_TBT_MS is not None:
-    _SWE_TTFT_S = float(os.environ.get("FS_SWE_TTFT_S", "7.0"))
+    _SWE_TTFT_S = _first_token_budget("FS_SWE_TTFT_S", 7.0, "swe")
     _SWE_RULE = {"ttft": _SWE_TTFT_S, "tbt": float(_SWE_TBT_MS)}
     print(f"!! FS_SWE_TBT_MS={_SWE_TBT_MS}: swe is being scored in PER-TOKEN "
           f"form (TTFT <= {_SWE_TTFT_S} s, mean per-token <= {_SWE_TBT_MS} ms), "
@@ -88,9 +165,57 @@ if _SWE_TBT_MS is not None:
 else:
     _SWE_RULE = {"e2e": _SWE_E2E_S}
 
+# EXP-121. chat's and deepresearch's PER-TOKEN budgets are settable from the
+# environment for exactly the reason swe's is, and the two envs carry the same
+# names the scheduler side reads (set_scheduler_profiling._class_budgets_spec
+# builds "50:decode:<FS_CHAT_TBT_MS>,100:decode:<FS_DR_TBT_MS>" from them), so
+# the policy and the scorer move together or not at all. Before this, chat 50 and
+# deepresearch 100 were written here as constants and on the scheduler side as
+# bare tier keys, which is the shape CLAUDE.md records as "the same quantity
+# written in two places, and only one of them updated".
+#
+# The FIRST-TOKEN budgets are deliberately NOT settable here. The derivation that
+# motivates halving the per-token budgets -- the crossover footprint
+# T* = C(c_n + rho/R) / ((B - c0)s - C c_kv), whose denominator is the only place
+# the budget appears -- is a statement about the per-token ceiling alone. A
+# first-token budget would need its own derivation, and moving both at once would
+# confound the axis under test.
+#
+# Whole milliseconds, matching the scheduler: its parser reads the budget with
+# strconv.Atoi and refuses anything else, so a scorer that accepted 37.5 while
+# the policy ran 37 would judge the same request against two budgets in silence.
+def _per_token_budget(env_key, default_ms, cls):
+    raw = os.environ.get(env_key)
+    if not raw:
+        return default_ms
+    try:
+        val = float(raw)
+    except ValueError:
+        raise SystemExit(f"{env_key}={raw!r} is not a number")
+    if val <= 0 or abs(val - round(val)) > 1e-9:
+        raise SystemExit(
+            f"{env_key}={raw} must be a positive WHOLE number of milliseconds, "
+            f"because --fluidserve-class-budgets is parsed with strconv.Atoi and "
+            f"the policy cannot be given a fractional budget. Scoring at a value "
+            f"the policy cannot be told is the two-budget failure this variable "
+            f"exists to prevent.")
+    val = float(round(val))
+    print(f"!! {env_key}={raw}: {cls} is being scored against a {val:g} ms "
+          f"per-token budget, NOT the standard {default_ms:g} ms. Numbers scored "
+          f"this way cannot sit in a table with numbers scored at the standard "
+          f"budgets ({cls} {default_ms:g} ms), and any citation must name the "
+          f"budget beside the figure.", file=sys.stderr)
+    return val
+
+
+_CHAT_TBT_MS = _per_token_budget("FS_CHAT_TBT_MS", 50.0, "chat")
+_DR_TBT_MS = _per_token_budget("FS_DR_TBT_MS", 100.0, "deepresearch")
+_CHAT_TTFT_S = _first_token_budget("FS_CHAT_TTFT_S", 5.0, "chat")
+_DR_TTFT_S = _first_token_budget("FS_DR_TTFT_S", 10.0, "deepresearch")
+
 SLO_RULES = {
-    "chat":         {"ttft": 5.0,  "tbt": 50.0},
-    "deepresearch": {"ttft": 10.0, "tbt": 100.0},
+    "chat":         {"ttft": _CHAT_TTFT_S,  "tbt": _CHAT_TBT_MS},
+    "deepresearch": {"ttft": _DR_TTFT_S, "tbt": _DR_TBT_MS},
     "swe":          _SWE_RULE,
 }
 CLASSES = ["chat", "deepresearch", "swe"]
@@ -196,6 +321,33 @@ ARM_STYLE = {
                              label="FluidServe"),
     "polyservept75": dict(color="#d62728", ls="-.", marker="o",
                           label="PolyServe"),
+    # EXP-121, the halved per-token budgets (chat 25 / deepresearch 50 / swe 38
+    # ms per token, first-token budgets unchanged). Registered before the runs
+    # exist for the reason stated above this table: the two arms these are read
+    # against, fsv3capgnofrct75 and polyservept75, ARE in this table, so leaving
+    # the new pair out would draw a figure carrying only the full-budget columns
+    # and label it as a comparison. Same hue as the arm each one halves, so the
+    # policy identity does not change between figures, and a dotted line plus a
+    # different marker to separate the budget settings. The label states the
+    # budgets rather than "halved": these columns may not be read as continuous
+    # with the 50 / 100 / 75 ones.
+    "fsv3capgnofrcc25d50s38": dict(color="#1f77b4", ls=":", marker="D",
+                                   label="FluidServe (per-token 25/50/38 ms)"),
+    "polyservepc25d50s38": dict(color="#d62728", ls=":", marker="v",
+                                label="PolyServe (per-token 25/50/38 ms)"),
+    # EXP-123. The same two policies with the FIRST-TOKEN budgets halved as
+    # well. Registered before the runs exist: this table is turned into an arm
+    # list as [k for k in ARM_STYLE if k in <data>], so an arm missing here is
+    # dropped from every figure without a message and the remaining arms render
+    # a plausible legend. Dash-dot separates them from the EXP-121 pair, which
+    # is dotted, while the colours stay FluidServe blue and PolyServe red so the
+    # policy identity never swaps between figures.
+    "fsv3capgnofrcc25d50s38ftc2500d5000s3500": dict(
+        color="#1f77b4", ls="-.", marker="D",
+        label="FluidServe v0.4 (first-token 2.5/5/3.5 s, per-token 25/50/38 ms)"),
+    "polyservepc25d50s38ftc2500d5000s3500": dict(
+        color="#d62728", ls="-.", marker="v",
+        label="PolyServe (paper mech., first-token 2.5/5/3.5 s, per-token 25/50/38 ms)"),
     "slot75": dict(color="#2ca02c", ls="--", marker="^",
                    label="Llumnix SLO"),
     "llmdslot75": dict(color="#8c564b", ls=(0, (6, 1.5)), marker="D",

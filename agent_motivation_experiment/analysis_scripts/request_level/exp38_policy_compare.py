@@ -65,6 +65,18 @@ ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
              "fsv3capgnofrct75dl",
              "fsv3ft", "fsv3ftq", "fsv3ftboth",
              "fsv3dl", "fsv3dlftboth",
+             "fsv3ftml", "fsv3ftms85",
+             # EXP-121. The halved per-token budgets, registered before the runs
+             # exist because the check below ABORTS on an arm that has runs and
+             # no entry here, and that abort is the point.
+             "fsv3capgnofrcc25d50s38", "polyservepc25d50s38",
+             # EXP-123. The same two policies with the first-token budgets
+             # halved as well, registered before the runs exist for the same
+             # reason: the check below ABORTS on an arm that has runs and no
+             # entry here, and that abort is what stops a "comparison" figure
+             # being drawn from whichever arms happened to be registered.
+             "fsv3capgnofrcc25d50s38ftc2500d5000s3500",
+             "polyservepc25d50s38ftc2500d5000s3500",
              "llmdslot75", "polyservept75",
              "slot75", "vllmcachet75",
              # EXP-73's ladder. Registered before that sweep's engine-layer
@@ -97,6 +109,20 @@ ARM_LABEL = {"fsv3capgnofrct75": "FluidServe v0.4", "llmdslot75": "llm-d",
              "fsv3capgnofrct75ml": "FluidServe v0.4 (level memory test)",
              "fsv3capgnofrct75ml85": "FluidServe v0.4 (level memory test, 0.85 pool)",
              "fsv3capgnofrct75dl": "FluidServe (deadline)",
+             # EXP-121. Both labels carry the three per-token budgets, because
+             # this figure puts them beside columns scored at 50 / 100 / 75 and
+             # the two sets of numbers may not be read as one.
+             "fsv3capgnofrcc25d50s38":
+                 "FluidServe v0.4\n(per-token\n25/50/38 ms)",
+             "polyservepc25d50s38":
+                 "PolyServe\n(paper mech.,\nper-token\n25/50/38 ms)",
+             # EXP-123. Both labels carry both budget sets, because this figure
+             # puts them beside columns scored at first-token 5/10/7 s and
+             # per-token 50/100/75 ms and the three sets may not be read as one.
+             "fsv3capgnofrcc25d50s38ftc2500d5000s3500":
+                 "FluidServe v0.4\n(first-token\n2.5/5/3.5 s,\nper-token\n25/50/38 ms)",
+             "polyservepc25d50s38ftc2500d5000s3500":
+                 "PolyServe\n(paper mech.,\nfirst-token\n2.5/5/3.5 s,\nper-token\n25/50/38 ms)",
              "polyservept75": "PolyServe (paper mech.)",
              "slot75": "Llumnix SLO", "vllmcachet75": "vLLM router",
              "polyserve": "PolyServe", "slo": "Llumnix SLO",

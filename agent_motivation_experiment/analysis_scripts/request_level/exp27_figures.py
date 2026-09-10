@@ -64,6 +64,23 @@ ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
          # EXP-118: the first-token estimate corrections.
          "fsv3ft": "#ff7f0e", "fsv3ftq": "#9467bd", "fsv3ftboth": "#2ca02c",
          "fsv3dl": "#8c564b", "fsv3dlftboth": "#e377c2",
+         "fsv3ftml": "#17becf", "fsv3ftms85": "#7f7f7f",
+         # EXP-121, the halved per-token budgets. Registered before the runs
+         # exist, for the reason written above this table: fig_sweep builds its
+         # arm list as [a for a in ARM_C if a in set(df["arm"])], so an arm that
+         # is absent here is dropped from every figure without a message and the
+         # figure still renders with a plausible legend. The FluidServe arm keeps
+         # the project's FluidServe blue and the PolyServe arm PolyServe's red,
+         # because these two are read against fsv3capgnofrct75 and polyservept75
+         # and the pairs must not swap identity between figures; the halved arms
+         # are separated from the full-budget ones by line style in ARM_LS below.
+         "fsv3capgnofrcc25d50s38": "#1f77b4", "polyservepc25d50s38": "#d62728",
+         # EXP-123. The same two policies with the first-token budgets halved
+         # as well. Same colours as the EXP-121 pair, because the policy
+         # identity must not change between figures; ARM_LS separates the two
+         # budget settings by line style.
+         "fsv3capgnofrcc25d50s38ftc2500d5000s3500": "#1f77b4",
+         "polyservepc25d50s38ftc2500d5000s3500": "#d62728",
          "fsv3capgnofrct75cc": "#2ca02c",
          "fsv3capgnofrct75ml": "#9467bd",
          "fsv3capgnofrct75ml85": "#8c564b",
@@ -123,6 +140,20 @@ ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "fsinterleave": "FluidServe (+ interleave-aware first-token estimate)",
          "fsv3": "FluidServe v0.3",
          "fsv3noaff": "FluidServe v0.3 (class preference off)",
+         # EXP-121. The label states the budgets rather than "halved", because a
+         # relative word is only readable beside the arm it is relative to.
+         "fsv3capgnofrcc25d50s38":
+             "FluidServe v0.4 (per-token 25/50/38 ms)",
+         "polyservepc25d50s38":
+             "PolyServe (paper mech., per-token 25/50/38 ms)",
+         # EXP-123. The label states both budget sets, because these arms sit on
+         # figures beside columns scored at first-token 5/10/7 s and per-token
+         # 50/100/75 ms and the two sets of numbers may not be read as one.
+         "fsv3capgnofrcc25d50s38ftc2500d5000s3500":
+             "FluidServe v0.4 (first-token 2.5/5/3.5 s, per-token 25/50/38 ms)",
+         "polyservepc25d50s38ftc2500d5000s3500":
+             "PolyServe (paper mech., first-token 2.5/5/3.5 s, "
+             "per-token 25/50/38 ms)",
          "fsv3b40": "FluidServe v0.3 (swe budget 40 s)",
          "fsv3noaffb40": "FluidServe v0.3 (swe 40 s, preference off)",
          "fsv3cap": "FluidServe v0.3 (+ class-instance cap)",
@@ -143,6 +174,8 @@ ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "fsv3ftboth": "FluidServe v0.4 (+ both first-token corrections)",
          "fsv3dl": "FluidServe v0.4 (+ first-token deadline in feasibility)",
          "fsv3dlftboth": "FluidServe v0.4 (+ deadline + both corrections)",
+         "fsv3ftml": "FluidServe v0.4 (+ corrections + level memory test)",
+         "fsv3ftms85": "FluidServe v0.4 (+ corrections + 0.85 pool)",
          "fsdelay": "FluidServe (+ per-inst. delay in deadline test)",
          "fsdeadfix": "FluidServe (+ delay, deadline in feasibility)",
          "fsnaboth": "FluidServe (pref. off + corr. + pace cap)",
@@ -184,6 +217,16 @@ ARM_LS = {"fluidserve": "-", "slo": "--", "polyserve": ":",
           "fsv3capgnofrct75dl": "--",
           "fsv3ft": "--", "fsv3ftq": ":", "fsv3ftboth": "-",
           "fsv3dl": "-.", "fsv3dlftboth": "-",
+          "fsv3ftml": "-", "fsv3ftms85": "--",
+          # EXP-121. Dashed, so that on a figure carrying both budget settings
+          # the halved arm is distinguishable from the full-budget arm of the
+          # same colour without reading the legend.
+          "fsv3capgnofrcc25d50s38": "--", "polyservepc25d50s38": "--",
+          # EXP-123. Dash-dot, so a figure carrying all three budget settings
+          # separates full budgets (solid), per-token halved (dashed) and both
+          # halved (dash-dot) without reading the legend.
+          "fsv3capgnofrcc25d50s38ftc2500d5000s3500": "-.",
+          "polyservepc25d50s38ftc2500d5000s3500": "-.",
           "fluidservefifo": "-", "fluidserveqoserve": "--",
           "slofifo": "-.", "sloqoserve": ":",
           "llmdslo": "-", "fspfx": "--", "fspfxb": "-.",
