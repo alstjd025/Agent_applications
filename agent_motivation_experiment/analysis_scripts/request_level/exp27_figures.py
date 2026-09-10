@@ -65,6 +65,16 @@ ARM_C = {"polyserve": "#d62728", "slo": "#2ca02c", "fluidserve": "#1f77b4",
          "fsv3ft": "#ff7f0e", "fsv3ftq": "#9467bd", "fsv3ftboth": "#2ca02c",
          "fsv3dl": "#8c564b", "fsv3dlftboth": "#e377c2",
          "fsv3ftml": "#17becf", "fsv3ftms85": "#7f7f7f",
+         # EXP-124 (2026-09-10). The arrivals term in the KV projection: two window
+         # lengths at the shipped 0.95 memory ceiling, the 0.97 ceiling alone, and the
+         # pairing. Registered BEFORE the runs exist, because every one of these tables
+         # is turned into an arm list as [k for k in <table> if k in <data>] and an arm
+         # missing from the table is dropped from the figure with no message, leaving a
+         # plausible legend over an incomplete comparison. FluidServe-family colours,
+         # kept away from #d62728 (PolyServe) and #1f77b4 (the control arm these four
+         # are read against, which must stay visually distinct from its own variants).
+         "fsv3ah3": "#bcbd22", "fsv3ah1": "#ffbb78",
+         "fsv3ms97": "#c5b0d5", "fsv3ah3ms97": "#393b79",
          # EXP-121, the halved per-token budgets. Registered before the runs
          # exist, for the reason written above this table: fig_sweep builds its
          # arm list as [a for a in ARM_C if a in set(df["arm"])], so an arm that
@@ -176,6 +186,13 @@ ARM_L = {"polyserve": "PolyServe", "slo": "Llumnix SLO",
          "fsv3dlftboth": "FluidServe v0.4 (+ deadline + both corrections)",
          "fsv3ftml": "FluidServe v0.4 (+ corrections + level memory test)",
          "fsv3ftms85": "FluidServe v0.4 (+ corrections + 0.85 pool)",
+         # EXP-124, the arrivals term. Registered before the runs exist: ARM_L
+         # is read as a lookup with a fallback to the raw arm name, so a missing
+         # entry does not abort, it prints the directory token as the legend.
+         "fsv3ah3": "FluidServe v0.4 (+ arrivals term, window 3)",
+         "fsv3ah1": "FluidServe v0.4 (+ arrivals term, window 1)",
+         "fsv3ms97": "FluidServe v0.4 (0.97 pool, no arrivals term)",
+         "fsv3ah3ms97": "FluidServe v0.4 (+ arrivals term, window 3, 0.97 pool)",
          "fsdelay": "FluidServe (+ per-inst. delay in deadline test)",
          "fsdeadfix": "FluidServe (+ delay, deadline in feasibility)",
          "fsnaboth": "FluidServe (pref. off + corr. + pace cap)",
@@ -218,6 +235,9 @@ ARM_LS = {"fluidserve": "-", "slo": "--", "polyserve": ":",
           "fsv3ft": "--", "fsv3ftq": ":", "fsv3ftboth": "-",
           "fsv3dl": "-.", "fsv3dlftboth": "-",
           "fsv3ftml": "-", "fsv3ftms85": "--",
+          # EXP-124, the arrivals term.
+          "fsv3ah3": "-", "fsv3ah1": "--",
+          "fsv3ms97": ":", "fsv3ah3ms97": "-.",
           # EXP-121. Dashed, so that on a figure carrying both budget settings
           # the halved arm is distinguishable from the full-budget arm of the
           # same colour without reading the legend.

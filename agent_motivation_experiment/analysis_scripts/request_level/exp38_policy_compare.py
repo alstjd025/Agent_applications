@@ -66,6 +66,15 @@ ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
              "fsv3ft", "fsv3ftq", "fsv3ftboth",
              "fsv3dl", "fsv3dlftboth",
              "fsv3ftml", "fsv3ftms85",
+             # EXP-124 (2026-09-10). The arrivals term in the KV projection: two window
+             # lengths at the shipped 0.95 memory ceiling, the 0.97 ceiling alone, and the
+             # pairing. Registered BEFORE the runs exist, because every one of these tables
+             # is turned into an arm list as [k for k in <table> if k in <data>] and an arm
+             # missing from the table is dropped from the figure with no message, leaving a
+             # plausible legend over an incomplete comparison. FluidServe-family colours,
+             # kept away from #d62728 (PolyServe) and #1f77b4 (the control arm these four
+             # are read against, which must stay visually distinct from its own variants).
+             "fsv3ah3", "fsv3ah1", "fsv3ms97", "fsv3ah3ms97",
              # EXP-121. The halved per-token budgets, registered before the runs
              # exist because the check below ABORTS on an arm that has runs and
              # no entry here, and that abort is the point.
@@ -109,6 +118,14 @@ ARM_LABEL = {"fsv3capgnofrct75": "FluidServe v0.4", "llmdslot75": "llm-d",
              "fsv3capgnofrct75ml": "FluidServe v0.4 (level memory test)",
              "fsv3capgnofrct75ml85": "FluidServe v0.4 (level memory test, 0.85 pool)",
              "fsv3capgnofrct75dl": "FluidServe (deadline)",
+             # EXP-124, the arrivals term in the KV projection. The window
+             # length and the memory ceiling are both in the label, because a
+             # figure carrying all four puts two settings of each beside the
+             # control and neither may be inferred from the position.
+             "fsv3ah3": "FluidServe v0.4\n(+ arrivals term,\nwindow 3)",
+             "fsv3ah1": "FluidServe v0.4\n(+ arrivals term,\nwindow 1)",
+             "fsv3ms97": "FluidServe v0.4\n(0.97 pool,\nno arrivals term)",
+             "fsv3ah3ms97": "FluidServe v0.4\n(+ arrivals term,\nwindow 3, 0.97 pool)",
              # EXP-121. Both labels carry the three per-token budgets, because
              # this figure puts them beside columns scored at 50 / 100 / 75 and
              # the two sets of numbers may not be read as one.

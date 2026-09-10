@@ -354,6 +354,22 @@ ARM_STYLE = {
                        label="llm-d"),
     "vllmcachet75": dict(color="#7b3294", ls=":", marker="p",
                          label="vLLM router (cache-aware)"),
+    # EXP-124 (2026-09-10). The arrivals term in the KV projection: two window
+    # lengths at the shipped 0.95 memory ceiling, the 0.97 ceiling alone, and the
+    # pairing. Registered BEFORE the runs exist, because every one of these tables
+    # is turned into an arm list as [k for k in <table> if k in <data>] and an arm
+    # missing from the table is dropped from the figure with no message, leaving a
+    # plausible legend over an incomplete comparison. FluidServe-family colours,
+    # kept away from #d62728 (PolyServe) and #1f77b4 (the control arm these four
+    # are read against, which must stay visually distinct from its own variants).
+    "fsv3ah3": dict(color="#bcbd22", ls="-", marker="^",
+                    label="FluidServe v0.4 (+ arrivals term, window 3)"),
+    "fsv3ah1": dict(color="#ffbb78", ls="--", marker="v",
+                    label="FluidServe v0.4 (+ arrivals term, window 1)"),
+    "fsv3ms97": dict(color="#c5b0d5", ls=":", marker="<",
+                     label="FluidServe v0.4 (0.97 pool, no arrivals term)"),
+    "fsv3ah3ms97": dict(color="#393b79", ls="-.", marker=">",
+                        label="FluidServe v0.4 (+ arrivals term, window 3, 0.97 pool)"),
 }
 PAPER_STYLE = {
     "font.family": "serif",
