@@ -64,6 +64,7 @@ ARM_ORDER = ["polyserve", "slo", "loadbalance", "llmdslo",
              # reason given above.
              "fsv3capgnofrct75dl",
              "fsv3ft", "fsv3ftq", "fsv3ftboth",
+             "fsv3dl", "fsv3dlftboth",
              "llmdslot75", "polyservept75",
              "slot75", "vllmcachet75",
              # EXP-73's ladder. Registered before that sweep's engine-layer
