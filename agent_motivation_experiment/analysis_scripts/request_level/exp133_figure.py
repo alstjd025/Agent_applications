@@ -136,9 +136,35 @@ def main():
             l1_c.append(np.mean(l1) if l1 else np.nan)
             labs.append(lab)
         xi = np.arange(len(labs))
-        ax2.bar(xi - w / 2, cum_c, w, color="#1f77b4", label="cumulative step (EXP-133)")
+        # The last step is CONFOUNDED and is drawn so. Moving the planning horizon
+        # to 1 was meant to remove the arriving request's future-KV charge, but the
+        # same number is the denominator of the prefill fraction in meanStepMs, and
+        # the pace is evaluated with the arriving prompt already in pendingPrefill,
+        # so sp >= 1 always and a horizon of 1 makes every candidate cost a whole
+        # prefill iteration. Most of that bar is the pace estimate, not the charge.
+        # It is also four times the next largest, so the axis is clipped to keep
+        # the others readable and the bar is labelled with its value.
+        conf = [i for i, l in enumerate(labs) if "future-KV" in l]
+        colours = ["#bbbbbb" if i in conf else "#1f77b4" for i in range(len(labs))]
+        hatches = ["//" if i in conf else "" for i in range(len(labs))]
+        bars = ax2.bar(xi - w / 2, cum_c, w, color=colours,
+                       label="cumulative step (EXP-133)")
+        for b, h in zip(bars, hatches):
+            if h:
+                b.set_hatch(h)
+                b.set_edgecolor("#777777")
         ax2.bar(xi + w / 2, l1_c, w, color="#d62728", alpha=0.85,
                 label="leave-one-out (EXP-131)")
+        if conf:
+            finite = [c for i, c in enumerate(cum_c) if i not in conf]
+            top = max(finite + [0]) * 1.9 + 2
+            bot = min(finite + [0]) * 1.6 - 2
+            ax2.set_ylim(bot, top)
+            for i in conf:
+                ax2.annotate("%.0f\nconfounded:\nthe horizon also sets\nthe pace estimate"
+                             % cum_c[i],
+                             xy=(xi[i] - w / 2, top), ha="center", va="top",
+                             fontsize=6, color="#555555")
         for k, v in enumerate(l1_c):
             if np.isnan(v):
                 ax2.text(xi[k] + w / 2, 0.15, "not measured\nalone", ha="center",
