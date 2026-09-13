@@ -109,6 +109,23 @@ def _note(ax, msg):
             fontsize=8, color="0.5", style="italic")
 
 
+
+def _rate_phrase(reqps, tag):
+    """How the condition is named in a suptitle.
+
+    A dynamic trace has no single arrival rate, so the rate parsed out of the
+    directory name falls back to 0 and the title then read "offered 0 req/s",
+    which is not a missing value but a wrong one. When there is no rate, the
+    run tag is printed instead.
+    """
+    try:
+        r = float(reqps)
+    except (TypeError, ValueError):
+        r = 0.0
+    if r > 0:
+        return f"offered {r:g} req/s"
+    return f"dynamic trace, no single rate ({tag})"
+
 def plot_llumnix(run, rpm, out_dir, tag=None, rate_div=60.0):
     reqps = rpm / rate_div
     tag = tag or f"rpm_{rpm:g}"
@@ -154,7 +171,7 @@ def plot_llumnix(run, rpm, out_dir, tag=None, rate_div=60.0):
             b.set_ylabel("requests/s"); b.legend(loc="upper right")
         else:
             _note(b, "request_total/rescheduling not captured\n(needs collector re-run)")
-        fig.suptitle(f"Llumnix layer — offered {reqps:.0f} req/s", y=1.0)
+        fig.suptitle(f"Llumnix layer — {_rate_phrase(reqps, tag)}", y=1.0)
         fig.tight_layout()
         out = os.path.join(out_dir, f"llumnix_{tag}.png")
         fig.savefig(out, dpi=140, bbox_inches="tight"); plt.close(fig)
@@ -240,8 +257,15 @@ def plot_engine(run, rpm, out_dir, tag=None, rate_div=60.0):
         for row in ax:
             for p in row:
                 p.grid(axis="y", ls=":", lw=0.5, alpha=0.5)
-        fig.suptitle(f"Engine layer — offered {reqps:.0f} req/s "
-                     f"(per engine 8000-8003)", y=1.0)
+        # The port range is read from the series that were drawn. It was
+        # the literal "8000-8003" until 2026-09-11, by which time this
+        # script was being run on eight-instance fleets and the title
+        # named half the engines its own legend showed.
+        _p = sorted(ports)
+        _range = (f"per engine {_p[0]}-{_p[-1]}, {len(_p)} engines"
+                  if _p else "no engine series")
+        fig.suptitle(f"Engine layer — {_rate_phrase(reqps, tag)} "
+                     f"({_range})", y=1.0)
         fig.tight_layout()
         out = os.path.join(out_dir, f"engine_{tag}.png")
         fig.savefig(out, dpi=140, bbox_inches="tight"); plt.close(fig)
@@ -322,7 +346,7 @@ def plot_tokens(run, rpm, out_dir, tag=None, rate_div=60.0):
                 if row == len(rows) - 1:
                     axis.set_xlabel("time (s)")
         fig.suptitle(f"Per-engine token throughput & latency (separate scales) — "
-                     f"offered {reqps:g} req/s")
+                     f"{_rate_phrase(reqps, tag)}")
         fig.tight_layout()
         out = os.path.join(out_dir, f"tokens_{tag}.png")
         fig.savefig(out, dpi=140, bbox_inches="tight"); plt.close(fig)

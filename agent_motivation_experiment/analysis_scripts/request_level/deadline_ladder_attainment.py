@@ -61,18 +61,30 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# The ladder rule needs a rate for every class, so swe is always scored in the
+# per-token form v0.4 adopted; an end-to-end budget has no expression here at
+# all. `setdefault` and not an assignment, so a caller that has already asked
+# for a different swe budget keeps it. These two lines must run BEFORE
+# exp22_fluidserve is imported, because it reads the environment at import.
+os.environ.setdefault("FS_SWE_TBT_MS", "75")
+os.environ.setdefault("FS_SWE_TTFT_S", "7")
 from exp22_fluidserve import (  # noqa: E402
-    WARMUP_S, DRAIN_S, class_of, truthy, arm_of,
+    WARMUP_S, DRAIN_S, class_of, truthy, arm_of, SLO_RULES,
 )
 
-# The per-class budgets, as (TTFT seconds, per-token milliseconds). swe carries
-# the per-token form adopted in FluidServe v0.4; the ladder rule needs a rate for
-# every class, so an end-to-end budget has no expression here at all.
-BUDGETS = {
-    "chat":         (5.0,  50.0),
-    "deepresearch": (10.0, 100.0),
-    "swe":          (7.0,  75.0),
-}
+# The per-class budgets, as (TTFT seconds, per-token milliseconds), TAKEN FROM
+# THE SAME PLACE THE OTHER SCORER TAKES THEM (2026-09-11). They were written
+# here as six constants, which is the shape CLAUDE.md records as "the same
+# quantity in two places and only one of them updated": EXP-121 and EXP-123 made
+# all six settable through the environment on the exp22 side -- so that the
+# policy flag and the scorer move together -- and this file kept scoring at the
+# standard six whatever those variables said.
+#
+# ⚠ WITH NO ENVIRONMENT SET THE VALUES ARE UNCHANGED: chat (5 s, 50 ms),
+# deepresearch (10 s, 100 ms), swe (7 s, 75 ms). Every run scored before this
+# change re-scores to the same verdicts, which was checked on one run of each
+# arm before the change was kept.
+BUDGETS = {c: (r["ttft"], r["tbt"]) for c, r in SLO_RULES.items() if "tbt" in r}
 
 
 def ladder_ok(chunk_events, ttft_s, tbt_ms, frac):
@@ -91,7 +103,7 @@ def ladder_ok(chunk_events, ttft_s, tbt_ms, frac):
     return (n - late) >= frac * n, n, late
 
 
-def score_run(run_dir, frac):
+def score_run(run_dir, frac, dump_dir=None):
     mpath = os.path.join(run_dir, "metrics.csv")
     epath = os.path.join(run_dir, "tbt_events.jsonl")
     if not os.path.exists(epath):
@@ -158,6 +170,17 @@ def score_run(run_dir, frac):
     tok_ok = float(m["_ntok"].sum() - m["_nlate"].sum())
     tok_all = float(m["_ntok"].sum())
 
+    if dump_dir:
+        # The per-request verdict, so that a figure needing a timeline or an
+        # outcome split reads THIS rule's judgement instead of reimplementing
+        # it. One file per run, keyed the way the scorer keys requests.
+        os.makedirs(dump_dir, exist_ok=True)
+        m[["task_id", "call_index", "iteration", "class", "ladder_ok",
+           "_ntok", "_nlate", "rejected", "errored", "cutoff", "rel"]].rename(
+            columns={"_ntok": "n_tokens", "_nlate": "n_late"}).to_csv(
+            os.path.join(dump_dir, os.path.basename(run_dir) + ".csv"),
+            index=False)
+
     out = dict(
         run=os.path.basename(run_dir),
         arm=arm_of(run_dir),
@@ -181,18 +204,37 @@ def main():
     ap.add_argument("--frac", type=float, default=0.95,
                     help="share of a request's tokens that must be on time")
     ap.add_argument("--out")
+    ap.add_argument("--dump-verdicts", metavar="DIR",
+                    help="write one CSV per run holding the per-request "
+                         "verdict, so figures consume this rule rather than "
+                         "reimplementing it")
+    ap.add_argument("--workers", type=int, default=1)
     a = ap.parse_args()
     dirs = sorted(d for d in glob.glob(a.runs) if os.path.isdir(d) and "PRERUN" not in d)
     if not dirs:
         sys.exit(f"no run directories match {a.runs}")
     rows = []
-    for d in dirs:
-        r = score_run(d, a.frac)
-        if r is None:
-            print(f"  skipped (no tbt_events.jsonl): {os.path.basename(d)}", file=sys.stderr)
-            continue
-        rows.append(r)
-        print(f"  scored {r['run']}", file=sys.stderr)
+    if a.workers > 1:
+        from concurrent.futures import ProcessPoolExecutor
+        from functools import partial
+        with ProcessPoolExecutor(max_workers=a.workers) as ex:
+            for d, r in zip(dirs, ex.map(partial(score_run, frac=a.frac,
+                                                 dump_dir=a.dump_verdicts),
+                                         dirs)):
+                if r is None:
+                    print(f"  skipped (no tbt_events.jsonl): "
+                          f"{os.path.basename(d)}", file=sys.stderr)
+                    continue
+                rows.append(r)
+                print(f"  scored {r['run']}", file=sys.stderr, flush=True)
+    else:
+        for d in dirs:
+            r = score_run(d, a.frac, a.dump_verdicts)
+            if r is None:
+                print(f"  skipped (no tbt_events.jsonl): {os.path.basename(d)}", file=sys.stderr)
+                continue
+            rows.append(r)
+            print(f"  scored {r['run']}", file=sys.stderr)
     t = pd.DataFrame(rows)
     print(f"\ncumulative per-token deadline, >= {100*a.frac:.0f}% of a request's tokens on time")
     print("budgets: chat (5 s, 50 ms)  deepresearch (10 s, 100 ms)  swe (7 s, 75 ms)\n")

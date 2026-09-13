@@ -333,8 +333,18 @@ def main():
             ax[0][0].legend(fontsize=6, loc="upper left")
             where = (f"at {rpm/60:.0f} req/s" if isinstance(rpm, int)
                      else f"on the hour-long dynamic trace ({rpm})")
+            # The fleet size is counted from the series actually drawn. It was
+            # a literal "four" until 2026-09-11, by which time this script was
+            # being run on eight-instance fleets and the subtitle contradicted
+            # its own legend: a caption number has to come from the aggregate
+            # the panels are drawn from.
+            # series() returns (eng, grid, rate); the engine count is the
+            # size of the per-engine dict, not of that 3-tuple.
+            nengine = sorted({len(v[0]) for v in loaded.values() if v})
+            fleet = (f"the same {nengine[0]} engines" if len(nengine) == 1
+                     else f"engine counts {nengine} — NOT the same fleet")
             fig.suptitle(f"{a.title} engine layer {where} — "
-                         f"same four engines, {len(arms)} policies\n"
+                         f"{fleet}, {len(arms)} policies\n"
                          f"rows share a y axis across columns", fontsize=9)
             fig.tight_layout(rect=(0, 0, 1, 0.96))
             p = os.path.join(a.out_dir, f"compare_rpm_{rpm}.png")

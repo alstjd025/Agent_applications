@@ -80,6 +80,13 @@ ARMS = {"slo": "Llumnix SLO", "fluidserve": "FluidServe (prefix off)",
         # message.
         "fsv3capgnofrct75": "FluidServe v0.4",
         "fsv3capgnofrct75cc": "FluidServe v0.4 (free gates)",
+        # EXP-125. The v0.4 candidate with one extra term in the KV
+        # projection: the mean prompt tokens the instance received over the
+        # last N=1 horizons, added to kvLogical + inflow - outflow. Its
+        # control is fsv3capgnofrct75 above and the two differ by one
+        # environment variable, so they must appear in the same figure.
+        "fsv3ah1": "FluidServe v0.4 (+ arrivals term, N=1)",
+        "fsv3ah3": "FluidServe v0.4 (+ arrivals term, N=3)",
         "llmdslot75": "llm-d",
         "polyservept75": "PolyServe (paper mechanisms)",
         "slot75": "Llumnix SLO",
@@ -342,29 +349,42 @@ def fig_requests(data, runs, variant, out_dir, exp_title="EXP-41"):
 
     with plt.rc_context(PAPER_STYLE):
         fig, ax = plt.subplots(1, 4, figsize=(13.0, 3.0))
-        w = 0.36
+        # One shade per arm, not one for the first arm and one for every other:
+        # `1.0 if k else 0.45` gave arms 1 and 2 the SAME shade while the legend
+        # below claimed they differed, so a three-arm figure read as two arms
+        # with one of them drawn twice. The ramp is built from the number of
+        # arms actually drawn.
+        def shade(k):
+            if len(arms) == 1:
+                return 1.0
+            return 0.40 + 0.60 * k / (len(arms) - 1)
+
+        # Width scales with the arm count: a fixed 0.36 was right for two
+        # arms and made three arms span 1.08 of a 1.0 tick spacing, so the
+        # outer bars of neighbouring port groups overlapped.
+        w = 0.82 / len(arms)
         x = np.arange(len(ports))
         for k, arm in enumerate(arms):
             j = per[arm]
             off = (k - (len(arms) - 1) / 2) * w
             n = [(j["engine_port"] == p).sum() for p in ports]
             ax[0].bar(x + off, n, w, color=[ENG_C[p] for p in ports],
-                      alpha=1.0 if k else 0.45, edgecolor="white", lw=0.5)
+                      alpha=shade(k), edgecolor="white", lw=0.5)
             att = [attain(j[j["engine_port"] == p], "violate_served") for p in ports]
             ax[1].bar(x + off, att, w, color=[ENG_C[p] for p in ports],
-                      alpha=1.0 if k else 0.45, edgecolor="white", lw=0.5)
+                      alpha=shade(k), edgecolor="white", lw=0.5)
             # class mix per engine: does the routing separate the classes at all
             bot = np.zeros(len(ports))
             for cl in CLASSES:
                 sh = [100.0 * ((j["engine_port"] == p) & (j["class"] == cl)).sum()
                       / max((j["engine_port"] == p).sum(), 1) for p in ports]
                 ax[2].bar(x + off, sh, w, bottom=bot, color=CLASS_COLORS[cl],
-                          alpha=1.0 if k else 0.45, edgecolor="white", lw=0.4)
+                          alpha=shade(k), edgecolor="white", lw=0.4)
                 bot += np.array(sh)
             itl = [pd.to_numeric(j[(j["engine_port"] == p) & (j["class"] == "chat")]["itl_ms"],
                                  errors="coerce").median() for p in ports]
             ax[3].bar(x + off, itl, w, color=[ENG_C[p] for p in ports],
-                      alpha=1.0 if k else 0.45, edgecolor="white", lw=0.5)
+                      alpha=shade(k), edgecolor="white", lw=0.5)
         ax[3].axhline(50.0, color="#d62728", lw=0.8, ls=":")
         # Sits below the line, not above: above it runs into the panel title.
         ax[3].annotate("chat budget 50 ms", (-0.45, 50.0), textcoords="offset points",
@@ -384,7 +404,7 @@ def fig_requests(data, runs, variant, out_dir, exp_title="EXP-41"):
             ax[i].grid(axis="y", ls=":", lw=0.7, alpha=0.6)
         for i in (1, 2):
             ax[i].set_ylim(0, 105)
-        h = [plt.Rectangle((0, 0), 1, 1, fc="#666666", alpha=(1.0 if k else 0.45))
+        h = [plt.Rectangle((0, 0), 1, 1, fc="#666666", alpha=shade(k))
              for k in range(len(arms))]
         ax[0].legend(h, [ARMS[a] for a in arms], fontsize=6.5, loc="lower left")
         # A stacked bar fills its panel, so both legends go under the axes
@@ -392,8 +412,13 @@ def fig_requests(data, runs, variant, out_dir, exp_title="EXP-41"):
         hc = [plt.Rectangle((0, 0), 1, 1, fc=CLASS_COLORS[c]) for c in CLASSES]
         ax[2].legend(hc, list(CLASSES), fontsize=6.5, ncol=3, loc="upper center",
                      bbox_to_anchor=(0.5, -0.20))
-        fig.suptitle(f"{exp_title} {variant} — the dispatch side: faded bars are "
-                     f"{ARMS[arms[0]]}, solid are {ARMS[arms[-1]]}", fontsize=9, y=1.04)
+        # The caption names every arm that was drawn, in the order the bars sit
+        # in each port group. Naming only the first and the last silently
+        # dropped the middle arm of a three-arm figure.
+        order = " | ".join(f"{i+1}. {ARMS[x]}" for i, x in enumerate(arms))
+        fig.suptitle(f"{exp_title} {variant} — the dispatch side. Bars run "
+                     f"lightest to darkest left to right within each port "
+                     f"group: {order}", fontsize=8, y=1.04)
         fig.tight_layout()
         p = os.path.join(out_dir, f"{title_slug(exp_title)}_{variant}_engine_requests.png")
         fig.savefig(p, dpi=300, bbox_inches="tight")
