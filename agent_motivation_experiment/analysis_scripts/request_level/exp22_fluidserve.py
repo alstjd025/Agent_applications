@@ -439,6 +439,55 @@ def mean_inter_token_ms(r, ttft, e2e):
     return derived
 
 
+# The arm name records which form swe's promise took, and this checks that the
+# scoring in force is that form. Put here, in the loader, rather than in each
+# caller: on 2026-09-14 a caller that did not pin the form produced a table in
+# which chat and deep research were right and swe was wrong -- 33.9 against the
+# correct 67.2 on the same run -- and a per-class conclusion came out with the
+# wrong sign before the mismatch was noticed. Nothing failed and nothing warned,
+# because the default IS a valid rule; it is just not this run's rule.
+#
+# Only the two forms that are actually written into directory names are checked:
+#   `t75`  the per-token form adopted by EXP-107 -- first token within its TTFT
+#          budget AND a mean of 75 ms per token. SLO_RULES["swe"] must have "tbt".
+#   `b40`  the end-to-end form with swe's budget raised to 40 s. Must have "e2e".
+# A run named neither is left alone: runs before EXP-105 carry no form in the
+# name and are scored with whatever the caller chose, which is the old behaviour.
+#
+# The check is on the FORM, not on the number, so a deliberate sweep over budget
+# scales (slo_scale_rescore.py, rescore_token_deadline.py) still passes. Set
+# FS_ALLOW_RULE_MISMATCH=1 to score a run against the other form on purpose --
+# and say so in whatever the result is written into.
+_RULE_CHECKED = set()
+
+
+def _check_rule_matches_run(run_dir):
+    if os.environ.get("FS_ALLOW_RULE_MISMATCH"):
+        return
+    name = os.path.basename(os.path.abspath(run_dir).rstrip("/"))
+    want = ("tbt" if "t75" in name else "e2e" if "b40" in name else None)
+    if want is None or want in SLO_RULES["swe"]:
+        return
+    if name in _RULE_CHECKED:
+        return
+    _RULE_CHECKED.add(name)
+    have = "per-token (ttft+tbt)" if "tbt" in SLO_RULES["swe"] else "end-to-end (e2e)"
+    need = "per-token (ttft+tbt)" if want == "tbt" else "end-to-end (e2e)"
+    raise SystemExit(
+        "\n%s is a run whose name says swe was promised the %s form, but swe is "
+        "being scored with the %s form.\n"
+        "chat and deep research would come out right and swe would come out "
+        "wrong, with no error and no warning.\n"
+        "Fix it by setting the environment BEFORE importing this module -- the "
+        "budgets are read into constants at import time:\n"
+        "    os.environ.setdefault(\"FS_SWE_TBT_MS\", \"75\")\n"
+        "    os.environ.setdefault(\"FS_SWE_TTFT_S\", \"7\")\n"
+        "or from the shell: FS_SWE_TBT_MS=75 FS_SWE_TTFT_S=7 python3 ...\n"
+        "If the mismatch is deliberate, set FS_ALLOW_RULE_MISMATCH=1 and say so "
+        "wherever the numbers are written down."
+        % (name, need, have))
+
+
 def load_run(run_dir):
     """All requests that arrived in the analysis window, with a violation flag.
 
@@ -448,6 +497,7 @@ def load_run(run_dir):
     outcome was never determined; that exclusion applies identically to both
     arms and is reported.
     """
+    _check_rule_matches_run(run_dir)
     p = os.path.join(run_dir, "metrics.csv")
     if not os.path.isfile(p):
         return None
