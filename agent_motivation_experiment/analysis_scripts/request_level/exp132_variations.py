@@ -66,6 +66,8 @@ CHANGED = {
     "orct75":     "per-request output-length oracle (length AND flux)",
     "noafft75":   "class preference off",
     "flatlent75": "one deterministic length of 532 tokens for all three classes",
+    "nocaphour":      "class-instance cap off (EXP-135)",
+    "noaffnocaphour": "class preference AND class-instance cap both off (EXP-138)",
 }
 
 
@@ -233,7 +235,8 @@ def main():
               "preempt", "/1k met", "d vs control"))
     print(hdr)
     print("-" * len(hdr))
-    for arm in ("fsv3capgnofrct75", "orct75", "noafft75", "flatlent75"):
+    for arm in ("fsv3capgnofrct75", "orct75", "noafft75", "flatlent75",
+                "nocaphour", "noaffnocaphour"):
         for r in rows.get(arm, []):
             aa = r["all_arrivals"]
             if arm == "fsv3capgnofrct75":

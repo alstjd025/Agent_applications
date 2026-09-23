@@ -109,6 +109,12 @@ SCHEDULER_METRICS = {
     # And why a server refused, split by the rung it refused on:
     # first_token / second_token / steady_state / memory.
     "scheduler_polyserve_refused_total",
+    # EXP-127. The two sides of the section 4.5 memory test, so that "the
+    # accounting refused while the pool was half empty" can be checked rather
+    # than inferred. The pool size is constant per instance; the projection is
+    # the last one computed for it and is specific to one candidate request.
+    "scheduler_polyserve_kv_capacity_tokens",
+    "scheduler_polyserve_memrefuse_projected_tokens",
     # FluidServe. Same reason as above: the per-decision detail is only in the
     # scheduler's log, which does not survive an hour-long run. What the run has
     # to be able to answer afterwards is why each request went where it did, so
@@ -246,6 +252,16 @@ SCHEDULER_METRICS = {
     # decide whether the control plane can keep up with the offered load.
     "request_full_mode_schedule_duration_milliseconds_sum",
     "request_full_mode_schedule_duration_milliseconds_count",
+    # EXP-140. The same decision in MICROSECONDS. The millisecond pair above
+    # floors, so its sum/count is the share of decisions that crossed a
+    # millisecond and not a mean. Separate names because every run already on
+    # disk carries the millisecond one.
+    "request_full_mode_schedule_duration_microseconds_sum",
+    "request_full_mode_schedule_duration_microseconds_count",
+    # And the policy's own decision, without the lock, the CMS fetch and the
+    # view conversion that every policy pays alike.
+    "request_policy_decide_duration_microseconds_sum",
+    "request_policy_decide_duration_microseconds_count",
     "scheduler_scheduling_total",
     "scheduler_scheduling_failed_total",
 }
