@@ -32,3 +32,8 @@ agent_motivation_experiment/workloads/codingagent_request_level_poisson/data/tra
 # a copy would commit all of them.
 ._*
 .DS_Store
+
+# kubectl's local cache, created by running kubectl from inside the experiment
+# directory. Discovery data and HTTP cache only -- no credentials -- but it is
+# machine state, not part of the experiment.
+agent_motivation_experiment/.kube/
