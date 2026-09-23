@@ -10,6 +10,7 @@ Do not add plotting logic here. This is constants plus two helpers that encode
 the two mistakes that cost the most time; the figures themselves stay readable
 as single files.
 """
+import os
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
@@ -27,7 +28,16 @@ KTOK = 1000.0
 # smaller drawing area.
 STYLE = {
     "font.family": "serif",
-    "font.serif": ["DejaVu Serif", "Times New Roman", "Liberation Serif"],
+    # Nimbus Roman first (2026-09-18, at the author's request): it is URW's
+    # Times, metrically the same as the body face of the USENIX and ACM
+    # templates, so type in a figure matches type in the text. DejaVu Serif,
+    # matplotlib's own, is wider and was what every figure carried before.
+    "font.serif": ["Nimbus Roman", "Times New Roman", "Liberation Serif",
+                   "DejaVu Serif"],
+    # math in the same face as the text: "$5.8\\times$" beside "Arrival Rate"
+    "mathtext.fontset": "custom",
+    "mathtext.rm": "Nimbus Roman", "mathtext.it": "Nimbus Roman:italic",
+    "mathtext.bf": "Nimbus Roman:bold",
     "font.size": 8, "axes.labelsize": 8, "axes.titlesize": 8,
     "axes.linewidth": 0.5, "legend.fontsize": 8, "legend.frameon": False,
     "xtick.labelsize": 8, "ytick.labelsize": 8,
@@ -87,6 +97,87 @@ def ktick(v, _pos):
 
 def kfmt():
     return FuncFormatter(ktick)
+
+
+# Key order and key names, one place for every paper figure (2026-09-17, at the
+# author's request). The KEY is ordered FluidServe first; the bars and lines
+# keep the order each figure draws them in, which is the ramp's order.
+# The star marks the two arms whose caption carries a qualification: the vLLM
+# router has no admission control, and "Llumnix" here is Llumnix's SLO-aware
+# policy (`--scheduling-policy slo`), not its load balancer.
+# One key size for every paper figure: the size class_mix_hour draws its key at
+# (label_size 5 + 1.5), chosen 2026-09-18 by the author as the common one.
+KEY_FS = 6.5
+# Square swatches: matplotlib's default key patch is a wide rectangle, and a
+# square reads as a colour sample rather than as a bar.
+KEY_SQUARE = dict(handlelength=1.0, handleheight=1.0, handletextpad=0.35)
+
+
+def square_handler(handles):
+    """handler_map that draws every Patch handle as a square."""
+    from matplotlib.legend_handler import HandlerPatch
+    from matplotlib.patches import Rectangle, Patch
+
+    class _Sq(HandlerPatch):
+        def create_artists(self, legend, orig, xd, yd, width, height,
+                           fontsize, trans):
+            # ⚠ SIDE FROM THE TYPE, NOT FROM THE HANDLE BOX (2026-09-18). The
+            # box is taller than the letters, so a square filling it sat below
+            # the text's midline and read as misaligned. The side is the
+            # capital height of the key's type and the square is centred on the
+            # box, which puts it on the same midline as the words beside it.
+            side = 0.70 * fontsize
+            # ⚠ CENTRED ON THE TEXT, NOT ON THE HANDLE BOX (2026-09-18). The
+            # box's middle sits about a fifth of the type size above the middle
+            # of the words beside it, which read as the swatch floating high;
+            # the offset below was measured off a 600 dpi render of
+            # class_latency_outcome_grid.pdf and drives that difference to
+            # nothing.
+            yc = yd + (height - side) / 2.0 - 0.21 * fontsize
+            return [Rectangle((xd + (width - side) / 2.0, yc), side, side,
+                              facecolor=orig.get_facecolor(),
+                              edgecolor=orig.get_edgecolor(),
+                              linewidth=orig.get_linewidth(),
+                              hatch=orig.get_hatch(), transform=trans)]
+
+    return {h: _Sq() for h in handles if isinstance(h, Patch)}
+
+
+LEGEND_ORDER = ["FluidServe", "llm-d", "PolyServe", "Llumnix", "vLLM"]
+LEGEND_NAME = {"Llumnix": "Llumnix*", "Llumnix SLO": "Llumnix*",
+               "vLLM": "vLLM*", "vLLM-router": "vLLM*"}
+
+
+def legend_items(handles, labels):
+    """(handles, labels) reordered for the key and renamed.
+
+    A label not in LEGEND_ORDER sorts with the arm whose name it starts with
+    ("FluidServe w/o Affinity" follows FluidServe) and keeps its own name.
+    """
+    def rank(i_lab):
+        i, lab = i_lab
+        for r, name in enumerate(LEGEND_ORDER):
+            if lab == name or lab.startswith(name):
+                return (r, i)
+        return (len(LEGEND_ORDER), i)
+
+    order = sorted(range(len(labels)), key=lambda i: rank((i, labels[i])))
+    return ([handles[i] for i in order],
+            [LEGEND_NAME.get(labels[i], labels[i]) for i in order])
+
+
+FINAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "final")
+
+
+def final(name):
+    """Path of an output inside `paper_figures/final/`, created on demand.
+
+    The figures the paper actually uses are written there (2026-09-17, at the
+    author's request) so that they are not mixed with the exploratory ones in
+    this directory. Scripts pass the FILE NAME, never a directory.
+    """
+    os.makedirs(FINAL, exist_ok=True)
+    return os.path.join(FINAL, name)
 
 
 def save(fig, path):

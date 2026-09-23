@@ -941,9 +941,24 @@ total variation에는 평범한 읽는 법이 하나 있고 그것이 이 값을
 이유는 (a)의 파랑 옆에 놓기 위해서다 — 처음에 PolyServe의 빨강을 그대로 썼더니 아래 패널이
 위 패널에서 눈을 빼앗았다.
 
+### `azure_mix_only.pdf` — 아래 패널만 남긴 판 (2026-09-10 추가)
+
+**크기**: 3.335 × 1.40 in, 단일 열. 같은 스크립트가 같이 만든다. **같은 계열, 같은 창,
+같은 10분 구간**이고 위의 모든 단서가 그대로 적용된다.
+
+⚠ **도착률 패널이 빠지면 이 창의 부하가 5.8배 움직인다는 것을 그림이 말하지 않는다.**
+두 부분 주장을 하는 자리에서는 stacked 판을 쓰거나 캡션이 도착률 범위를 말로 적어야 한다.
+그리고 **"부하가 움직일 때 믹스도 움직인다"로 읽으면 안 된다** — 그 비교를 하라고 있는 것이
+세로로 쌓은 판이다(둘의 상관은 +0.57이다).
+
+⚠ **높이를 정하는 것은 곡선이 아니라 회전된 y축 이름이다.** `Workload mixture / deviation (%)`가
+축을 따라 1.01 in이고 회전된 라벨은 캔버스로 잘리지 않으므로, 1.30 in에서는 첫 줄이 페이지
+위로 0.01 in 넘어가 **조용히 잘렸다.** 1.40 in에서 축이 1.01 in가 되어 들어간다. 스크립트의
+`check_ylabel`이 빌드마다 재서 여유를 찍으므로 높이를 바꾸면 즉시 드러난다.
+
 **다시 만들려면**: `python3 paper_figures/fig_azure_rate_and_mix.py`
-(창은 `traces/dynamic/canonical/dyn60_azure4d.plan.json`에서 읽으므로 trace를 다시 만들면
-그림도 따라간다.)
+(네 판을 한 번에 만든다. 창은 `traces/dynamic/canonical/dyn60_azure4d.plan.json`에서 읽으므로
+trace를 다시 만들면 그림도 따라간다.)
 
 ---
 
@@ -1112,6 +1127,25 @@ per-token(첫토큰 7초 + 토큰당 75 ms)으로 바꿔 네 arm을 다시 재�
 **스크립트**: `fig_motivation_tg_4panel.py`. 한 번 실행하면 둘 다 쓴다 — FluidServe를 뺀 판
 (motivation용)과 넣은 판. 채점 규칙은 고정이고 이 스크립트에 선택지가 없다.
 **크기**: 7.0 × 1.75 in, `figure*`에 `width=\textwidth`(스케일 1.0). 페이지 크기 504 × 126 pt 확인.
+한 번 실행하면 판이 다섯 나온다 — 기본 둘, `_wide` 둘(같은 값을 덜 정사각으로),
+그리고 **`_withfs_col.pdf`(2026-09-10 추가)**.
+
+### `_withfs_col.pdf` — 한 칼럼, 2×2 블록
+
+**크기 3.335 × 2.85 in, `figure`에 `width=\columnwidth`.** 같은 데이터·같은 채점·같은 y 한계이고
+바뀐 것은 배치와 색과 글씨 크기뿐이다. **한 칼럼에서는 네 패널을 한 줄로 놓을 수 없다** —
+패널 하나가 0.6 in 폭이 되고 회전된 y축 이름이 패널보다 길어진다. 그래서 **(a)와 (b)를 윗줄에**
+(둘이 y축을 공유하므로 서로 견줄 수 있어야 한다), (c)와 (d)를 아랫줄에 놓는다. 패널 축 상자는
+1.24 × 0.79 in.
+
+- **색은 PuBuGn 5단계**(`RAMP`), `fig_two_models_hour.py --ramp`와 같은 램프·같은 순서다.
+  ⚠ **순차 램프인데 arm에는 순서가 없다** — 밝기 순서를 성능 순서로 읽으면 안 된다.
+  ⚠ **가장 옅은 단계가 사실상 흰색**이라 0.9 pt 선이 사라지므로 **선 아래에 회색 테두리**를
+  깔았다(색 자체는 요청받은 값 그대로다). 두 옅은 arm은 선 색으로는 거의 안 갈리고 **마커
+  모양(오각형 대 원)이 실제로 가르는 채널**이다.
+- **패널의 눈금·축 글씨가 8 → 6 pt**(`shrink=2.0`). 범례는 6.5 pt 2줄이고, 다섯 이름은 한
+  칼럼에 한 줄로 안 들어간다.
+- ⚠ 6 pt는 본문 8 pt보다 작으므로 **`width=\columnwidth`로 배율 없이** 넣어야 한다.
 
 | 패널 | 무엇 | y축 |
 |---|---|---|
@@ -1840,15 +1874,45 @@ EXP-113(2026-09-03), 반복 하나. `/home/nxclab/tools/pick_usable_run.sh`가 �
 
 **다시 만들려면**: `python3 paper_figures/fig_exp113_hour_qwen.py`
 
-## `two_models_hour.pdf` / `_stacked.pdf` — 같은 한 시간을 두 모델에서, 네 패널
+## `two_models_hour.pdf` / `_stacked.pdf` / `_reqgoodput.pdf` — 같은 한 시간을 두 모델에서, 네 패널
 
-**스크립트**: `fig_two_models_hour.py`(`--stacked`가 오른쪽 패널을 도착 분해로 바꾼다).
+**스크립트**: `fig_two_models_hour.py`(`--stacked`가 오른쪽 패널을 도착 분해로,
+`--req-goodput`이 요청 goodput 막대로 바꾼다).
 **값**: 같은 basename의 `.csv`.
 
 | 파일 | 크기 | 오른쪽 패널 |
 |---|---|---|
 | `two_models_hour.pdf` | 7.0 × 1.59 in | arm 색 막대 하나 = admitted 달성률, 반복 범위 표시 |
 | `two_models_hour_stacked.pdf` | 7.0 × 1.92 in | 도착 전체의 네 갈래 누적 막대 |
+| `two_models_hour_stacked_normfs_met.pdf` | 7.0 × 1.92 in | 같은 네 갈래를 **FluidServe가 규칙을 지킨 요청 수**로 나눈 것 |
+| **`two_models_hour_reqgoodput.pdf`** | 7.0 × 1.59 in | **규칙을 지킨 요청 수 ÷ 구간 길이 = request goodput (req/s)**, 반복 범위 표시 |
+
+### `_reqgoodput` 판 — 비율이 아니라 속도를 담은 막대 (2026-09-10 추가)
+
+막대가 **그 구간에서 규칙을 지킨 요청 수를 구간 길이로 나눈 값**이라, 왼쪽 타임라인과
+**같은 양을 두 단위로** 읽게 된다 — 마감을 지킨 토큰이 초당 몇 개인가와 마감을 지킨 요청이
+초당 몇 건인가. 받아들인 요청 수가 arm마다 다를 때 비율끼리는 비교가 안 되므로, **"무엇을
+얼마나 전달했는가"를 묻는 자리에서는 이 판을 쓴다.**
+
+두 모델의 막대 축은 공유하지만 **두 반쪽은 여전히 비교가 아니다**(아래 절). 공유하는 이유는
+한 반쪽의 다섯 막대를 서로, 그리고 그 반쪽의 도착률과 견주기 위해서다.
+
+| 그린 값 (req/s, 반복 2 / 반복 1) | Llama, 도착 27.20 req/s | Qwen, 도착 17.45 req/s |
+|---|---|---|
+| **FluidServe** | **21.52 / 21.71** | **14.17 / 14.19** |
+| llm-d | 15.33 / 13.56 | 9.95 / 9.56 |
+| PolyServe | 14.53 / 14.08 | 10.54 / 10.49 |
+| Llumnix SLO | 7.76 / 7.65 | 5.27 / 5.25 |
+| vLLM router | 5.95 / 6.03 | 4.24 / 4.24 |
+
+⚠ **Llama에서 2위를 매기면 안 된다** — llm-d 평균 14.45와 PolyServe 14.30의 차이가 0.15인데
+**llm-d 자신의 두 반복이 1.78 벌어진다**(13.56 대 15.33). Qwen에서는 PolyServe가 앞서고
+llm-d의 반복 폭이 0.39라 그쪽은 구별된다. **1위와 4·5위는 어느 모델에서도 안 바뀐다.**
+
+⚠ **vLLM router는 같은 도착 스트림을 받지 않았다.** 거절을 안 해 부하 생성기가 밀렸고, 그린
+구간에 도착한 요청이 **87,335건(Llama) / 56,073건(Qwen)**으로 다른 arm의 96,68x / 61,50x보다
+**9~10% 적다.** 분모가 시간이므로 그 막대는 **더 얇은 스트림 위의 속도**이고 실제보다 유리하다.
+누적 판에는 이 문제가 없다(각 막대가 그 arm 자신의 도착의 100%다).
 
 둘 다 `figure*`에 `width=\textwidth`. 패널은 **(a) goodput 타임라인 + Request SLO 막대 =
 Llama-3.1-70B**, **(b) 같은 쌍 = Qwen2.5-72B**이고, 캡션이 네 개가 아니라 **쌍마다 하나**다 —
@@ -1920,7 +1984,11 @@ control이 없는 arm**이다(Llama 46.6%, Qwen 54.1%). 빼면 그 arm의 막대
   반복 폭이 그려져 있지 않다.
 - **모델 이름은 Llama-3.1-70B와 Qwen2.5-72B다**(80B가 아니다).
 
-**다시 만들려면**: `python3 paper_figures/fig_two_models_hour.py [--stacked]`
+**다시 만들려면**: `python3 paper_figures/fig_two_models_hour.py [--stacked [--norm-to-fs met]] [--req-goodput]`
+
+⚠ **세 판이 같은 `.csv` 열을 공유한다** — 2026-09-10부터 어느 판을 돌리든 `met_requests`,
+`met_requests_repeat1`, `arrivals`, `req_goodput_s`, `req_goodput_s_repeat1`이 같이 쓰인다.
+기존 열의 값은 바뀌지 않았고(누적 판은 픽셀 단위로 동일하다), 열이 다섯 개 늘었을 뿐이다.
 
 ## `engine_state_2x2_t75.pdf` / `_t75_withfs.pdf` — 점수 밑에서 엔진이 무엇을 하고 있었나, 토큰 단위 deadline 판의 run으로
 
@@ -2237,6 +2305,143 @@ EXP-109(2026-08-31) 반복 1, **위아래가 같은 run**이다(그래서 두 �
 30초 간격으로(`deadline_ladder_attainment.py`가 규칙의 주인), throughput은 네 엔진의
 `vllm:generation_tokens_total`이다. **vLLM router의 위 네 줄만 admitted의 74.9% 위에 그려지고
 아래 줄은 온전하다** — goodput과 throughput은 클라이언트 기록과 엔진 카운터라 엔진 이름이 필요없다.
+
+## `class_mix_hour_abs_tbt.pdf` — 무엇을 들고 있었나 옆에 얼마나 빨리 돌았나 (2026-09-10)
+
+**스크립트**: 같은 `fig_class_mix_hour.py`에 `--tbt`.
+**크기**: 7.0 × 3.10 in, `figure*`에 `width=\textwidth`. 값은 같은 basename의 `.csv`.
+
+| 파일 | 크기 | 열 | 축 숫자 | 지연 축 |
+|---|---|---|---|---|
+| `class_mix_hour_abs_tbt.pdf` | 7.0 × 3.10 in | arm 다섯 | 왼쪽 0·최대, 오른쪽은 마지막 열에만 | 로그, 30/100/300 |
+| **`class_mix_hour_abs_3arms_tbt.pdf`** | **3.335 × 2.60 in, 한 열** | **PolyServe / Llumnix SLO / llm-d** | **양쪽 다 모든 패널에**(왼쪽 0·중간·최대) | **선형 0~150, 50 간격** |
+
+```
+python3 paper_figures/fig_class_mix_hour.py --tbt
+python3 paper_figures/fig_class_mix_hour.py --tbt --col --palette pubugn \
+        --tbt-max 150 --label-size 5 \
+        --arms polyservept75 slot75 llmdslot75 --suffix _3arms
+```
+
+2026-09-10에 이름 셋을 바꿨다: 왼쪽 축이 **`Number of Requests per Instance`**(넓은 판은 뒤에
+`(own scale per column)`이 붙는다), 아래 축이 **`Time (min.)`**, 그리고 패널의 눈금·축 글씨가
+`--label-size`로 조절된다(한 열 기본값 6, 이 판은 **5**).
+⚠ **5 pt는 이 저장소가 쓰는 8 pt보다 작고 학회가 요구하는 최소 크기에 가깝다.** 그림을 축소해서
+넣으면 그만큼 더 작아지므로 **`width=\columnwidth`로 배율 없이** 넣어야 한다.
+
+한 열 판은 클래스 색이 **ColorBrewer PuBuGn 세 단계**(chat `#ece2f0`, deep research
+`#a6bddb`, agent `#1c9099`, `--palette pubugn`)이고 **지연 선이 빨간 점선**이다.
+⚠ **이것은 순차(sequential) 램프라 다른 두 팔레트와 성질이 다르다** — 세 단계가 주로 밝기로
+갈리므로(233 / 187 / 137) 눈이 **순서**로 읽고, 읽는 사람이 "agent가 큰 쪽"이라고 받아들일 수
+있다. 세 클래스는 순서가 없는 범주이므로 캡션이 그 램프에 기대면 안 된다. 대신 **회색조에서
+세 띠가 갈리는 유일한 팔레트다**(경계 밝기 차 46 / 50, deep research가 없는 구간에서 맞닿는
+chat|agent는 96).
+⚠ **빨강은 이 저장소에서 PolyServe의 색이다.** 이 그림에서는 arm이 열 제목으로 이름을 갖고
+클래스가 파랑·청록이라 패널 안에 다른 빨강이 없지만, arm 색을 쓰는 그림과 한 페이지에 놓이면
+같은 잉크가 두 뜻을 갖는다.
+
+⚠ **지연 축을 0~150 ms로 고정하면 잘리는 것이 생긴다.** 이 세 arm에서는 **42,744초 중
+10초(0.023%)**가 위로 나가고 전부 PolyServe다(인스턴스 1이 3.5분에 223.7 ms, 인스턴스 2가
+14.5분에 261.7 ms — 둘 다 클래스 구성이 바뀌는 순간의 한두 초다). **잘린 선은 천장에 닿아
+머문 선처럼 읽히므로** 스크립트가 잘린 초를 세어 찍고 캡션이 그것을 적어야 한다. 다섯 arm
+판이 로그 축인 것은 admission control이 없는 arm이 한 엔진에서 중앙값 398.5 ms이기 때문이다.
+
+⚠ **한 열에서는 왼쪽 축 이름이 짧아진다** — `Requests resident per instance (own scale per
+column)`은 잉크가 3.4 in이라 2.60 in 캔버스에서 양끝이 잘렸다(회전된 그림 라벨은 아무것도
+자르지 않으므로 조용히 잘린다). 괄호 안의 말은 캡션으로 옮기고, `check_side_labels`가 양쪽
+라벨의 여유를 빌드마다 찍는다.
+
+열이 셋 이하이면 `dense_y`가 켜져 **양쪽 축의 숫자가 패널마다 붙는다** — 다섯 열에서는 같은
+눈금을 다섯 번 적는 것이 한 가지 정보에 다섯 배의 잉크였는데, 셋이면 자리가 있고 위아래
+패널을 견줄 때 눈금을 그림 반대편에서 들고 오지 않아도 된다.
+
+**띠는 `class_mix_hour_abs.pdf`와 같은 값이고 오른쪽 축만 새로 생긴 것이다.** 선은 그
+인스턴스의 **토큰당 평균 시간**으로, 엔진 자신의 `vllm:inter_token_latency_seconds_{sum,count}`
+증분의 비(그 초에 그 엔진이 낸 토큰으로 가중한 평균)를 **120초 박스 필터로 평활**한 것이다
+(2026-09-10에 60 → 120초. 띠가 60초 창이라 처음에는 해상도를 맞췄는데, 한산한 초에 느린 토큰
+몇 개가 만드는 분 단위 요동이 남아서 늘렸다. **표본에 중심을 둔 박스 필터라 실제 계단은
+2분짜리 경사로 그려지고, run의 처음과 끝 1분은 더 적은 표본으로 평균된다.**)
+시각 기준점은 mix 표와 같다(loader가 보는 분석 창의 첫 도착).
+
+**행이 엔진 rank이고 메트릭 파일은 포트**라, mix 표가 run 전체에 대해 포트마다 매긴 rank로
+둘을 잇는다. rank 규칙이 바뀌면 띠와 선이 같이 움직인다.
+
+### ⚠ 오른쪽 축이 로그다
+
+한 그림에 축 하나를 쓰는 것이 맞다(지연은 패널마다 달라지지 않는 예산에 견주는 양이다).
+그런데 **admission control이 없는 arm이 한 엔진에서 중앙값 400.8 ms**인데 나머지 패널은
+20~90 ms 사이에 있어서, 선형 축이면 네 열이 바닥에 붙은 직선이 된다. 로그 축에서는
+FluidServe의 44 ms 대 71 ms 차이가 그대로 읽히면서 400 ms 엔진도 같은 격자 위에 있다.
+눈금은 30 / 100 / 300이고 **마지막 열에만 숫자를 적는다.**
+
+### ⚠ 선은 그 인스턴스의 모든 클래스를 합친 하나의 값이다
+
+클래스별 값이 아니므로 **한 클래스의 예산과 직접 견주면 안 된다.** chat 50 / deepresearch 100 /
+swe 75 ms인데 선은 셋을 섞은 토큰 가중 평균이다. 70 ms인 패널이 그래서 chat 예산을 어긴
+것도 아니고, 45 ms인 패널이 그 인스턴스의 모든 클래스에 대해 예산을 지킨 것도 아니다.
+
+### 그려진 값 (EXP-109 반복 1, 상주 비중 %와 TBT ms)
+
+| arm | 인스턴스 | chat | dr | agent | TBT p50 | TBT p90 |
+|---|---|---|---|---|---|---|
+| vLLM router | 1~4 | 47~69 | 15~25 | 8~38 | 97.9 / 105.6 / **398.5** / 133.2 | 212 / 137 / **622** / 286 |
+| PolyServe | 1 | 93.1 | 2.6 | 4.4 | 60.2 | 67.3 |
+| PolyServe | 2 | 76.2 | 17.4 | 6.4 | 53.5 | 65.5 |
+| PolyServe | 3 | 0.0 | 11.6 | 88.4 | 49.4 | 51.7 |
+| PolyServe | 4 | 0.0 | 100.0 | 0.0 | 47.9 | 49.8 |
+| Llumnix SLO | 1~4 | 27~38 | 55~68 | 5~11 | 71.6~72.9 | 77.3~82.5 |
+| llm-d | 1~4 | 34~50 | 38~57 | 10~13 | 39.3~42.4 | 44.9~72.7 |
+| FluidServe | 1 | 86.6 | 9.2 | 4.3 | 44.0 | 45.1 |
+| FluidServe | 2 | 48.8 | 34.2 | 17.0 | 44.8 | 74.1 |
+| FluidServe | 3 | 19.2 | 60.6 | 20.2 | 70.2 | 74.4 |
+| FluidServe | 4 | 7.7 | 72.9 | 19.4 | 71.3 | 74.8 |
+
+(120초 평활 기준. 60초로 재면 p50이 0.5 ms 안에서 같고 p90만 PolyServe·Llumnix SLO에서
+2~5 ms 높다.)
+
+**기준선 셋만 남긴 판에서 읽히는 것**: **PolyServe는 클래스를 완전히 나누고 속도가 그 순서로
+갈린다**(chat 93%인 인스턴스 60.2 ms, agent 88%인 인스턴스 49.4 ms, deepresearch 전용
+47.9 ms). **Llumnix SLO는 네 인스턴스가 거의 같은 구성이고 속도도 71.6~72.9 ms로 같다.**
+llm-d는 구성이 섞여 있는데 속도가 39~42 ms로 셋 중 가장 빠르고 평평한데, **같은 시간에 훨씬
+많이 거절한 결과이기도 하므로**(EXP-109 기준 42.0%) 이 패널만으로 읽으면 안 된다.
+
+**다섯 arm 판에서 읽히는 것**: FluidServe에서 **인스턴스마다 속도가 갈리고 그 방향이 그 인스턴스가 든 클래스와
+같다**(chat 86.6%인 인스턴스 44.2 ms, deepresearch 72.9%인 인스턴스 71.4 ms). Llumnix SLO는
+네 인스턴스의 구성이 거의 같고 속도도 71~73 ms로 같다. **이것은 상관이지 인과의 측정이 아니다** —
+어느 클래스를 어디에 놓느냐와 그 인스턴스가 얼마나 붐비느냐가 같이 움직인다.
+
+---
+
+## `class_mix_hour_3arms_soft.pdf` — 기준선 셋만, 한 열, 채도를 낮춘 판 (2026-09-10)
+
+**스크립트**: 같은 `fig_class_mix_hour.py`.
+**크기**: 3.335 × 2.60 in, 단일 열, `width=\columnwidth`. 값은 `class_mix_hour_3arms_soft.csv`.
+
+```
+python3 paper_figures/fig_class_mix_hour.py --col --muted \
+        --arms slot75 llmdslot75 polyservept75 --suffix _3arms_soft
+```
+
+열 셋(**Llumnix SLO / llm-d / PolyServe**)에 행 넷, 축 글씨는 6 pt다(한 열에 세 패널이면
+패널 하나가 약 0.85 in이다). `--muted`가 세 클래스를 **같은 색상(hue)의 채도를 낮춘 판**으로
+바꾼다 — chat `#d7a791`, deep research `#e3dcba`, agent `#afc1cf`(2026-09-10에 한 번 더
+낮췄다. 첫 판은 `#df9675` / `#e3d9a6` / `#9ebbce`였다). RdYlBu 판에서 채도만 내리고 흰색 쪽으로
+조금 올린 것이라 **어느 색이 어느 클래스인지가 판 사이에서 바뀌지 않는다**(deep research만
+예외다 — `#ffffbf`를 그냥 탈색하면 흰 종이에서 안 보여서 모래색으로 어둡게 했다).
+
+⚠ **더 낮추지 못하는 이유는 종이와의 대비가 아니라 띠와 띠 사이의 경계다.** stacked area에
+테두리를 안 그리므로 chat이 끝나고 deep research가 시작하는 자리는 색이 바뀌는 것 하나로만
+표시된다. 회색조 밝기가 179 / 218 / 189라 보통 보이는 두 경계(chat|deep, deep|agent)는 39와
+29 떨어져 있다.
+
+⚠ **회색조 인쇄에서는 chat과 agent가 안 갈린다**(밝기 179 대 189). 둘은 deep research가 없는
+구간에서 실제로 맞닿는다. 채도가 높은 판도 같은 문제이므로(168 대 181) 어느 쪽도 회색조로
+안전하지 않고, 캡션이 그렇게 주장하면 안 된다.
+
+⚠ **`class_mix_hour_3arms.pdf`(채도가 높은 판)는 지우지 않고 그대로 두었다.** 두 파일이
+같은 데이터의 같은 그림이고 색만 다르므로, **논문에 넣을 때 둘 중 하나만 쓴다.**
+
+---
 
 ## `class_mix_hour_split.pdf` — 같은 모자이크에, 제때 낸 일과 늦게 낸 일을 갈라서
 
@@ -2822,3 +3027,181 @@ s = 0.707은 `C` = 1,041,024로 환산한 점유율 기반 값이고 s = 0.630�
 > pool is measured for the two Llama fleets and derived from the per-GPU memory budget
 > for the Qwen fleet; the decode step law is fitted on decode-only steps; rho, s and the
 > resident footprint are measured per fleet over the load window.
+
+## `effective_capacity.pdf` — EXP-139, in MOONCAKE's Figure 1 form
+
+Single column, 3.335 x 2.45 in. Drawn by `fig_slo_scale_pace.py`; values in
+`slo_scale_pace_outcome.csv`.
+
+**Why this form, and where the metric name comes from.** MOONCAKE (FAST '25,
+`related_works/`) draws its Figure 1 as a sweep of the TBT SLO on x against
+"request capacity ratio" on y, with the improvement read as a percentage at fixed
+SLO thresholds. It defines the quantity as "the proportion of effective requests
+among all requests", an effective request being one that met both its TTFT and
+its TBT threshold, and its scheduler rejects a request it cannot serve (algorithm
+1, lines 18-19), so a rejection counts against the denominator. **That is the
+same quantity this repository computes as attainment on every arrival.** The axis
+carries their name because the term already exists; inventing one would be the
+defect CLAUDE.md's 없는 용어를 만들지 않는다 rule is about.
+
+**y** = effective request capacity (%): met / every arrival, rejected and
+unfinished both counted as not met.
+**x** = chat's per-token budget in ms. All three classes scale together --
+the caption must give the other two (deepresearch 2x chat, swe 1.5x chat, and the
+first-token budgets scale with them; EXP-139 section 3.1 has the table).
+
+**Two differences from MOONCAKE's figure, both of which belong in the caption.**
+Their x spans 10x (100 to 1000 ms) and is logarithmic; ours spans 1.86x and is
+linear. **Their curves do not cross and ours do**, so the gap is annotated at two
+budgets rather than one and its sign changes: +216% at 45 ms (FluidServe 80.3
+against the best baseline, llm-d at 25.4) and -3% at 65 ms (81.6 against
+PolyServe's 83.8). Annotating only the favourable one would be the omission the
+exp-plot skill records under "report every scoring combination".
+
+**The caption must also state** the three things the other EXP-139 figures state:
+k=1.0 is a hollow marker from a different session (2026-08-31, movement up to 4.6
+points); llm-d's repeat spread is 4.8 to 11.7 points against 0.0 to 0.7 for the
+others; one 8-minute condition per point at 35 req/s, 4-point threshold fixed
+before the run. The -3% at 65 ms is INSIDE that threshold and must not be read as
+PolyServe winning.
+
+
+## `slo_scale_plane.pdf` — EXP-139, what a policy spends against what it gets
+
+Single column, 3.335 x 2.55 in. Drawn by `fig_slo_scale_pace.py`; values in
+`slo_scale_pace_outcome.csv` (columns `budget_consumed`, `goodput_tok_s`,
+`batch_p50`).
+
+**Axes, and why these two.**
+- x = **share of the per-token budget consumed** = delivered chat per-token time
+  divided by chat's per-token budget at that scale. chat is the class that sets
+  the gate on any instance holding it, so this is the budget that binds. x > 1 is
+  a fleet running slower than the promise it was given, and the region is shaded.
+  The dashed line at 0.90 is the pace FluidServe's gate plans against.
+- y = **token goodput**: output tokens per second from requests that met their
+  SLO. Request goodput is NOT a second axis: at a fixed arrival rate it is the
+  attainment rescaled, measured within 0.06 req/s on every cell, so it would be
+  the same picture twice.
+- marker area = **fleet decode batch**, linear from 150 to 1070 onto 8 to 62
+  pt^2. Concurrency is not independent -- Little's law makes it the admitted rate
+  times the residence time -- so it is a third reading, not a third claim.
+
+**What the figure says.** Three of the four policies TRAVERSE this plane as the
+budget is scaled and one does not. FluidServe's four budgets land on one point
+(x 0.87 to 0.90, y 11.9 to 13.8k) with the largest markers. PolyServe sweeps from
+x=1.41 to x=0.86, crossing the budget line, and its goodput only rises once it is
+inside. Llumnix SLO never leaves the over-budget region. llm-d stays under budget
+(x 0.75 to 0.85) and converts less of it.
+
+**A composite scalar was considered and rejected.** Any single "effective serving
+capacity" number here would be close to a monotone function of goodput, because
+request goodput is attainment rescaled and batch depth follows from admission and
+residence time. It would also be a term with no definition in the literature. The
+plane shows the trade instead of hiding it in one number.
+
+**The caption must state** the same three things as the two figures below (k=1.0
+is a different session and is not drawn here at all; llm-d's repeat spread is
+4.8 to 11.7 points; one 8-minute condition per point, 4-point threshold).
+
+**What may NOT be said:** that a point further right is "using the hardware
+better". x > 1 means the fleet is slower than its promise, which is a failure,
+not a higher utilisation.
+
+
+## `slo_scale_pace.pdf` / `slo_scale_outcome.pdf` — EXP-139, the SLO scale sweep
+
+Two single-column figures (3.335 x 2.30 in, include at that width, no scaling).
+Both are drawn by `slo_scale.py`; the values they draw are in `slo_scale.csv`,
+written by the same run of the same script.
+
+**Runs.** Static, 2100 rpm (35 req/s), 8 minutes per condition, Llama-3.1-70B x4
+TP=2, scheduler `063e1c85`.
+`results/*exp139k{070,080,090,110,120,130}r[12]_*` for the six scales measured on
+2026-09-15, and `results/*exp108r[12]_*_rpm_2100` for the deployed budget k=1.0,
+measured 2026-08-31. PRERUN directories (llm-d's discarded 3-minute warm-up) are
+excluded everywhere.
+
+**n per cell.** 2 repeats at k=0.7 and k=1.3 for FluidServe / llm-d / PolyServe
+(Llumnix SLO has 2 at 0.7, 1 at 1.3), 2 at k=1.0 for all four, and 1 elsewhere.
+k=0.8 and k=1.2 are PolyServe only -- they were run as a probe after the model in
+EXP-139 section 8.6 predicted them. The `n_repeats` column carries this per row
+and the error bars are min..max, so a point with no bar is a single run.
+
+**What the budgets are.** Every budget is scaled by k, first-token and per-token
+together: chat (5000 ms, 50 ms/token) at k=1. FluidServe receives the per-token
+budgets through `--fluidserve-class-budgets` with the tier keys held at
+25/50/100; the other three read `slo.<class>.tbt_ms` from their workload file.
+EXP-139 section 3.1 lists all six values per scale.
+
+**Metric definitions.**
+- *attainment*: every arrival is the denominator; a rejected or unfinished
+  request is a violation. From `all_arrivals_attainment.one_run`, the
+  repository's own scorer, imported rather than reimplemented.
+- *delivered per-token time*: `(e2e - first token) / (output tokens - 1)`, median
+  over chat requests that were admitted and ran to completion. chat is the class
+  that sets the gate on any instance holding it, so it is the quantity the budget
+  is meant to control. It is computed from the client's columns and does not
+  depend on the scoring rule.
+- *0.90 x budget*: the pace FluidServe's gate plans against
+  (`fsAllowanceUtilisation = 0.90` in `fluidserve.go:92`, `gateSlack` 1.000).
+
+**The caption must state:**
+- k=1.0 is drawn as a HOLLOW marker and is not joined into the curves: it is the
+  only point from a different session (2026-08-31), and session-to-session
+  movement on this workload has been measured at up to 4.6 points. PolyServe's
+  pace at that point reads 64.3 ms against 55.9-56.7 at every 2026-09-15 scale,
+  which is the same session effect seen in the pace rather than a response to the
+  budget.
+- llm-d's repeat spread is 4.8 points at k=1.3 and 11.7 at k=0.7, against 0.0-0.7
+  for the other three arms. Its predictor is reset per condition and trained only
+  by a 3-minute pre-run (EXP-139 section 7.1), so differences involving that arm
+  are not read at the 4-point threshold the other arms use.
+- Every point is one 8-minute condition at one arrival rate; the pre-registered
+  threshold for reading a difference is 4 points (EXP-139 section 5).
+
+**What may NOT be said from these figures:**
+- That PolyServe beats FluidServe at k=1.3. The gap is +1.9 to +2.6 on every
+  arrival and reproduces (PolyServe 83.8/83.8, FluidServe 81.9/81.2, ranges not
+  overlapping), but it is below the threshold fixed before the run, and on token
+  goodput it is +0.3%.
+- That PolyServe "rejects" the requests it does not serve. At k=1.3 its policy
+  refuses nothing; all 2,186 client-side rejections are the gateway giving up at
+  its 5-second ceiling (EXP-139 section 8.7).
+
+## `budget_cdf.pdf` — EXP-139, both performance axes in one curve
+
+Two panels, 4.05 x 2.25 in (include at that width). Drawn by `fig_budget_cdf.py`;
+`budget_cdf.csv` carries each curve at 5-point quantile steps.
+
+**The problem it solves.** A policy has to be judged on two things that are
+normally two figures: how much it delivers, and how close it runs to the latency
+budget it was given. Encoding the second as marker area does not read.
+
+**The device.** Per request, take the WORSE of its two terms against its own
+budget -- `max(first-token / first-token budget, per-token / per-token budget)`
+-- and plot the CDF over EVERY arrival. All three classes then share one axis,
+and since a request meets its SLO exactly when both terms are under 1, the SLO is
+the single line x = 1. One curve carries three readings:
+
+- **height at x = 1** = SLO attainment on every arrival. Verified against the
+  scored table on all eight (panel, arm) cells: agreement within 0.3 points, the
+  residual being one-output-token requests, for which a per-token time is
+  undefined.
+- **where the curve stands up** = how much of the budget the policy spends.
+  FluidServe's step is at 0.87-0.90 in both panels, which is its gate's target
+  (`fsAllowanceUtilisation = 0.90`); llm-d rises from 0.4 and leaves headroom;
+  PolyServe stands up at 1.1-1.35 when tight and just under 1.0 when loose, which
+  is the same fixed 56 ms pace meeting two different budgets.
+- **the plateau** = the share that produced a per-token time at all, so 100 minus
+  it is rejection plus the requests cut off at the end of the window.
+
+**Why the axis is the max and not the per-token term.** Drawn on the per-token
+term alone, the Llumnix SLO curve reaches 24% at x = 1 in the loose panel while
+its measured attainment is 6.7 -- that policy fails on FIRST TOKEN, not on pace
+(deepresearch 62.6% and swe 77.0% over their first-token budgets at k = 1.3). The
+figure would have contradicted the table.
+
+**Caption must state:** one repeat per curve (the panels show single runs, not
+pooled repeats, so that two runs are never hidden inside one curve); 35 req/s,
+8-minute conditions; the two panels are k = 0.9 and k = 1.3 of EXP-139 and the
+budgets at each are in section 3.1 of that file.

@@ -124,10 +124,42 @@ TITLES = ["(a) Throughput",
           "(c) Request SLO"]
 
 
-def collect():
+# The pinned copy of the static sweep. `paper_experiment/static_sweep_clean_2026-08/
+# manifest.tsv` names 16 runs per arm -- eight arrival rates, two repeats -- with
+# a sha256 of every metrics.csv, and STATUS.md calls that directory the canonical
+# static sweep.
+#
+# ⚠ WHY A SECOND SELECTION EXISTS. The disk cleanup of 2026-08-26 kept only the
+# runs the manifest references and emptied the rest, and the EXP-86 conditions
+# under `results/` were emptied while their pinned copies were kept: 24 of those
+# directories still exist and contain nothing. A glob over `results/` therefore
+# finds one repeat instead of two at most rates and NOTHING at three cells --
+# vLLM at 45 req/s, PolyServe at 70, Llumnix SLO at 55 -- and drops them from the
+# figure in silence. llm-d is unaffected because EXP-82 was not pruned.
+#
+# `pinned_arms()` keeps the arm names, colours, markers and order and replaces
+# only the run globs. NOTHING ABOUT THE SCORING CHANGES; the same `load_run`
+# reads the same files, from the directory that still has them.
+PINNED = "paper_experiment/static_sweep_clean_2026-08/data"
+PINNED_PATS = {
+    "vLLM": [f"{PINNED}/*exp86r[12]_vllmcache_m1_rpm_*"],
+    "PolyServe": [f"{PINNED}/*exp86r[12]_polyserve_m1_rpm_*"],
+    "Llumnix SLO": [f"{PINNED}/*exp86r[12]_slo_m1f_rpm_*"],
+    "llm-d": [f"{PINNED}/*exp82r[12]_llmdslo_m1f_rpm_*"],
+}
+
+
+def pinned_arms():
+    """ARMS with the run globs repointed at the pinned copy, arms without one
+    dropped. FluidServe has no entry, so this returns the four baselines."""
+    return [(n, c, m, PINNED_PATS[n]) for (n, c, m, _) in ARMS
+            if n in PINNED_PATS]
+
+
+def collect(arms=None):
     """arm -> rate -> (throughput, goodput, offered, admitted, rejected)."""
     out = {}
-    for name, _, _, pats in ARMS:
+    for name, _, _, pats in (ARMS if arms is None else arms):
         acc = collections.defaultdict(list)
         seen = set()
         for pat in pats:
@@ -333,6 +365,122 @@ def build_admit_reject(data, arms, out, denom="admitted", legend=True):
         save(fig, out)
 
 
+def build_four(data, arms, out, legend=True):
+    """Goodput, throughput, attainment among ADMITTED requests, rejection rate.
+
+      motivation_throughput_vs_goodput_4panel.pdf  7.0 x 1.62 in, width=\\textwidth
+
+    THE SCORING IS UNCHANGED. Every value comes from the same `collect()` pass,
+    and therefore the same `EXP22.load_run` and `EXP22.per_request`, as the
+    three-panel versions above; this function only chooses which four of the
+    five collected quantities to draw and in what order. A number read off this
+    figure and a number read off `motivation_throughput_vs_goodput.pdf` for the
+    same arm and rate are the same number.
+
+    WHY THIS ORDER. (a) leads with the quantity the figure is an argument about
+    -- output that belonged to a request that met its rule -- and (b) puts the
+    raw token rate immediately beside it, sharing one y axis, so the reader sees
+    that the two differ by an order of magnitude while the engines were producing
+    comparable amounts. (c) and (d) then answer the same question counted in
+    requests rather than tokens, and they also share one y axis because both are
+    percentages of the same arrivals.
+
+    (c) IS THE ADMITTED DENOMINATOR, WHICH REWARDS REFUSING WORK. That is why (d)
+    is beside it and why the two must be read as a pair: (c) alone hands the best
+    score to a policy that accepted almost nothing, and (d) says how much each
+    policy accepted. This is the pairing that the three-panel `build()` cannot
+    make, because there the second denominator is carried as a dotted overlay and
+    the amount refused has to be inferred from the gap between two curves.
+
+    ⚠ AN ARM THAT NEVER REJECTS IS ABSENT FROM (d), NOT MISSING. PolyServe and
+    the vLLM router have no admission control, so their rejection curves are
+    0.0% at every rate: drawn, they would lie on the x axis and on each other,
+    and only the one drawn last would show its colour, leaving a reader unable to
+    tell whether the other arm is at zero or absent. THE CAPTION MUST SAY that
+    the two arms missing from (d) reject nothing at any rate, which is a property
+    of the policy. Panel (d) therefore carries two curves where the legend names
+    four. This is the same decision, for the same reason, as in
+    `build_admit_reject`.
+
+    X TICKS ARE MEASURED RATES. Four panels across 7.0 in leave about 1.4 in of
+    plotting area each, which will not carry seven labels at 8 pt. The labelled
+    subset is 10, 25, 45 and 70 req/s and the remaining measured rates -- 15, 20,
+    35, 55 -- get unlabelled minor ticks. The three-panel figures label 10 to 70
+    in steps of ten, four of which (30, 40, 50, 60) were never measured; this one
+    does not introduce round numbers that no condition ran at.
+    """
+    with plt.rc_context(STYLE):
+        fig, ax = plt.subplots(1, 4, figsize=(TEXT_W, FIG_H))
+        handles, labels = [], []
+
+        for name, col, _, _ in arms:
+            x = sorted(data[name])
+            mk = dict(marker="o", ms=2.8, mec="white", mew=0.4)
+            # (a) goodput, (b) throughput. `h` is taken from the panel the
+            # legend should point at, which is the one the figure argues from.
+            h, = ax[0].plot(x, [data[name][k][1] for k in x], color=col,
+                            lw=1.2, **mk)
+            ax[1].plot(x, [data[name][k][0] for k in x], color=col,
+                       lw=1.2, **mk)
+            # (c) attainment on the ADMITTED denominator, index 3.
+            ax[2].plot(x, [data[name][k][3] for k in x], color=col,
+                       lw=1.2, **mk)
+            rej = [data[name][k][4] for k in x]
+            if max(rej) > 0:
+                ax[3].plot(x, rej, color=col, lw=1.2, **mk)
+            handles.append(h)
+            labels.append(name)
+
+        titles = ["(a) Goodput Tokens", "(b) Throughput",
+                  "(c) Request SLO (admitted)", "(d) Rejection rate"]
+        for i in range(4):
+            # The panel title is the SECOND LINE of the x label rather than a
+            # hand-placed text artist: `tight_layout` reserves room for an axis
+            # label and knows nothing about an artist placed in axes
+            # coordinates, which left the panels crushed into the top.
+            ax[i].set_xlabel(f"Offered rate (req/s)\n{titles[i]}",
+                             labelpad=1.5, linespacing=1.6)
+            ax[i].set_xlim(7, 73)
+            ax[i].set_xticks([10, 25, 45, 70])
+            ax[i].set_xticks([15, 20, 35, 55], minor=True)
+            ax[i].grid(axis="both", **GRID)
+            ax[i].set_axisbelow(True)
+
+        # (a) and (b) share one y axis on purpose: the claim is that the token
+        # rate the engines produced is nearly the same across policies and the
+        # part of it that counted is not, and rescaling either panel would hide
+        # exactly that. Both keep their tick numbers and their name -- side by
+        # side as separate rectangles, a panel with no y axis of its own reads
+        # as a continuation of the one left of it rather than as a second
+        # measurement.
+        ax[1].sharey(ax[0])
+        ax[0].set_ylim(0, 16000)
+        ax[0].set_yticks([0, 5000, 10000, 15000])
+        ax[0].yaxis.set_major_formatter(kfmt())
+        ax[1].yaxis.set_major_formatter(kfmt())
+        ax[0].set_ylabel("Tokens/s")
+        ax[1].set_ylabel("Tokens/s")
+        # (c) and (d) are both percentages of the same arrivals and are read
+        # against each other, so they get one scale: at any rate the pair reads
+        # "of what this policy took, this fraction was on time" beside "it took
+        # this much less than everything that arrived".
+        for i in (2, 3):
+            ax[i].set_ylim(0, 105)
+            ax[i].set_yticks([0, 25, 50, 75, 100])
+        ax[2].set_ylabel("SLO attainment (%)")
+        ax[3].set_ylabel("Rejection rate (%)")
+
+        # `rect` is identical to the three-panel builders, so the axes of this
+        # figure are the same height as theirs and the two can be read as the
+        # same measurement at different widths.
+        if legend:
+            fig.legend(handles, labels, loc="lower center", ncol=len(labels),
+                       bbox_to_anchor=(0.5, 0.866), frameon=False,
+                       columnspacing=1.4, handlelength=1.8, handletextpad=0.4)
+        fig.tight_layout(rect=(0, 0, 1, 0.872), w_pad=2.2, pad=0.25)
+        save(fig, out)
+
+
 def build_one_arm_norm(data, arms, out, stacked=True, phases=False):
     """Two panels -- normalised throughput and attainment -- for one arm or two.
 
@@ -517,6 +665,26 @@ def main():
     build(data, [a for a in present if a[0] == OURS],
           os.path.join(HERE, "motivation_throughput_vs_goodput_fsonly.pdf"),
           legend=False)
+    # The four-panel version of the same measurement, baselines only: goodput,
+    # throughput, attainment on the admitted denominator, rejection rate. Same
+    # `collect()` pass and therefore the same scoring as every figure above; the
+    # difference is that the amount refused is a panel of its own rather than
+    # the gap between a solid and a dotted curve.
+    # ⚠ THIS ONE IS DRAWN FROM THE PINNED COPY, not from `results/`. See
+    # `pinned_arms()` for why: the EXP-86 directories under `results/` were
+    # emptied by the 2026-08-26 cleanup, so a `results/` glob silently loses
+    # three rate cells and half the repeats at the rest. The figures above still
+    # use the `results/` selection, so THIS FIGURE AND ITS THREE-PANEL SIBLINGS
+    # ARE NOT DRAWN FROM THE SAME SET until that selection is repointed too --
+    # do not read a number off one and quote it beside a number off the other.
+    pinned = pinned_arms()
+    pdata = collect(pinned)
+    ppresent = [a for a in pinned if pdata[a[0]]]
+    print("\n--- four-panel, pinned selection ---")
+    report(pdata, ppresent)
+    build_four(pdata, ppresent,
+               os.path.join(HERE,
+                            "motivation_throughput_vs_goodput_4panel.pdf"))
     # Throughput / admitted attainment / rejection rate, baselines only. Our
     # system is absent from all three panels for the same reason as above.
     build_admit_reject(data, [a for a in present if a[0] != OURS],

@@ -3,6 +3,7 @@
 
   azure_rate_and_mix.pdf     3.335 x 2.45 in, `figure`, width=\\columnwidth
   azure_rate_and_mix_lr.pdf  3.335 x 1.42 in, the same two panels side by side
+  azure_mix_only.pdf         3.335 x 1.40 in, panel (b) alone
 
 Two panels over the SAME four-day window of the Azure LLM Inference 2024 traces.
 
@@ -10,6 +11,14 @@ Two panels over the SAME four-day window of the Azure LLM Inference 2024 traces.
       upper dashed rule is 1.0 by construction
   (b) what share of those arrivals is off the window's average composition, in
       10-minute bins
+
+`azure_mix_only.pdf` IS PANEL (b) ALONE, for a place in the text that makes only
+the composition half of the claim. It is the same series over the same window, so
+⚠ EVERY CAVEAT BELOW STILL APPLIES, and one more: with the rate panel gone the
+figure no longer shows that this window's load moves by 5.8x, so a caption that
+needs the two-part claim has to say the rate range in words or use the stacked
+version. The panel also cannot be read as "the mix moves when the load does" --
+that comparison is what the stacked layout exists for.
 
 This exists because the motivation makes a two-part claim -- the offered load
 varies AND what it is made of varies -- and `azure_trace_shape.pdf` only shows
@@ -122,6 +131,16 @@ CONV = "traces/azure/plots/_minute_conv2024.csv"
 CODE = "traces/azure/plots/_minute_code2024.csv"
 FIG_H = 2.45
 FIG_H_SHORT = 1.95
+# The mixture panel on its own. One panel carries the x axis and its label that
+# the stacked pair shares, so it cannot simply be half of 2.45.
+# ⚠ THE HEIGHT IS SET BY THE ROTATED Y LABEL AND NOT BY THE CURVE. "Workload
+# mixture / deviation (%)" is 1.01 in of ink measured along the axis, and a
+# rotated label is centred on the axes and NOT clipped to the canvas: at 1.30 in
+# the axes are 0.91 in and the label's first line ran 0.01 in off the top of the
+# page, silently. 1.40 in puts the axes at 1.01 in and the label's top at 1.36
+# against a 1.40 in canvas. `check_ylabel` measures it on every build so a
+# future height change says so instead of shipping a cut label.
+FIG_H_MIX = 1.40
 C_RATE = "#1f77b4"
 # A muted terracotta, and the two nearby colours it deliberately is not.
 # paper_style.ARM_COLOR binds #d62728 to PolyServe and #ff7f0e to an ablation arm,
@@ -131,6 +150,40 @@ C_RATE = "#1f77b4"
 # competing with it: the first attempt used PolyServe's red straight and the
 # panel drew the eye away from the one above it.
 C_MIX = "#b56349"
+# `azure_mix_only.pdf` ONLY (2026-09-11, at the author's request): an orange,
+# #e08214 -- ColorBrewer PuOr, the same one the author picked on the same day for
+# the attainment curve in `load_engine_tbt.pdf`.
+#
+# NOT #ff7f0e AND NOT #d62728. The note above this one records why: paper_style
+# binds #d62728 to PolyServe and #ff7f0e to an ablation arm, and exp27_figures
+# gives orange to the deep research CLASS, so either of those reads here as if a
+# policy or a class were being drawn. This panel is a property of the workload.
+#
+# TWO QUANTITIES NOW SHARE #e08214 -- this panel and that attainment curve. They
+# are in different figures and nothing else connects them, but a page carrying
+# both should not let the colour suggest otherwise. #fe9929 (ColorBrewer YlOrBr)
+# is the nearest orange that keeps them apart, if that ever matters.
+#
+# THE AREA IS THE LINE'S OWN COLOUR AT AN ALPHA, not a second step of the ramp.
+# Two steps were tried -- #ffffd4 and then #a1dab4 under the line -- and both
+# read as two quantities rather than one quantity and the area under it. One hue
+# at two strengths is what panel (a) does with C_RATE, and it is what the
+# terracotta version of this panel did before any of this.
+# The other three outputs keep C_MIX, because there the mixture panel sits
+# beside the rate panel and the terracotta was chosen to sit beside that panel's
+# blue -- see the note above. So the same panel is two colours depending on
+# which file it is in, and a caption that shows both has to say so.
+#
+# THE AREA IS OPAQUE, not C_MIX's alpha 0.20, because the colour asked for is a
+# value the area should actually take. An opaque area would hide the dotted grid
+# underneath it, so the area alone is dropped below the gridlines (zorder 0
+# against the 0.5 `set_axisbelow(True)` gives them); the line stays above both.
+# Env-overridable only so a variant can be rendered during a review
+# without editing the file; the default here is what the figure ships.
+C_MIX_ONLY = os.environ.get("FS_MIX_COLOR", "#e08214")
+# The one number to turn if the area is too faint or too heavy. Panel (a) fills
+# at 0.15 and the terracotta mixture panel at 0.20.
+C_MIX_ONLY_ALPHA = float(os.environ.get("FS_MIX_ALPHA", 0.22))
 BIN = 10          # minutes per bin in panel (b)
 
 
@@ -196,6 +249,13 @@ def main():
          os.path.join(HERE, "azure_rate_and_mix_short.pdf"), height=FIG_H_SHORT)
     draw(hours, total, peak, hb, tv, "side",
          os.path.join(HERE, "azure_rate_and_mix_lr.pdf"))
+    # The mixture panel alone, for the places that make only the composition
+    # claim. ⚠ IT IS THE SAME PANEL AND THE SAME DATA -- the deviation is
+    # measured against the mean composition of this window, so a figure that
+    # drops the rate panel still describes a window whose load moves by
+    # 15.6x, and the caption has to say which window it is.
+    draw(hours, total, peak, hb, tv, "mix",
+         os.path.join(HERE, "azure_mix_only.pdf"))
     return 0
 
 
@@ -273,6 +333,26 @@ def check_overlap(fig, ax, txt, x, y, name):
               f"(label bottom {y0:.3g}, series top {top:.3g})")
 
 
+def check_ylabel(fig, ax, name):
+    """Does the rotated y label fit on the canvas?
+
+    A y label is centred on its axes and drawn outside them, and matplotlib
+    clips neither to the figure. With `bbox_inches` off -- which this directory
+    requires, so that the PDF is the size it was drawn at -- a label taller than
+    the axes simply loses its ends off the page and the script says nothing.
+    """
+    fig.canvas.draw()
+    b = ax.yaxis.label.get_window_extent(fig.canvas.get_renderer())
+    h = fig.get_size_inches()[1] * fig.dpi
+    if b.y0 < 0 or b.y1 > h:
+        print(f"  ⚠ {name}: the y label runs off the canvas by "
+              f"{max(-b.y0, b.y1 - h) / fig.dpi:.3f} in "
+              f"(label {b.height / fig.dpi:.2f} in tall)")
+    else:
+        print(f"  {name}: y label fits with "
+              f"{min(b.y0, h - b.y1) / fig.dpi:.3f} in to spare")
+
+
 def draw(hours, total, peak, hb, tv, layout, out, height=None):
     """The same two panels stacked (one above the other) or side by side.
 
@@ -294,35 +374,50 @@ def draw(hours, total, peak, hb, tv, layout, out, height=None):
     makes that claim, the stacked version is the one to include.
     """
     side = layout == "side"
-    tight = not side and (height or FIG_H) < FIG_H
+    mix_only = layout == "mix"
+    tight = not side and not mix_only and (height or FIG_H) < FIG_H
     with plt.rc_context(STYLE):
-        fig, ax = plt.subplots(1, 2, figsize=(COL_W, height or 1.42)) \
-            if side else plt.subplots(2, 1, figsize=(COL_W, height or FIG_H),
-                                      sharex=True)
+        if mix_only:
+            # `ax[0]` is left absent rather than made empty: everything the
+            # rate panel draws is then skipped by the same test, and nothing
+            # downstream can quietly draw into a panel that is not there.
+            fig, a1 = plt.subplots(figsize=(COL_W, height or FIG_H_MIX))
+            ax = [None, a1]
+        elif side:
+            fig, ax = plt.subplots(1, 2, figsize=(COL_W, height or 1.42))
+        else:
+            fig, ax = plt.subplots(2, 1, figsize=(COL_W, height or FIG_H),
+                                   sharex=True)
 
-        ax[0].plot(hours, total / peak, color=C_RATE, lw=0.5)
-        ax[0].fill_between(hours, total / peak, color=C_RATE, alpha=0.15, lw=0)
-        ax[0].axhline(1.0, color="#555555", lw=0.6, ls="--")
-        ax[0].axhline(total.min() / peak, color="#555555", lw=0.6, ls="--")
-        t0 = span(ax[0], hours, total / peak, total.min() / peak, 1.0,
-                  (f"{peak/total.min():.1f}$\\times$" if side else
-                   f"peak / trough = {peak/total.min():.1f}$\\times$"))
-        # ONE LINE WHERE IT FITS AND TWO WHERE IT DOES NOT, same words either
-        # way. A rotated axis label is not clipped to its panel, and this one
-        # is 1.11 in of ink against a panel that is 0.95 in at the tall stacked
-        # height and 0.71 in at the short one; the tall version already spends
-        # its whole top margin on it (0.013 in left) and every height from 2.35
-        # down was measured with the label's ink at row 0, that is, cut off. At
-        # 8-9 pt the only way to keep one line at the short height would be to
-        # take the type below the paper's floor, so the short version breaks
-        # the line instead.
-        ax[0].set_ylabel("Arrival rate (norm.)" if not tight
-                         else "Arrival rate\n(norm.)")
-        ax[0].set_ylim(0, 1.12)
-        ax[0].set_yticks([0, 0.5, 1.0])
+        if not mix_only:
+            ax[0].plot(hours, total / peak, color=C_RATE, lw=0.5)
+            ax[0].fill_between(hours, total / peak, color=C_RATE, alpha=0.15, lw=0)
+            ax[0].axhline(1.0, color="#555555", lw=0.6, ls="--")
+            ax[0].axhline(total.min() / peak, color="#555555", lw=0.6, ls="--")
+            t0 = span(ax[0], hours, total / peak, total.min() / peak, 1.0,
+                      (f"{peak/total.min():.1f}$\\times$" if side else
+                       f"peak / trough = {peak/total.min():.1f}$\\times$"))
+            # ONE LINE WHERE IT FITS AND TWO WHERE IT DOES NOT, same words either
+            # way. A rotated axis label is not clipped to its panel, and this one
+            # is 1.11 in of ink against a panel that is 0.95 in at the tall stacked
+            # height and 0.71 in at the short one; the tall version already spends
+            # its whole top margin on it (0.013 in left) and every height from 2.35
+            # down was measured with the label's ink at row 0, that is, cut off. At
+            # 8-9 pt the only way to keep one line at the short height would be to
+            # take the type below the paper's floor, so the short version breaks
+            # the line instead.
+            ax[0].set_ylabel("Arrival rate (norm.)" if not tight
+                             else "Arrival rate\n(norm.)")
+            ax[0].set_ylim(0, 1.12)
+            ax[0].set_yticks([0, 0.5, 1.0])
 
-        ax[1].plot(hb, tv, color=C_MIX, lw=0.6)
-        ax[1].fill_between(hb, tv, color=C_MIX, alpha=0.20, lw=0)
+        # One hue for both; only the strength differs. A translucent area lets
+        # the dotted grid through on its own, so the zorder juggling an opaque
+        # one needed is gone with it.
+        mix_c = C_MIX_ONLY if mix_only else C_MIX
+        mix_a = C_MIX_ONLY_ALPHA if mix_only else 0.20
+        ax[1].plot(hb, tv, color=mix_c, lw=0.6)
+        ax[1].fill_between(hb, tv, color=mix_c, alpha=mix_a, lw=0)
         ax[1].axhline(tv.max(), color="#333333", lw=0.6, ls="--")
         # The lower end is 0, not tv.min(): the claim the arrow carries is the
         # RANGE the deviation covers, and the trace does come within 0.4 points
@@ -337,6 +432,8 @@ def draw(hours, total, peak, hb, tv, layout, out, height=None):
         ax[1].set_yticks([0, 20, 40])
 
         for a in ax:
+            if a is None:
+                continue
             a.grid(axis="both", **GRID)
             a.set_axisbelow(True)
             a.set_xlim(0, hours[-1])
@@ -348,11 +445,14 @@ def draw(hours, total, peak, hb, tv, layout, out, height=None):
             ax[1].set_xlabel("Time (hours)")
 
         fig.tight_layout(pad=0.35, **({"w_pad": 1.2} if side else {}))
-        if not side:
+        if not side and not mix_only:
             fig.subplots_adjust(hspace=0.18)
         print(f"{os.path.basename(out)}")
-        check_overlap(fig, ax[0], t0, hours, total / peak, "arrival rate")
+        if not mix_only:
+            check_overlap(fig, ax[0], t0, hours, total / peak, "arrival rate")
         check_overlap(fig, ax[1], t1, hb, tv, "mixture deviation")
+        if mix_only:
+            check_ylabel(fig, ax[1], "mixture deviation")
         save(fig, out)
 
 
