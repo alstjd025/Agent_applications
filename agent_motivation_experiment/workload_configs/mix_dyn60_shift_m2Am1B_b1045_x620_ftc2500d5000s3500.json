@@ -1,0 +1,28 @@
+{
+  "_comment": "EXP-126. The x6.20 hour trace with BOTH budget halves: first-token 2500/5000/3500 ms and per-token chat 25 / deepresearch 50 / swe 38 ms. Derived from mix_dyn60_shift_m2Am1B_b1045_x620_t75.json by replacing the slo block and nothing else. tbt_ms here are the TIER KEYS, not the budgets: the policy gets the budgets from --fluidserve-class-budgets.",
+  "class_plan_file": "/work/traces/dynamic/canonical/dyn60_shift_m2Am1B_b1045_x620.csv",
+  "chat_config": {
+    "num_conversations": 10000
+  },
+  "deepresearch_config": {},
+  "swe_config": {
+    "transcript_file": "/work/workloads/codingagent_request_level_poisson/data/transcript_swe_short7k_mix1500.jsonl"
+  },
+  "slo": {
+    "chat": {
+      "ttft_ms": 2500,
+      "tbt_ms": 50,
+      "out_len": 386
+    },
+    "deepresearch": {
+      "ttft_ms": 5000,
+      "tbt_ms": 100,
+      "out_len": 275
+    },
+    "swe": {
+      "ttft_ms": 3500,
+      "tbt_ms": 25,
+      "out_len": 728
+    }
+  }
+}

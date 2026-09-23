@@ -1,0 +1,37 @@
+{
+ "_comment": "swe's promise is stated in the SAME per-token form as chat and deepresearch: TTFT 7 s + 75 ms per token (FluidServe v0.4 section 1.3). This file is for the policies that read slo.<class>.tbt_ms LITERALLY as the per-token target -- PolyServe, llm-d and Llumnix SLO -- because none of them can express an end-to-end budget. It replaces the *_slofair files for those policies under the per-token form: there is nothing left to restate, 75 IS the promise. FluidServe uses the sibling *_t75 file instead, where swe keeps tbt_ms 25 as a TIER KEY and the real budget arrives as --fluidserve-class-budgets 25:decode:75. Scoring for BOTH is FS_SWE_TBT_MS=75, so the policy and the scorer judge the same quantity.",
+ "mix": {
+  "chat": 10,
+  "deepresearch": 2,
+  "swe": 1
+ },
+ "mean_input_tokens": {
+  "chat": 649,
+  "deepresearch": 4639,
+  "swe": 5557
+ },
+ "chat_config": {
+  "num_conversations": 10000
+ },
+ "deepresearch_config": {},
+ "swe_config": {
+  "transcript_file": "/work/workloads/codingagent_request_level_poisson/data/transcript_swe_short7k_mix1500.jsonl"
+ },
+ "slo": {
+  "chat": {
+   "ttft_ms": 4000,
+   "tbt_ms": 40,
+   "out_len": 386
+  },
+  "deepresearch": {
+   "ttft_ms": 8000,
+   "tbt_ms": 80,
+   "out_len": 275
+  },
+  "swe": {
+   "ttft_ms": 5600,
+   "tbt_ms": 60,
+   "out_len": 728
+  }
+ }
+}
