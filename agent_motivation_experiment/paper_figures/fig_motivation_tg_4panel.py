@@ -51,7 +51,7 @@ marker at each measured rate, so where the data actually is stays visible.
 THE SCORING RULE IS NEW AND IT IS THE POINT OF THIS FIGURE. Until now the
 per-token half of a class rule was scored as `mean inter-token time over the
 request <= budget`, which is Scorpio's rule and, among the nine systems whose
-definitions were read for ms_dev/notes/slo-definitions.md, the rule only Scorpio
+definitions were read for archive/llumnix_reproduce/ms_dev/notes/slo-definitions.md, the rule only Scorpio
 uses. Here it is a TOKEN-LEVEL CUMULATIVE DEADLINE WITH A TOLERANCE: writing
 a_i for the arrival of the i-th output token measured from submission, T for the
 class time-to-first-token budget and P for its per-token budget,

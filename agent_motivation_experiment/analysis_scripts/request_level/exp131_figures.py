@@ -30,7 +30,7 @@ R = "results"
 # silently stops excluding the next run that lands in the table.
 EXCLUDED = set()
 _tsv = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                    "..", "..", "..", "..", "ms_dev", "notes", "excluded_runs.tsv")
+                    "..", "..", "..", "..", "ms_dev", "data", "excluded_runs.tsv")
 if os.path.isfile(_tsv):
     with open(_tsv) as f:
         for line in f:

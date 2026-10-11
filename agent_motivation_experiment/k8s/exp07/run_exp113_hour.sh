@@ -530,7 +530,7 @@ set_arm() {
     # The five constants are the compile defaults, which are vllm-router
     # 0.1.15's own values; set_scheduler_profiling.py reads the start-up line
     # back and refuses the condition if they differ or if localaccount is not
-    # true. Plan and judgement rule: ms_dev/notes/vllm-router-baseline.md.
+    # true. Plan and judgement rule: archive/llumnix_reproduce/ms_dev/notes/vllm-router-baseline.md.
     vllmcache)   policy=vllm-cache ;;
     # EXP-109. The hour trace in the per-token form of the agent class's promise.
     # The t75 suffix records the form, as the b40 suffix records a budget: these

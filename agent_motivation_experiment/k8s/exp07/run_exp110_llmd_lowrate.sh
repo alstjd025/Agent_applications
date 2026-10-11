@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # EXP-66 — llm-d predicted-latency (arm llmd-slo) on EXP-53's rate sweep.
 #
-# Design and judgement rules: llumnix_reproduce/ms_dev/notes/llmd-baseline.md
+# Design and judgement rules: llumnix_reproduce/archive/llumnix_reproduce/ms_dev/notes/llmd-baseline.md
 # and experiments/EXP-66_llm-d-baseline.md. This script only executes them.
 #
 # One condition is:
@@ -65,7 +65,7 @@ HOSTWORK=/home/nxclab/llumnix_reproduce/Agent_applications/agent_motivation_expe
 # FluidServe's nominal pace that still fits 30 s at the measured output length,
 # 2,500 + 520.2 x 52 = 29,550. Using it here gives llm-d the same treatment as the
 # other baseline that cannot state an end-to-end budget.
-# Full account: ms_dev/notes/llmd-baseline.md section 3.3, CLAUDE.md trap group A.
+# Full account: archive/llumnix_reproduce/ms_dev/notes/llmd-baseline.md section 3.3, CLAUDE.md trap group A.
 # EXP-108. The per-token form of the agent class's promise: TTFT 7 s + 75 ms per
 # token. llm-d reads slo.<class>.tbt_ms literally as the per-token target -- it
 # has no way to express an end-to-end budget -- so this file states 75. The

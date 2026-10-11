@@ -104,7 +104,7 @@ set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
     # the prompt minus the leading blocks the candidate instance is believed to
     # already hold, from an index the scheduler keeps of what it dispatched
     # where. Everything else is the `fluidserve` arm above, so the difference
-    # from it is one change. See ms_dev/notes/fluidserve-prefix.md.
+    # from it is one change. See archive/llumnix_reproduce/ms_dev/notes/fluidserve-prefix.md.
     #
     # fspfx-nocal drops the calibration as well, which is what corrects a charge
     # built on cache hits the engines no longer have. The two arms together
@@ -285,7 +285,7 @@ set_arm() {  # $1 = fluidserve | polyserve | slo | loadbalance
     # vllm-router's 0.3 and the two are different routers, so an unchecked
     # default would run as this arm under the same name. The same check requires
     # localaccount=true, without which the load signal collapses to a 500 ms poll
-    # snapshot. Plan and judgement rule: ms_dev/notes/vllm-router-baseline.md.
+    # snapshot. Plan and judgement rule: archive/llumnix_reproduce/ms_dev/notes/vllm-router-baseline.md.
     vllmcache)   policy=vllm-cache ;;
     loadbalance) policy=load-balance ;;
     *) echo "[exp27] unknown arm: $1" >&2; return 1 ;;

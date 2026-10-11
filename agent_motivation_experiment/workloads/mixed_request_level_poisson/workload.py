@@ -214,7 +214,7 @@ class Workload:
             # sent twelve times. But prefix cache reuse is exactly the quantity
             # EXP-66 found separating llm-d from FluidServe, so every mixed-
             # workload run measured it under far more reuse than the workload
-            # intends. See ms_dev/notes/fluidserve-prefix.md section 8.
+            # intends. See archive/llumnix_reproduce/ms_dev/notes/fluidserve-prefix.md section 8.
             #
             # Reported rather than applied silently: a guard that skips is
             # indistinguishable from one that ran, which is how this survived.
