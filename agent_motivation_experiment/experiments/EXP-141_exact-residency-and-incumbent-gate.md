@@ -40,7 +40,7 @@
 | 항목 | 값 |
 |---|---|
 | 함대 | Llama-3.1-70B × 4, TP=2, migration 끔(10-10 재구축 그대로) |
-| 스케줄러 | `/home/nxclab/tools/staging/scheduler-residency`, md5 `6b9b5eac`(브랜치 `revision_scheduler` `bae80bb`) |
+| 스케줄러 | `/home/nxclab/tools/staging/scheduler-residency2`, md5 **`33e7cc10`**(바깥 `revision_scheduler`, 장부 키 수정 커밋). 1단계의 확인 run과 `fsexact` smoke는 그 앞 빌드 `6b9b5eac`로 돌았다 — 두 빌드는 장부에 기록하는 인스턴스 키만 다르고, 그 둘은 그 키를 읽지 않는다(아래 5절 1단계 기록) |
 | 게이트웨이 | `/home/nxclab/tools/staging/gateway-residency`, md5 `590242b0`, 모든 arm에서 `--notify-completion=true` |
 | 드라이버 | 정적 `k8s/exp07/run_exp141_residency.sh`, 한 시간 `k8s/exp07/run_exp141_hour.sh`(EXP-108·109 드라이버의 복사본, 차이는 각 파일 머리말) |
 | 워크로드 | 정적: FluidServe 계열 `mix_short_m1_t75.json`, Llumnix\* 계열 `mix_short_m1_t75fair.json`. 한 시간: `dyn60_shift_m2Am1B_b1045` 의 `_t75`/`_t75fair` |
@@ -60,4 +60,13 @@
 
 ## 6. 결과
 
-(실행 후)
+### 1단계 (2026-10-20 11:29~12:17, 빌드 `6b9b5eac`)
+
+- **새 빌드 확인** `261019_1938_exp141baser1_fsv3capgnofrct75_t75_rpm_2100`: 모든 도착 77.3 / admitted 99.9 / 거절 22.6% /
+  goodput 13,790 tok/s, run 검사 7개 ok. 기준(10-10 재현 77.5·76.1, 10-16 시연 77.2에서 2점 안) 통과.
+- **`fsexact` smoke** `261019_1953_exp141smoker1_fsexact_t75_rpm_2100`(4분): route 6,631건, 장부 이탈 이유 completion 6,425 /
+  count 0 / survival 0 / age 0. 완료 통지 실패 경고 0.
+- **`slot75inc` smoke** (4분): **기준이 한 번도 바뀌지 않았다** — `scheduler_slo_incumbent_gate_total{binding="own"}` 178,948,
+  `resident` 0. 원인: 장부에 기록하는 키가 `LLMInstance.Id()`(`<ip>_instance<n>_<m>` 형식)였고 필터는 `GetInstanceId()`로
+  조회한다. 수정해 `33e7cc10`으로 다시 빌드했고 `slot75inc` smoke를 다시 돈다(`exp141smokeb`). 이 run은 판정에 쓰지 않는다.
+
