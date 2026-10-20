@@ -54,3 +54,14 @@ ladder95, 35 req/s 3회 평균. "차이 없음" = 평균 차이가 두 arm의 �
 ## 5. 결과
 
 (실행 후)
+### 첫 시도 (2026-10-20 15:53~16:04) — smoke 검사에서 멈춤, 본 실험 안 함
+
+- smoke `261019_2354_exp142smoker1_fsexactprog_t75_rpm_2100`(4분): 엔진은 대기 요청을 인스턴스마다 최대 7~25개 보고했는데
+  (`instance_cms_waiting_requests`), 스케줄러의 `scheduler_fluidserve_waiting_residents`는 네 인스턴스 모두 162개 표본 내내 0.
+  3절의 계측 규칙대로 본 실험을 하지 않았다. 이 run은 판정에 쓰지 않는다.
+- 원인: vLLM 0.12의 `/v1/completions`는 요청의 프롬프트마다 엔진 요청 ID를 `cmpl-<게이트웨이 ID>-<프롬프트 번호>`로 만든다
+  (`serving_completion.py`의 `request_id_item`). 장부의 키는 게이트웨이 ID(32자리 16진수)라서, 앞의 `cmpl-`만 떼고 뒤의 `-0`을
+  떼지 않은 ID는 하나도 맞지 않았다. 고친 빌드: 바깥 `revision_scheduler`, `/home/nxclab/tools/staging/scheduler-progress2`, md5 `3251836a`.
+- 같은 시각 EXP-141 체인이 멈추지 않고(연결 스크립트의 kill이 프로세스 그룹 번호를 잘못 잡았다) 미뤄 둔 한 시간 trace 단계로 넘어가
+  스케줄러 설정을 몇 초 동안 동시에 바꿨다. 한 시간 trace의 네 arm은 설정 불일치·바이너리 md5 검사에서 모두 시작 전에 멈췄고,
+  smoke는 조건마다 스케줄러를 다시 띄운 뒤 측정했으며 떠 있던 스케줄러의 설정이 의도한 값과 같았다.
