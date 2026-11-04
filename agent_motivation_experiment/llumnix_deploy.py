@@ -138,6 +138,32 @@ def _wait_engines(host: str, ports, timeout: int) -> bool:
     return True
 
 
+def _remove_terminating_pods(namespace: str, app: str, timeout: int = 90) -> list:
+    """Force-remove pods of `app` that are already terminating, then wait until
+    none is left. Returns the names removed (empty when there were none)."""
+    import json as _json
+    cp = _kubectl(["get", "pods", "-n", namespace, "-l", f"app={app}", "-o", "json"], timeout=30)
+    try:
+        items = _json.loads(cp.stdout).get("items", [])
+    except Exception:
+        return []
+    old = [p["metadata"]["name"] for p in items if p["metadata"].get("deletionTimestamp")]
+    for name in old:
+        _kubectl(["delete", "pod", name, "-n", namespace, "--grace-period=1", "--force", "--wait=false"],
+                 timeout=30)
+    deadline = time.monotonic() + timeout
+    while old and time.monotonic() < deadline:
+        cp = _kubectl(["get", "pods", "-n", namespace, "-l", f"app={app}", "-o", "json"], timeout=30)
+        try:
+            names = {p["metadata"]["name"] for p in _json.loads(cp.stdout).get("items", [])}
+        except Exception:
+            names = set()
+        if not names & set(old):
+            break
+        time.sleep(2)
+    return old
+
+
 def restart_llumnix(
     namespace: str = "llumnix",
     engine_pod: str = "neutral-0",
@@ -188,6 +214,20 @@ def restart_llumnix(
             ok = cp.returncode == 0
             result["ok"] = result["ok"] and ok
             print(f"[llumnix-restart] {dep} rollout ok={ok}")
+            # 4b) `rollout status` returns once the NEW pod is ready, not once the
+            #     old one is gone. Both deployments have a 300 s grace period and
+            #     both processes ignore the first SIGTERM, so the replaced pod
+            #     keeps serving for up to five minutes. With the scheduler that
+            #     matters: the gateway sends /schedule and /complete to the same
+            #     Service over different pooled connections, so a completion
+            #     notice can land on the old scheduler pod while the new one holds
+            #     the request, and the new scheduler's residency record then never
+            #     leaves (EXP-145 19절, 100-200 stale records per run in EXP-141-143).
+            #     No load runs between conditions, so the old pods hold nothing
+            #     that matters: remove them before warmup starts.
+            removed = _remove_terminating_pods(namespace, dep, timeout=90)
+            result["phases"][f"{dep}_old_pods_removed"] = removed
+            print(f"[llumnix-restart] {dep} old pods removed: {removed}")
 
     # 5) Verify EVERY engine serves before load resumes. Step 3 waited on the
     #    pod, and the pod's probe knows about one port out of four.
