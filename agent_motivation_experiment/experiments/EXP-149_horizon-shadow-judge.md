@@ -54,3 +54,41 @@ shadow 계산이 결정 경로를 건드리지 않았다고 본다).
 - 고침: `run_exp149_hour.sh`의 `check_stack`은 삭제 표시(deletionTimestamp)가 있는 파드를 건너뛴다(러너가 warmup 전에 그 파드를 지운다).
 - **두 번째 시도(22:45~)**: `/home/nxclab/scratch/exp149b/run.sh`, 로그 `/home/nxclab/tools/exp149b_chain.log`. `FS_SHADOW_HORIZON` 대응은 첫 시도가 이미 넣었으므로 확인만 한다.
   게이트웨이 replicas는 끝나면 0으로 되돌린다.
+
+## 결과 (2026-11-06 22:48~23:57, `261106_0549_exp149hr1_fsexactprogshadow25_shift`)
+
+엔진 4/4, 도착률 27.43 req/s, 측정 구간 스케줄러·게이트웨이 파드 각 1개, 남는 기록 0건.
+
+**카운터를 어디서 읽었나**: run 디렉토리의 `scheduler.jsonl`은 수집기가 정해 둔 메트릭만 적어서 shadow 카운터가 없다. 체인이 끝난 뒤에도 그 run의 스케줄러 파드
+(`scheduler-67d77976dd-4f95v`, 파드 안 `md5sum /proc/1/exe` = `783a574e`)가 살아 있어서 그 파드의 `/metrics`를 그대로 저장했다
+(`/home/nxclab/scratch/exp149b/scheduler_metrics_final.txt`, 분석 `/home/nxclab/scratch/exp149b/shadow.py`). 파드 기동 이후 누적값이므로 warmup(부하 낮음)의 결정이 섞여 있다.
+
+**점수(결정이 horizon 100 그대로인지 확인)**: EXP-147 `fsexactprog` 2회와 아홉 지표 모두 차이 없음. 모든 도착 79.36 대 79.39, 가장 큰 차이는 deepresearch 모든 도착 −0.33.
+shadow 계산이 결정을 바꾸지 않았다.
+
+**1. 유효성**: `same` 변형(전부 100으로 다시 판정)의 후보 판정 불일치 **0건**(swe 110,044 · chat 364,784 · deepresearch 344,948회 평가 중). 판정 기준 1 % 이하 충족.
+
+**2·3. 결정 수준**: 결정 평가 하나마다 "인스턴스 상한을 적용한 뒤 남은 후보 중 feasible이 있는가"를 실제(h100)와 shadow(h25)로 비교. 비율은 그 클래스의 결정 평가 수 대비
+(대기 중 재평가 포함).
+
+| 클래스 | 결정 평가 | 실제 feasible | all(셋 다 25) 막힘 / 풀림 | pace만 | proj만 | charge만 |
+|---|---|---|---|---|---|---|
+| swe | 27,511 | 35.0 % | 24.4 % / 0.0 % | 21.7 % / 0.5 % | 9.6 % / 0.0 % | 0.0 % / 0.0 % |
+| chat | 91,196 | 60.0 % | 27.4 % / 0.1 % | 24.3 % / 2.9 % | 7.1 % / 0.0 % | 0.0 % / 0.0 % |
+| deepresearch | 86,237 | 17.2 % | 14.2 % / 0.0 % | 13.7 % / 0.0 % | 6.1 % / 0.0 % | 0.0 % / 0.0 % |
+
+("막힘" = 실제로는 feasible 후보가 있었는데 h25에서는 없음, "풀림" = 반대)
+
+- **같은 상태에서 h를 25로 줄이면 세 클래스 모두 더 막힌다.** 풀리는 경우는 거의 없다(chat pace 2.9 %가 가장 크다).
+- **원인 항은 pace(prefill 비중 = 대기 prefill 청크 수 ÷ h)다.** 세 클래스 모두 pace만 바꿔도 all의 막힘의 89~97 %가 나온다(판정 규칙 "all의 절반 이상" 충족).
+  proj(증가량·outflow)는 all의 27~43 %(둘이 겹친다), charge(새 요청에 미리 잡는 KV)는 0 — 무시해도 된다.
+- 예상 토큰당 시간(후보 평균, shadow − 실제): pace만 바꿔 swe +15.1 ms, chat +8.0 ms, deepresearch +18.1 ms. proj는 +0.4~0.6 ms, charge 0.
+  headroom(KV 한도 − 들어간 뒤 KV): pace −50~−67만 토큰(capKv가 준다), proj −3~−5만 토큰(outflow가 준다).
+- 후보 수준 실패 사유(후보 평가 대비, 실제 → all): deepresearch incumbents 31 → 85 %, swe incumbents 21 → 66 %, chat incumbents 3 → 26 %;
+  memory(물리 KV)는 모든 클래스 1 → 19~25 %인데 이것은 proj가 만든다(proj만 바꿔도 같은 값).
+
+**EXP-148과 어떻게 맞나**: 같은 상태에서 h25는 모든 클래스에 더 엄격하다. 그런데 EXP-148의 h25 run은 chat·swe를 **더 많이** 받았다. 둘은 모순이 아니다 —
+h25는 프롬프트가 긴 요청이 있는 인스턴스의 예상 토큰당 시간을 크게 올리므로(deepresearch +18 ms, chat +8 ms), deepresearch를 더 거절하고(EXP-148: 30 → 38 %)
+처리 중인 요청을 보호하는 판정(incumbents)이 deepresearch에 가장 많이 걸린다. 그렇게 deepresearch가 덜 들어간 인스턴스는 대기 prefill과 KV가 적은 상태가 되고,
+그 상태에서는 chat·swe가 통과한다(EXP-148 h25: preemption 0). 이 마지막 단계(상태가 바뀌어 chat이 더 들어가는 것)는 이 실험이 직접 잰 것이 아니라 두 실험을 합친 해석이다.
+한계: shadow는 같은 순간의 판정만 비교하므로 h25였다면 도달했을 상태는 반영하지 않는다.
