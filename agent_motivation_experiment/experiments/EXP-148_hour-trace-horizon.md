@@ -1,0 +1,36 @@
+# EXP-148 — 통지 수정이 들어간 FluidServe에서 계획 horizon을 25·50·200으로 바꾼 한 시간 trace
+
+세션 접두어: `exp148h`
+
+작성 2026-11-06, **실행 전**. 사용자 요청: horizon 25·50·200을 한 시간 trace로 돌린다. 100은 EXP-147(다른 세션)의 값을 그대로 쓴다.
+
+## 왜
+
+- 논문 그림 15(EXP-131·136)는 horizon을 1~500으로 바꿔 배포값 100이 최적이 아님을 보였다(Llama-70B 35 req/s goodput: 25 → 14,394, 50 → 14,328,
+  100 → 13,246 tok/s, revision.md R21). 그러나 그 측정은 **정적 8분**, **평균 규칙** 채점, **논문 구성**(처리 중 목록을 추정하고 통지를 받지 못한 기록이 남는 바이너리)이다.
+- 남는 기록은 진행 토큰 수 j가 커질수록 "곧 끝남"으로 계산되어 outflow를 부풀리고, 그 효과는 horizon이 길수록 커진다. 그래서 수정된 구성에서는 곡선 모양이 달라질 수 있다.
+  한 시간 trace(믹스가 15분마다 바뀜)에서 horizon을 바꾼 측정은 없다.
+
+## 구성
+
+| 항목 | 값 |
+|---|---|
+| 바이너리 | EXP-147과 같다: 스케줄러 `3a1d2354`, 게이트웨이 `05745270` |
+| 드라이버 | `k8s/exp07/run_exp148_hour.sh` — EXP-147 드라이버 사본에 arm 셋만 더했다 |
+| arm | `fsexactprogh25`, `fsexactprogh50`, `fsexactprogh200`: `fsexactprog`(notified residency + 엔진 대기 요청 제외)에서 `--fluidserve-horizon-steps`만 25·50·200. 청구 창(`--fluidserve-charge-horizon`)은 0(= horizon을 따른다), 논문 그림 15와 같은 방식 |
+| trace·워크로드 | EXP-143·147과 같다: `dyn60_shift_m2Am1B_b1045.csv`, `mix_dyn60_shift_m2Am1B_b1045_t75.json` |
+| 순서 | 반복이 바깥 루프: r1 h25 → h50 → h200, r2 h25 → h50 → h200. run 하나 약 70분, 전체 약 7~8시간 |
+| 체인 | `/home/nxclab/scratch/exp148/run.sh`, 로그 `/home/nxclab/tools/exp148_chain.log`. EXP-147과 같이 60초 파드 목록, 30초 목록 snapshot, 파드 둘 이상 10분이면 WARN. 끝나면 바이너리 복구, 게이트웨이 replicas 0, Sionna |
+
+horizon 하나가 여러 계산을 같이 바꾼다는 점을 해석할 때 같이 적는다(system.md 8.2절): outflow를 세는 기간, 새 요청에 미리 잡아 두는 KV(청구 창 `min(h, 기대 출력)`),
+iteration 시간 추정에서 prefill 비중의 분모, duty를 시간으로 환산하는 길이.
+
+## 판정 (실행 전에 정함)
+
+ladder95, swe는 TTFT 7 s + 75 ms/token. 한 시간 trace 반복 간 편차 3.8점.
+
+- horizon 값 사이: 모든 도착 기준 2회 평균의 차이가 max(4점, 두 값의 반복 범위)를 넘을 때만 "다르다".
+- h=100과의 비교는 EXP-147 `fsexactprog` 2회(79.3, 79.4, 평균 79.35)를 쓴다. 세션이 다르므로 **차이가 4점 이하이면 "구별할 수 없음"**, 넘으면 "다르다(세션 차이 포함)"로 적는다.
+- 같이 본다: 클래스별 admitted·거절률, token goodput, deepresearch TTFT 초과 건수, 남는 기록(run마다 최대 10건 이하여야 측정이 유효), preemption(이 세션 안에서만),
+  outflow 예측/실제 비율(대시보드 기록).
+- 예상: 정적 실험처럼 25·50이 100보다 높고 200이 낮다. 다만 수정된 구성에서는 남는 기록이 없어 긴 horizon의 손실이 정적 실험보다 작을 수 있다.
