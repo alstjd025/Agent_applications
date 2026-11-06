@@ -226,7 +226,11 @@ check_stack() {
   for app in scheduler gateway; do
     [ "$app" = scheduler ] && want=${EXPECT_SCHED_MD5:-} || want=${EXPECT_GW_MD5:-}
     [ -n "$want" ] || continue
-    for p in $(kubectl -n llumnix get pods -l app=$app --field-selector=status.phase=Running -o jsonpath='{.items[*].metadata.name}'); do
+    # EXP-149: a pod already marked for deletion is skipped. The chain's own
+    # restart leaves the previous pod terminating for up to 300 s and the runner
+    # removes it before warmup; checking it aborted the first attempt on the
+    # binary it was being replaced FROM.
+    for p in $(kubectl -n llumnix get pods -l app=$app --field-selector=status.phase=Running -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.metadata.name}} {{end}}{{end}}'); do
       got=$(kubectl -n llumnix exec "$p" -- md5sum /proc/1/exe | cut -c1-8)
       [ "$got" = "$want" ] || { echo "[exp149] ABORT: $app $p runs $got, want $want"; exit 1; }
     done
