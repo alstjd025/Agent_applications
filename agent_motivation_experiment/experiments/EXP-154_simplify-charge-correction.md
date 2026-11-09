@@ -17,7 +17,7 @@ EXP-153 제거 후보 장부(같은 상태에서 판정만 다시 계산):
 |---|---|
 | 스케줄러 | `359aac2c` (`staging/scheduler-simplify1`, 바깥 `37e4d52`): `--fluidserve-charge-prompt-only`, `--fluidserve-latency-correction` 추가(기본값은 이전과 같음). shadow·장부는 꺼져 있다(결정 시간 증가 없음) |
 | 게이트웨이 | `05745270` |
-| arm | `fsexactprog`(대조), `fsexactprogA`(prompt만 청구), `fsexactprogAC`(prompt만 청구 + 지연 보정 끔) |
+| arm | `fsexactprog`(대조), `fsexactproga`(prompt만 청구), `fsexactprogac`(prompt만 청구 + 지연 보정 끔) |
 | 순서 | 반복이 바깥 루프: r1 대조 → A → AC, r2 같은 순서. 약 7.5시간 |
 | 드라이버·체인 | `k8s/exp07/run_exp154_hour.sh`, `/home/nxclab/scratch/exp154/run.sh`, 로그 `/home/nxclab/tools/exp154_chain.log` |
 
@@ -30,3 +30,12 @@ EXP-153 제거 후보 장부(같은 상태에서 판정만 다시 계산):
 - AC가 아홉 지표 모두 차이 없음 → 지연 보정도 지운다. 하나라도 다르면 지우지 않고 어느 지표인지 적는다.
 - 같이 본다: preemption(같은 세션), goodput, deepresearch TTFT 초과, 남는 기록. 마지막 구간의 갈림(EXP-150·153: 엔진 하나가 deepresearch 쪽으로 넘어가 chat 거절 급증)이
   어느 run에서 일어나는지 5분 창 chat 거절로 표시한다 — 갈림이 한 arm의 한 run에만 있으면 그 차이를 arm의 효과로 읽지 않는다.
+
+## 실행 기록
+
+- **첫 시도(2026-11-09 09:28~13:27)**: r1 대조(`261108_1638_exp154hr1_fsexactprog_shift`, 09:37~10:45)는 정상으로 끝났다. 다음 arm `fsexactprogA`는 **러너 Job 이름에 대문자가 들어가**
+  쿠버네티스가 Job 생성을 거부했는데(`metadata.name ... must consist of lower case`), 드라이버가 `kubectl apply`의 실패를 확인하지 않았고 `wait_job`이 존재하지 않는 Job을
+  최대 300분 기다렸다. 10:46~13:27 측정 없이 시간이 흘렀다. 체인을 정리 단계 전에 멈췄다(바이너리·엔진·게이트웨이는 EXP-154 상태 그대로). 결과 디렉토리는 생기지 않았다.
+- 고침: arm 이름을 소문자로(`fsexactproga`, `fsexactprogac`); 드라이버는 `kubectl apply`가 실패하거나 apply 뒤 Job이 없으면 바로 ABORT한다.
+- **두 번째 시도(13:3x~)**: `/home/nxclab/scratch/exp154b/run.sh`, 로그 `/home/nxclab/tools/exp154b_chain.log`. 남은 다섯 칸을 원래 순서로: r1 a → r1 ac → r2 대조 → r2 a → r2 ac.
+  r1 대조는 첫 시도의 것을 쓴다(같은 바이너리·같은 날, 엔진 재시작 사이에 끼는 시간만 다르다).

@@ -1,8 +1,8 @@
 #!/bin/bash
 # EXP-154 (2026-11-09). Copy of run_exp153_hour.sh with two arms and its own
 # job/session/log names (the simplification A/B from the EXP-153 ledger):
-#   fsexactprogA   fsexactprog + --fluidserve-charge-prompt-only (FS_CHARGE_PROMPT_ONLY)
-#   fsexactprogAC  the same + --fluidserve-latency-correction=false (FS_LATENCY_CORRECTION)
+#   fsexactproga   fsexactprog + --fluidserve-charge-prompt-only (FS_CHARGE_PROMPT_ONLY)
+#   fsexactprogac  the same + --fluidserve-latency-correction=false (FS_LATENCY_CORRECTION)
 # Both variables are added to set_arm's clearing list.
 #
 # EXP-153 (2026-11-08). Copy of run_exp151_hour.sh with one arm and its own
@@ -647,14 +647,14 @@ set_arm() {
                                           FS_SWE_TBT_MS=75 \
                                           FS_EXACT_RESIDENCY=1 FS_EXACT_PROGRESS=1 ;;
     # EXP-154. fsexactprog charging the prompt only.
-    fsexactprogA) policy=fluidserve; export FS_PREFIX=true FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false \
+    fsexactproga) policy=fluidserve; export FS_PREFIX=true FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false \
                                           FS_AFFINITY_METRIC=count FS_PER_INSTANCE_CORR=true \
                                           FS_MEMORY_PACE_CAP=true FS_PREFILL_INTERLEAVE=true \
                                           FS_INSTANCE_CAP=true FS_CAP_WINDOW_MULT=3.0 FS_FORCE=false \
                                           FS_SWE_TBT_MS=75 \
                                           FS_EXACT_RESIDENCY=1 FS_EXACT_PROGRESS=1 FS_CHARGE_PROMPT_ONLY=true ;;
-    # EXP-154. fsexactprogA with the latency correction off.
-    fsexactprogAC) policy=fluidserve; export FS_PREFIX=true FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false \
+    # EXP-154. fsexactproga with the latency correction off.
+    fsexactprogac) policy=fluidserve; export FS_PREFIX=true FS_FORCE_MARGIN=false FS_CLASS_HARM=false FS_OWN_BUDGET_GATE=false \
                                           FS_AFFINITY_METRIC=count FS_PER_INSTANCE_CORR=true \
                                           FS_MEMORY_PACE_CAP=true FS_PREFILL_INTERLEAVE=true \
                                           FS_INSTANCE_CAP=true FS_CAP_WINDOW_MULT=3.0 FS_FORCE=false \
@@ -821,7 +821,7 @@ run_cell() {  # $1 arm, $2 variant (ablation|full)
   # than a chain of if-statements, so that adding an arm cannot silently fall
   # through to the wrong file.
   case "$arm" in
-    fsv3capgnofrct75|fsexact|fsexactprog|fsexactprogdl|fsexactprogh25|fsexactprogh50|fsexactprogh200|fsexactprogshadow25|fsexactprogshadow200|fsexactprogp25|fsexactprogp50|fsexactprogledger|fsexactprogA|fsexactprogAC)
+    fsv3capgnofrct75|fsexact|fsexactprog|fsexactprogdl|fsexactprogh25|fsexactprogh50|fsexactprogh200|fsexactprogshadow25|fsexactprogshadow200|fsexactprogp25|fsexactprogp50|fsexactprogledger|fsexactproga|fsexactprogac)
       wcfg=/work/workload_configs/mix_dyn60_shift_m2Am1B_b1045_t75.json ;;
     polyservept75|slot75|slot75inc|vllmcachet75|llmdslot75)
       wcfg=/work/workload_configs/mix_dyn60_shift_m2Am1B_b1045_t75fair.json ;;
@@ -838,7 +838,12 @@ run_cell() {  # $1 arm, $2 variant (ablation|full)
   kubectl -n llumnix delete job "$job" --ignore-not-found >/dev/null
   sed -e "s/__JOBNAME__/$job/" -e "s/__SESSION__/$session/" -e "s/__ARM__/$arm/" \
       -e "s#__TRACE__#$trace#" -e "s#__WCFG__#$wcfg#" \
-      runner-dyn.template.yaml | kubectl apply -f - >/dev/null
+      runner-dyn.template.yaml | kubectl apply -f - >/dev/null \
+    || { echo "[exp154] ABORT: runner Job $job was not created (kubectl apply failed)"; return 1; }
+  # EXP-154: the first attempt named an arm with capitals; the API refused the
+  # Job and wait_job then waited 300 minutes on a Job that did not exist.
+  kubectl -n llumnix get job "$job" >/dev/null 2>&1 \
+    || { echo "[exp154] ABORT: runner Job $job does not exist after apply"; return 1; }
   echo "[exp154] $arm/$variant launched $(date -u +%H:%M:%S)"
   warn_if_overrun "$job" 100
   # Poll for EITHER terminal condition. `kubectl wait --for=condition=complete`
