@@ -130,3 +130,16 @@ v0.5에서 거절을 만드는 것은 거의 전부 0.9 × 명목 budget 판정�
 - **판정선 0.9 → 1.0(G1.0)은 같은 상태에서 받아도 됐을 요청을 하나도 더 거절하지 않고, v0.5가 거절한 요청의 96~99 %에 대해 어느 시점에 받을 수 있는 인스턴스를 찾으며, chat을 새 인스턴스로 보내는 결정은 오히려 줄인다**(chat 인스턴스가 더 자주 가능해지므로).
 - U(h 없는 budget 판정)는 chat에서 G1.0보다 덜 느슨하고(70.5 %), deepresearch·swe를 다른 인스턴스로 보내는 결정을 늘린다. U+G1.0은 그 증가가 없다.
 - **한계**: (나)는 이득의 상한이다 — 받은 요청이 바뀌면 이후 상태가 바뀌고, v0.6-후보2에서 분리가 풀린 것이 그런 되먹임이었다. 그래서 EXP-159에서 실제로 돌린다.
+
+## ⚠ 정정 (2026-11-16): 이 실험의 FluidServe 후보 arm은 swe TTFT budget이 다른 워크로드 설정으로 돌았다
+
+드라이버(`run_exp15x/16x_hour.sh`의 `run_cell`)는 arm 이름이 목록(`case "$arm" in fsv3capgnofrct75|fsexact|fsexactprog|...|fsc2h200)`)에 있을 때만
+swe TTFT 7,000 ms 설정 `mix_dyn60_shift_m2Am1B_b1045_t75.json`을 쓰고, 목록에 없으면 경고 없이 원래 설정 `mix_dyn60_shift_m2Am1B_b1045.json`(swe `ttft_ms` **11,800**)으로 간다.
+이 실험에서 새로 만든 arm(EXP-158 `fsshadowv`, EXP-159 `fsg10`, EXP-160 `fsg10dl`)을 그 목록에 넣지 않았다. 각 run의 `run_config.json`의 `workload_config.slo.swe.ttft_ms`로 확인했다:
+v0.5(`fsexactprog`) run은 모두 7000, 위 세 arm의 run은 모두 11800. EXP-147~157의 arm은 모두 7000이다.
+
+스케줄러는 swe의 TTFT budget을 요청에 실려 온 이 값으로 쓴다(토큰당 budget만 `FS_SWE_TBT_MS=75`로 따로 맞춘다). 그래서 이 arm들에서 스케줄러는 swe의 첫 토큰 마감을 11.8 s로 보고
+pend 여부(`canWait`)와 첫 토큰 마감 판정(`missesTtftDeadline`)을 했고, 채점은 7 s로 했다. **v0.5 arm과 후보 arm은 판정선 하나가 아니라 swe의 첫 토큰 budget까지 달랐으므로, 이 실험의 arm 간 비교는 판정선(또는 첫 토큰 판정)의 효과로 읽을 수 없다.**
+특히 swe(admitted, 모든 도착, 첫 토큰 초과)와 그 영향을 받는 deepresearch 모든 도착의 차이는 이 설정 차이로 생겼을 수 있다. 위의 판정은 무효로 하고 올바른 설정으로 다시 잰다(EXP-161).
+
+EXP-158에 대해 더: 실제 결정은 "v0.5 + swe TTFT budget 11.8 s"였다. shadow 변형 비교는 같은 상태 위의 비교라 내부적으로는 성립하지만, 그 상태는 v0.5의 상태가 아니다. 이 run의 swe 모든 도착 84.0·admitted 98.4(v0.5 74·99.7)와 모든 도착 75.5를 "마지막 구간 갈림" 하나로 설명한 것은 틀렸을 수 있다 — swe를 11.8 s까지 기다려 받는 설정 차이가 같이 들어 있다.

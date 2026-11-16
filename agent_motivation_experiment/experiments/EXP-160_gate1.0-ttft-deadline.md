@@ -24,6 +24,19 @@
 | 반복 | 2회, 순서를 번갈아: r1 v0.5 → 후보4, r2 후보4 → v0.5. 약 5시간 |
 | 드라이버·체인 | `k8s/exp07/run_exp160_hour.sh`, `/home/nxclab/scratch/exp160/run.sh`, 로그 `/home/nxclab/tools/exp160_chain.log`. SparkGen lease가 있으면 놓을 때까지 기다린다 |
 
+## ⚠ 정정 (2026-11-16): 이 실험의 FluidServe 후보 arm은 swe TTFT budget이 다른 워크로드 설정으로 돌았다
+
+드라이버(`run_exp15x/16x_hour.sh`의 `run_cell`)는 arm 이름이 목록(`case "$arm" in fsv3capgnofrct75|fsexact|fsexactprog|...|fsc2h200)`)에 있을 때만
+swe TTFT 7,000 ms 설정 `mix_dyn60_shift_m2Am1B_b1045_t75.json`을 쓰고, 목록에 없으면 경고 없이 원래 설정 `mix_dyn60_shift_m2Am1B_b1045.json`(swe `ttft_ms` **11,800**)으로 간다.
+이 실험에서 새로 만든 arm(EXP-158 `fsshadowv`, EXP-159 `fsg10`, EXP-160 `fsg10dl`)을 그 목록에 넣지 않았다. 각 run의 `run_config.json`의 `workload_config.slo.swe.ttft_ms`로 확인했다:
+v0.5(`fsexactprog`) run은 모두 7000, 위 세 arm의 run은 모두 11800. EXP-147~157의 arm은 모두 7000이다.
+
+스케줄러는 swe의 TTFT budget을 요청에 실려 온 이 값으로 쓴다(토큰당 budget만 `FS_SWE_TBT_MS=75`로 따로 맞춘다). 그래서 이 arm들에서 스케줄러는 swe의 첫 토큰 마감을 11.8 s로 보고
+pend 여부(`canWait`)와 첫 토큰 마감 판정(`missesTtftDeadline`)을 했고, 채점은 7 s로 했다. **v0.5 arm과 후보 arm은 판정선 하나가 아니라 swe의 첫 토큰 budget까지 달랐으므로, 이 실험의 arm 간 비교는 판정선(또는 첫 토큰 판정)의 효과로 읽을 수 없다.**
+특히 swe(admitted, 모든 도착, 첫 토큰 초과)와 그 영향을 받는 deepresearch 모든 도착의 차이는 이 설정 차이로 생겼을 수 있다. 위의 판정은 무효로 하고 올바른 설정으로 다시 잰다(EXP-161).
+
+EXP-160에 대해 더: 후보4의 첫 토큰 판정이 swe의 첫 토큰 초과를 기대(약 96 %)만큼 막지 못한 이유가 이것이다 — 늦은 swe는 route 순간 (기다린 시간 + 예측 prefill)이 중앙값 9.4~9.6 s로 7 s를 넘었지만 11.8 s 안이어서 판정을 통과했다(route된 swe의 최댓값 11,704 ms).
+
 ## 판정 (실행 전에 정함; EXP-159와 같은 규칙)
 
 1. 아홉 지표를 지표마다 따로: "평균 차이 > max(문턱, 두 조건 각각의 반복 범위)"이면 그 지표만 "다르다". 문턱은 모든 도착·거절률·클래스별 모든 도착 4점, admitted·클래스별 admitted 1점.

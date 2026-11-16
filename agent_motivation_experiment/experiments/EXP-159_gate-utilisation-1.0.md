@@ -91,3 +91,14 @@ deepresearch·swe도 평균 인스턴스 수 3.0~3.2대로 v0.5와 같다.
 - chat 인스턴스도 49~50 ms로 budget에 붙어 돌았지만 마감 위반은 7~11건에 그쳤다: chat은 첫 토큰을 0.4 s 만에 받아 TTFT budget 5 s의 대부분이 뒤 토큰들의 여유로 남고, 프롬프트가 짧아(중앙값 약 500) prefill 지연이 작다.
 - swe를 더 받은 만큼(약 +1,700건) 같은 인스턴스의 deepresearch 자리가 줄어 deepresearch를 덜 받았다(약 −1,100건).
 - 즉 v0.5의 10 % 여유는 "긴 prefill이 섞이는 인스턴스에서 prefill 간섭 지연을 흡수하는 몫"으로 실제로 쓰이고 있었다. 이 몫을 고정된 비율이 아니라 인스턴스가 실제로 받는 prefill 간섭 지연으로 계산하는 것이 EXP-158의 U 변형(지속 부하 + 요청마다 늦은 토큰 수)이다.
+
+## ⚠ 정정 (2026-11-16): 이 실험의 FluidServe 후보 arm은 swe TTFT budget이 다른 워크로드 설정으로 돌았다
+
+드라이버(`run_exp15x/16x_hour.sh`의 `run_cell`)는 arm 이름이 목록(`case "$arm" in fsv3capgnofrct75|fsexact|fsexactprog|...|fsc2h200)`)에 있을 때만
+swe TTFT 7,000 ms 설정 `mix_dyn60_shift_m2Am1B_b1045_t75.json`을 쓰고, 목록에 없으면 경고 없이 원래 설정 `mix_dyn60_shift_m2Am1B_b1045.json`(swe `ttft_ms` **11,800**)으로 간다.
+이 실험에서 새로 만든 arm(EXP-158 `fsshadowv`, EXP-159 `fsg10`, EXP-160 `fsg10dl`)을 그 목록에 넣지 않았다. 각 run의 `run_config.json`의 `workload_config.slo.swe.ttft_ms`로 확인했다:
+v0.5(`fsexactprog`) run은 모두 7000, 위 세 arm의 run은 모두 11800. EXP-147~157의 arm은 모두 7000이다.
+
+스케줄러는 swe의 TTFT budget을 요청에 실려 온 이 값으로 쓴다(토큰당 budget만 `FS_SWE_TBT_MS=75`로 따로 맞춘다). 그래서 이 arm들에서 스케줄러는 swe의 첫 토큰 마감을 11.8 s로 보고
+pend 여부(`canWait`)와 첫 토큰 마감 판정(`missesTtftDeadline`)을 했고, 채점은 7 s로 했다. **v0.5 arm과 후보 arm은 판정선 하나가 아니라 swe의 첫 토큰 budget까지 달랐으므로, 이 실험의 arm 간 비교는 판정선(또는 첫 토큰 판정)의 효과로 읽을 수 없다.**
+특히 swe(admitted, 모든 도착, 첫 토큰 초과)와 그 영향을 받는 deepresearch 모든 도착의 차이는 이 설정 차이로 생겼을 수 있다. 위의 판정은 무효로 하고 올바른 설정으로 다시 잰다(EXP-161).
