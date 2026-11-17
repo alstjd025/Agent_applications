@@ -1,0 +1,16 @@
+{
+ "generator": "relabel_fixed_mix.py",
+ "source_trace": "canonical/dyn60_shift_m2Am1B_b25112.csv",
+ "name": "onlychat",
+ "weights": {
+  "chat": 1
+ },
+ "seed": 20261117,
+ "rows": 249234,
+ "class_counts": {
+  "chat": 249234
+ },
+ "arrival_s_md5_source": "c7eb8dac93532a580c11c4b6c80c900a",
+ "arrival_s_md5_out": "c7eb8dac93532a580c11c4b6c80c900a",
+ "note": "arrival_s identical to the source; only class (and segment labels) changed"
+}
