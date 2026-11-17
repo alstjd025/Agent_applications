@@ -1,0 +1,16 @@
+{
+ "generator": "relabel_fixed_mix.py",
+ "source_trace": "canonical/dyn60_shift_m2Am1B_b1045.csv",
+ "name": "onlyswe",
+ "weights": {
+  "swe": 1
+ },
+ "seed": 20261117,
+ "rows": 99242,
+ "class_counts": {
+  "swe": 99242
+ },
+ "arrival_s_md5_source": "5256bef05173ceda0ce18c9779f94cb2",
+ "arrival_s_md5_out": "5256bef05173ceda0ce18c9779f94cb2",
+ "note": "arrival_s identical to the source; only class (and segment labels) changed"
+}

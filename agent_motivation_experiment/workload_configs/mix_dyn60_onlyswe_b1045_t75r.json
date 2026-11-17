@@ -1,0 +1,34 @@
+{
+  "_comment": [
+    "EXP-163 (2026-11-17). Single-class variant of mix_dyn60_shift_m2Am1B_b1045_t75.json: every arrival of the deployed hour trace (same arrival times,",
+    "arrival_s md5 5256bef0...) relabelled swe (traces/dynamic/canonical/dyn60_onlyswe_b1045.csv, relabel_fixed_mix.py). Everything else as the t75 config",
+    "(swe TTFT 7000 ms). swe_config.replay_marker = true: with every arrival swe, the 1,500-record transcript returns a record about every 54 s",
+    "(33 s in the busiest minute), inside the engine's prompt residence; '[replay NN]' after the system prompt stops a re-sent record hitting the prefix cache in full."
+  ],
+  "class_plan_file": "/work/traces/dynamic/canonical/dyn60_onlyswe_b1045.csv",
+  "chat_config": {
+    "num_conversations": 10000
+  },
+  "deepresearch_config": {},
+  "swe_config": {
+    "transcript_file": "/work/workloads/codingagent_request_level_poisson/data/transcript_swe_short7k_mix1500.jsonl",
+    "replay_marker": true
+  },
+  "slo": {
+    "chat": {
+      "ttft_ms": 5000,
+      "tbt_ms": 50,
+      "out_len": 386
+    },
+    "deepresearch": {
+      "ttft_ms": 10000,
+      "tbt_ms": 100,
+      "out_len": 275
+    },
+    "swe": {
+      "ttft_ms": 7000,
+      "tbt_ms": 25,
+      "out_len": 728
+    }
+  }
+}
