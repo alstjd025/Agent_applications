@@ -89,9 +89,10 @@ class CyclingRequestPool:
     `instance_id` (the prompt bytes stay identical for literal replay).
     """
 
-    def __init__(self, records: list[dict], tau: float = 3.0):
+    def __init__(self, records: list[dict], tau: float = 3.0, replay_marker: bool = False):
         self.records = records
         self.tau = tau
+        self.replay_marker = replay_marker
         self._counter = 0
         self._lock = threading.Lock()
 
@@ -100,11 +101,38 @@ class CyclingRequestPool:
             idx = self._counter % len(self.records)
             replay_num = self._counter // len(self.records) + 1
             self._counter += 1
-        return _make_task(self.records[idx], replay_num, self.tau)
+        return _make_task(self.records[idx], replay_num, self.tau, self.replay_marker)
 
 
-def _make_task(record: dict, replay_num: int, tau: float) -> dict:
-    """Build a runner task dict for one transcript record emission."""
+def _with_replay_marker(messages: list, replay_num: int) -> list:
+    """Prefix the first non-system message with `[replay NN]`.
+
+    The 1,500-record transcript is cycled verbatim, so a record re-sent while
+    the engine still holds its KV hits the prefix cache in full and its prefill
+    costs almost nothing. At swe's share in the default traces a record returns
+    about every 7 minutes, longer than the engine's prompt residence (~1 min)
+    and the scheduler's prefix index (~2.8 min); at a 50% share (EXP-162) it
+    returns about every 110 s (67 s in the busiest minute), inside both. The
+    marker goes after the system prompt, so the system prompt every swe record
+    shares stays shareable as it would be in real agent traffic, while a
+    re-sent record no longer matches its previous emission past that point.
+    Calls of one recorded job emitted in the same cycle carry the same replay
+    number, so their shared history still matches.
+    """
+    out = [dict(m) for m in messages]
+    for m in out:
+        if m.get("role") != "system":
+            m["content"] = f"[replay {replay_num:02d}]\n" + m.get("content", "")
+            break
+    return out
+
+
+def _make_task(record: dict, replay_num: int, tau: float, replay_marker: bool = False) -> dict:
+    """Build a runner task dict for one transcript record emission.
+
+    replay_marker (workload config `replay_marker`, default False): see
+    _with_replay_marker. False sends the recorded bytes unchanged, which is
+    every run before EXP-162."""
     request_id = record["request_id"]
     baseline_e2e_s = record.get("baseline_e2e_s")
     job_timeout_sec = baseline_e2e_s * tau if baseline_e2e_s else 0
@@ -114,7 +142,7 @@ def _make_task(record: dict, replay_num: int, tau: float) -> dict:
         "src_job_id": record.get("src_job_id", ""),
         "stage": record.get("stage", ""),
         "nonce": record.get("nonce", ""),
-        "messages": record["messages"],
+        "messages": _with_replay_marker(record["messages"], replay_num) if replay_marker else record["messages"],
         "baseline_ttft_s": record.get("baseline_ttft_s"),
         "baseline_tbt_mean_ms": record.get("baseline_tbt_mean_ms"),
         "baseline_e2e_s": baseline_e2e_s,
@@ -154,7 +182,8 @@ class Workload:
     ) -> CyclingRequestPool:
         # baseline_latencies is unused: per-request baselines live in the
         # transcript records themselves.
-        return CyclingRequestPool(records=dataset, tau=args.tau)
+        return CyclingRequestPool(records=dataset, tau=args.tau,
+                                  replay_marker=bool(workload_config.get("replay_marker", False)))
 
     def run_job(self, task: dict, context: RunContext) -> JobResult:
         job_id = task["instance_id"]
