@@ -1,3 +1,4 @@
+import os
 """EXP-163 관찰: run 하나(단일 클래스)에 대해 점수, 5분 거절률, 마감 위반 종류, TTFT, prefix 적중, 예측기 정확도(iteration·첫 토큰), 결정 지연, 클라이언트 상태.
 사용: python3 observe.py <run 이름>   (대시보드가 채점을 마친 뒤)"""
 import json, re, sys, glob, urllib.request, numpy as np, pandas as pd
@@ -35,9 +36,12 @@ print(f"prefix 적중(스케줄러 추정): 적중 비율 중앙값 {hit.median(
 D["key"] = D.id.map(ids); D = D.dropna(subset=["key"]); D["task_id"] = D.key.map(lambda k: k[0]); D["call_index"] = D.key.map(lambda k: k[1])
 J = D.drop_duplicates(["task_id", "call_index"], keep="last").merge(a[["task_id", "call_index", "first_token_latency"]], on=["task_id", "call_index"])
 pred = (J.waited + J.est) / 1000; err = J.first_token_latency - pred
-print(f"첫 토큰 예측(waited + prefillest) 대 실제 TTFT: 표본 {len(J)}, (실제 − 예측) p10/p50/p90 {np.percentile(err,10):.2f}/{np.median(err):.2f}/{np.percentile(err,90):.2f} s, 실제가 예측보다 긴 비율 {100*(err > 0).mean():.1f} %, 예측 > budget이었는데 실제는 안 {int(((pred > tt) & (J.first_token_latency <= tt)).sum())}건")
+# EXP-165: other policies write no fsplacement line, so there is nothing to compare.
+if len(J) == 0: print("첫 토큰 예측: FluidServe 결정 로그가 없다(다른 정책)")
+else: print(f"첫 토큰 예측(waited + prefillest) 대 실제 TTFT: 표본 {len(J)}, (실제 − 예측) p10/p50/p90 {np.percentile(err,10):.2f}/{np.median(err):.2f}/{np.percentile(err,90):.2f} s, 실제가 예측보다 긴 비율 {100*(err > 0).mean():.1f} %, 예측 > budget이었는데 실제는 안 {int(((pred > tt) & (J.first_token_latency <= tt)).sum())}건")
 # iteration 예측 대 실측
-rows = [json.loads(l) for l in open(REC + run + "/fluidserve.jsonl")]; t0 = rows[0]["t"]; rows = [x for x in rows if 60 < x["t"] - t0 < 3540]
+_fj = REC + run + "/fluidserve.jsonl"
+rows = [json.loads(l) for l in open(_fj)] if os.path.exists(_fj) else [{"t": 0}]; t0 = rows[0]["t"]; rows = [x for x in rows if 60 < x["t"] - t0 < 3540]
 o, p = [], []
 for x in rows:
     for k, v in x.items():
@@ -46,8 +50,10 @@ for x in rows:
             if v and v > 0 and pv and pv > 0: o.append(v); p.append(pv)
 o, p = np.array(o), np.array(p)
 fin = np.isfinite(p); n_inf = int((~fin).sum()); o, p = o[fin], p[fin]
-print(f"iteration 예측이 무한대(모델이 값을 내지 못함)인 표본 {n_inf}개 제외")
-print(f"iteration 예측 대 실측(2초 gauge): 실측 평균 {o.mean():.1f} ms, 예측 평균 {p.mean():.1f} ms, 예측/실측 {p.mean()/o.mean():.3f}, (예측 − 실측) p10/p50/p90 {np.percentile(p-o,10):.1f}/{np.median(p-o):.1f}/{np.percentile(p-o,90):.1f} ms")
+if len(o) == 0: print("iteration 예측 대 실측: FluidServe gauge가 없다(다른 정책)")
+else:
+  print(f"iteration 예측이 무한대(모델이 값을 내지 못함)인 표본 {n_inf}개 제외")
+  print(f"iteration 예측 대 실측(2초 gauge): 실측 평균 {o.mean():.1f} ms, 예측 평균 {p.mean():.1f} ms, 예측/실측 {p.mean()/o.mean():.3f}, (예측 − 실측) p10/p50/p90 {np.percentile(p-o,10):.1f}/{np.median(p-o):.1f}/{np.percentile(p-o,90):.1f} ms")
 # 결정 지연, 클라이언트
 sj = [json.loads(l) for l in open(R + "/server_metrics/scheduler.jsonl")]
 tot = lambda r, k: sum(v for kk, v in r.items() if kk.split("|")[0] == k and isinstance(v, (int, float)))
