@@ -192,3 +192,20 @@ Llumnix SLO의 처리 중 요청 기준 판정은 여섯 run 모두 `binding="ow
   run마다 엔진(`neutral-0`)과 예측기 셋·EPP를 재시작하고 training server가 표본 0개에서 시작하는지 확인한다(논문 run과 같다; 측정 한 시간 동안 예측기가 학습한다).
 - **실행**: 체인 `/home/nxclab/scratch/exp165l/run.sh`, 로그 `/home/nxclab/tools/exp165l_chain.log`. r1 = onlychat25, onlyswe, onlydr; r2 같은 순서. 6 run, 약 7.5시간.
   판정은 위 판정 절과 같다(PolyServe·Llumnix SLO와는 세션이 하루 다르므로 세션 간 문턱을 쓴다).
+
+### ⚠ 첫 시도 무효 — 예측기가 학습하지 못했다 (2026-11-19 12:51~13:13 KST)
+
+- **무효 run**: `results/261118_1951_exp165lr1_llmdslot75_onlychat25`(약 22분 측정 뒤 체인과 runner를 멈췄다; 지우지 않는다, 쓰지 않는다). 다시 걸 때 세션 이름은 `exp165m`.
+- **무엇이 틀렸나**: 예측기를 `04e44cd`(0.9.0, 08-11)로 고정했었다. 그 `training_server.py`는 모듈 수준 함수 `_drop_timestamp`(60행, `@staticmethod`가 모듈 수준에 붙어 있다)를
+  `self._drop_timestamp(...)`로 부른다(714·859·968·1046행). 그래서 `train()`이 매번 `AttributeError`로 실패하고(`Initiating training with 52855 samples … Critical error in train(): 'LatencyPredictor' object has no attribute '_drop_timestamp'`)
+  모델이 만들어지지 않는다. EPP는 그때 모든 요청에 **TTFT·TPOT 예측 10 ms 고정값**을 썼다(예측 합/개수 431.69 s / 43,169). 그러면 latency-slo-admitter는 모든 엔진이 SLO 안이라고 보아 거절하지 않고,
+  그 run의 429(5,413건, 약 25 %)는 EPP의 legacy 포화 기반 admission이 만든 것이다 — llm-d의 SLO 인식 경로가 동작하지 않은 run이다. 드라이버의 검사(이미지·바이너리·커밋·표본 0개 시작)는 모두 통과했다.
+- **논문의 예측기는 `04e44cd`일 수 없다**: EXP-114(09-06~08, 같은 이미지가 쓰인 기간)가 EPP의 예측·실측 히스토그램으로 TTFT 예측/실측 1.18, TPOT 1.10을 쟀다 — 학습된 모델의 값이다.
+- **`ec7626b`로 바꾼 근거**: 레지스트리의 태그 모양에서 release 빌드는 `<버전>`과 `commit-<sha>`를 붙이고 `main`은 옮기지 않는다(1.0.0 = `commit-c810ebc` = `latest`, 10-16; 지금 `main`은 11-18의 별도 main 빌드).
+  `commit-04e44cd`는 `0.9.0`·`0.9`·`0`과 digest가 같은 release 빌드이고, main 빌드는 `ec7626b`(08-03) 다음이 `0e39e36`(09-08)이다. 따라서 08-31의 `:main`은 `ec7626b`였을 가능성이 가장 높다
+  (초기화 전 pod가 쓰던 digest와 같다: training `490d6bb9…`, prediction `8322e604…`). `ec7626b`에는 문제의 코드가 없다. `deploy/llmd/predictor-paper.yaml`을 이 digest로 바꿨다.
+- **기능 확인(측정 run 아님)**: 엔진이 떠 있는 동안 llm-d router로 짧은 요청 520건(헤더 5000/50, sheddable)을 보냈다. training server가 `TTFT model trained on 358 samples … Coverage = 95.35 %`,
+  `TPOT model trained on 357 samples`를 찍었고, 그 뒤 120건의 EPP 예측 평균은 TPOT 17.6 ms·TTFT 64.0 ms(10 ms 고정이 아니다; EXP-114의 예측 TPOT 평균 18.6 ms와 같은 크기). 드라이버가 run마다 예측기를 0개에서 다시 시작하므로 이 요청은 측정에 남지 않는다.
+- **드라이버에 넣은 검사**: run 시작 10분 뒤 training server 로그에 `model trained on`이 있고 `Critical error in train`이 없어야 하고, run 시작 뒤 EPP 예측 TTFT 평균이 10 ms 고정값이 아니어야 한다 — 아니면 runner를 지우고 ABORT.
+  알려진 답 셋(지금 상태 = 통과, 10 ms 고정 = ABORT, 로그에 crash 줄 = ABORT)으로 확인했다. 처음 쓴 판정은 `echo "$log" | grep -q`였는데 드라이버가 `pipefail`이라 `grep -q`가 먼저 끝나면 `echo`가 SIGPIPE로 실패해
+  "학습됨" 검사는 늘 실패하고 "crash" 검사는 절대 발동하지 않았다 — 알려진 답 시험에서 잡고 here-string으로 바꿨다.

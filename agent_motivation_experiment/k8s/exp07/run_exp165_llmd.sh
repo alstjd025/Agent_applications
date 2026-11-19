@@ -144,8 +144,9 @@ print(next((e.get('value','') for e in c.get('env',[]) if e['name']=='LLUMNIX_EN
   [ "$(sha256sum < /home/nxclab/tools/llmd-bin/epp-644a8856 | cut -c1-16)" = "c735485348dac37e" ] \
     || { say "ABORT: /home/nxclab/tools/llmd-bin/epp-644a8856 is not the 644a8856 build"; return 1; }
   img=$(kubectl -n $LLMD_NS get deploy llmd-training-server llmd-prediction-server -o jsonpath='{.items[*].spec.template.spec.containers[0].image}')
-  case "$img" in *5679d69a8603fb555578c5b5e319eb856acda058ddee1355e5d3b1f662701761*7377707db2efac33fed3740b3d541bd4c045b240195e03453a6e33e86d69eba3*) ;;
-    *) say "ABORT: predictor images are '$img', want the 04e44cd digests (deploy/llmd/predictor-paper.yaml)"; return 1 ;; esac
+  # ec7626b, not 04e44cd: see the header of deploy/llmd/predictor-paper.yaml (04e44cd cannot train).
+  case "$img" in *490d6bb951a9e3f4a60dfec80241c4d19b63a8019fe7386cdcd64944f1f80ae4*8322e60463cfdf4841117f40643dde995b72de48fbcdbaa94d00f6159378fc6d*) ;;
+    *) say "ABORT: predictor images are '$img', want the ec7626b digests (deploy/llmd/predictor-paper.yaml)"; return 1 ;; esac
 
   [ -s "$ENVOY_LOG" ] || touch "$ENVOY_LOG"
   say "preflight ok: arm=slo, pool present, sheddable priority=-1, engine stock FIFO, migration off, paper llm-d version pinned"
@@ -265,6 +266,31 @@ launch() {  # $1 job, $2 session, $3 rates rpm, $4 durmin
 # moment a job ends drops the tail of the condition -- and the loss looks like a
 # routing failure rather than a copy that was too early. Wait for the size to
 # stop moving, then take the slice this condition wrote.
+# EXP-165. The first attempt ran with a predictor whose train() always failed; the EPP
+# then predicted a constant 10 ms and llm-d was not SLO-aware at all, while every check
+# above passed. So, some minutes into the run: the training server must have trained
+# and never failed, and the EPP's predictions since the run started must not be 10 ms.
+# Here-strings, not `echo "$log" | grep -q`: under pipefail, grep -q exits at the first
+# match, echo dies of SIGPIPE and the pipeline reads as failed -- which made the
+# "trained" test always fail and the "Critical error" test never fire.
+verify_predictor_live() {  # $1 = EPP predicted-ttft sum, $2 = its count, both at run start
+  local ip m log i
+  for i in $(seq 1 60); do sleep 10; done   # 10 minutes in
+  log=$(kubectl -n $LLMD_NS logs deploy/llmd-training-server --tail=5000 2>/dev/null)
+  grep -q "Critical error in train" <<< "$log" && { say "ABORT: training server reports 'Critical error in train'"; return 1; }
+  grep -q "model trained on" <<< "$log" || { say "ABORT: training server has not trained a model 10 minutes in"; return 1; }
+  ip=$(kubectl -n $LLMD_NS get pods -l app=llmd-router --field-selector=status.phase=Running -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.status.podIP}}{{end}}{{end}}')
+  m=$(curl -sf -m 5 "http://$ip:9090/metrics" | awk -v s0="$1" -v c0="$2" '
+      /^inference_objective_request_predicted_ttft_seconds_sum/{s=$2} /^inference_objective_request_predicted_ttft_seconds_count/{c=$2}
+      END{ if (c-c0 > 0) printf "%.1f", 1000*(s-s0)/(c-c0); else print "none" }')
+  case "$m" in none|"") say "ABORT: EPP made no TTFT predictions 10 minutes in"; return 1 ;; esac
+  awk -v m="$m" 'BEGIN{exit !(m > 9.5 && m < 10.5)}' && { say "ABORT: EPP predicted TTFT averages ${m} ms, the untrained 10 ms constant"; return 1; }
+  say "verified: predictor trained ($(grep -c 'model trained on' <<< "$log") model fits), EPP mean predicted TTFT since start ${m} ms"
+}
+epp_pred_ttft() {  # prints "sum count" of the EPP's predicted-TTFT histogram
+  local ip; ip=$(kubectl -n $LLMD_NS get pods -l app=llmd-router --field-selector=status.phase=Running -o go-template='{{range .items}}{{if not .metadata.deletionTimestamp}}{{.status.podIP}}{{end}}{{end}}')
+  curl -sf -m 5 "http://$ip:9090/metrics" | awk '/^inference_objective_request_predicted_ttft_seconds_sum/{s=$2} /^inference_objective_request_predicted_ttft_seconds_count/{c=$2} END{print s+0, c+0}'
+}
 verify_epp_commit() {
   local ip c i
   for i in $(seq 1 30); do
@@ -384,6 +410,7 @@ case "${1:-}" in
     verify_epp_commit         || exit 1
     drain
     off=$(stat -c%s "$ENVOY_LOG")
+    pred0=$(epp_pred_ttft)
     kubectl -n $NS delete job bench-runner-exp165llmd --ignore-not-found >/dev/null
     sed -e "s/__JOBNAME__/bench-runner-exp165llmd/" -e "s/__SESSION__/$session/" \
         -e "s/__ARM__/llmdslot75/" \
@@ -391,6 +418,7 @@ case "${1:-}" in
         -e "s/{ name: LOAD_PROCS, value: \"12\" }/{ name: LOAD_PROCS, value: \"$procs\" }/" \
         "$HERE/runner-exp71-llmd-dyn.template.yaml" | kubectl apply -f - >/dev/null
     kubectl -n $NS get job bench-runner-exp165llmd >/dev/null 2>&1 || { say "ABORT: runner Job was not created"; exit 1; }
+    verify_predictor_live $pred0 || { kubectl -n $NS delete job bench-runner-exp165llmd --ignore-not-found >/dev/null; exit 1; }
     wait_job "bench-runner-exp165llmd" 120 || {
       say "hour trace failed"; kubectl -n $NS logs job/bench-runner-exp165llmd --tail=60; exit 1; }
     kubectl -n $NS logs job/bench-runner-exp165llmd --tail=400 2>/dev/null | grep -aE "Success:|rc=" | tail -3
