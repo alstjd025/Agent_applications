@@ -155,3 +155,40 @@ Llumnix SLO의 처리 중 요청 기준 판정은 여섯 run 모두 `binding="ow
 - **논문 run(EXP-108·109, 2026-08-31~09-02)은 초기화 뒤 `:main`을 다시 받아 돌았고, 그 digest는 기록되지 않았다.** 2026-08-06 이후 `:main`은 바뀌었다(EPP v0.10.0이 08-17 빌드).
   지금의 `:main`은 2026-11-17 빌드다.
 - 어느 이미지로 다시 세울지는 사용자가 정한다. 정해지면 이 절에 이미지 digest, 재구축 절차, 첫 요청 확인 결과를 적고 같은 세 변형 × 2회를 돌린다.
+
+### 논문 run의 llm-d 버전 — 찾은 것 (2026-11-19)
+
+- **EPP: llm-d-router 커밋 `644a885639ac64ca09d6f35af3a67fe61bcc2e31`(2026-08-29 12:11 UTC, main).** 근거: EXP-114 기록(2026-09-06~08 run)이 "배포된 EPP(`llm-d-router-endpoint-picker:main`,
+  커밋 `644a8856`, `--v=2`)"라고 적었다(`archive/.../EXP-114_llama8b-8instances.md:3543-3544`). manifest의 `imagePullPolicy`가 `IfNotPresent`(`deploy/llmd/router.yaml:190`)이므로
+  08-31 재구축 때 받은 이미지가 10-06 컨테이너 초기화까지 그대로 쓰였다 — EXP-108·109(08-31~09-02)와 EXP-114가 같은 이미지다. Go module proxy가 그 커밋을
+  `v0.10.0-rc.1.0.20260829121136-644a885639ac`로 풀어 주었다(커밋 날짜 08-29, 08-28 초기화 뒤 08-31 재구축 때의 main과 맞는다).
+  같은 방법으로 확인한 초기화 전 이미지(`9eb2ff38…`)는 커밋 `cbe302bb`(08-06 12:16 커밋, 12:18 빌드)이고, 바이너리에 `-X …/version.CommitSHA=` ldflags와 `go1.26.5`,
+  `sigs.k8s.io/gateway-api-inference-extension v1.5.0`이 들어 있다 — main 이미지는 커밋 몇 분 뒤에 빌드된다.
+  **`644a8856`의 이미지는 레지스트리에 태그가 없다**(태그가 붙은 08~09월 이미지는 `4a0edbb`=v0.10.0-rc.1 08-11, `71f4f09`=v0.10.0 08-17, `e48584e`=v0.11.0-rc.1 09-18뿐).
+  태그 없는 이미지는 digest로만 받을 수 있고 digest는 기록되지 않았다.
+- **예측기(training·prediction server): 커밋 `04e44cd801d5`(0.9.0, 08-11 빌드).** 이 저장소는 커밋마다 `commit-<sha>` 태그를 붙이고, 08-31 이전 마지막 빌드가 `04e44cd`(08-11), 다음이 `0e39e36`(09-08)이다.
+  digest: training `sha256:5679d69a8603fb555578c5b5e319eb856acda058ddee1355e5d3b1f662701761`, prediction `sha256:7377707db2efac33fed3740b3d541bd4c045b240195e03453a6e33e86d69eba3`(둘 다 지금 받을 수 있다).
+  초기화 전 이미지(`ec7626b`, 08-03)와 다르다.
+- **Envoy**: `envoyproxy/envoy:distroless-v1.33.2`(버전 태그, 초기화 전 digest `85500e28…`).
+- 찾지 못한 곳: 이 기계의 run 디렉토리(10-06 초기화로 없음), Lustre 08-28 백업(논문 run 이전), `/home/nxclab/tools`의 체인 로그(digest 없음), containerd 저장소(권한 없음), 이 기계의 Claude 세션 기록(11-04 이후뿐).
+
+### EPP를 커밋에서 다시 빌드 (2026-11-19, 사용자 결정 "직접 빌드하자")
+
+- **절차가 upstream과 같다는 확인**: upstream `Dockerfile.epp`는 `golang:<버전>` 빌더에서 `WORKDIR /workspace`, `go mod download`,
+  `CGO_ENABLED=0 go build -ldflags="-s -w -X …/version.CommitSHA=<sha> -X …/version.BuildRef=main" -o bin/epp cmd/epp/main.go`를 하고 바이너리만 distroless 이미지에 복사한다.
+  `-trimpath`가 없어 소스(`/workspace`), module cache(`/go/pkg/mod`), GOROOT(`/usr/local/go`) 경로가 바이너리에 들어가므로 같은 경로의 `golang` 컨테이너(k8s Job, CPU만)에서 빌드했다
+  (`/home/nxclab/tools/llmd-build/build-job.template.yaml`; pod에서 proxy.golang.org로 나가는 연결이 다른 인증서를 받아 막혀서 module cache는 호스트에서 받아 `/go/pkg/mod`에 마운트, `GOPROXY=off`).
+  **같은 절차로 커밋 `cbe302bb`(`golang:1.26.5`)를 빌드한 결과가 레지스트리의 08-06 `:main` 이미지 바이너리와 바이트 단위로 같았다**(sha256 `4a168eb5…`, 72,708,258바이트).
+- **`644a8856` 빌드**: 그 커밋의 `Dockerfile.epp`가 정한 `golang:1.26.7`로 같은 절차. 결과 `/home/nxclab/tools/llmd-bin/epp-644a8856`, sha256 `c735485348dac37e1ba924f3864d36f7a941aeecd6008dd024f6590a7e544bfa`,
+  go1.26.7, `gateway-api-inference-extension v1.5.0`.
+- **배포**: 원래 manifest는 두고 이미지를 고정한 사본을 만들었다 — `deploy/llmd/router-paper.yaml`(EPP는 08-06 이미지(같은 distroless/static:nonroot 바탕)를 그릇으로 쓰고
+  `command: /llmdbin/epp-644a8856`을 hostPath로 마운트, Envoy는 digest 고정), `deploy/llmd/predictor-paper.yaml`(`04e44cd` digest 둘). namespace `llmd`, CRD 둘, `pathb.yaml`, `epp-config-slo.yaml`은 원래 파일 그대로.
+  엔진이 내려가 있어 endpoints ConfigMap은 자리표시자로 만들었다(경로 B는 읽지 않고, 드라이버가 run마다 `llmd_endpoints.py`로 다시 쓴다).
+- **기동 확인**(엔진 없이): EPP가 설정을 읽고 우리 설정의 plugin을 모두 만들었다(`streamingMode: true`, `slo-headroom-tier-filter`, `latency-slo-admitter`), InferencePool·InferenceObjective를 reconcile했다.
+  **EPP 지표 `llm_d_epp_info{build_ref="main",commit="644a885639ac64ca09d6f35af3a67fe61bcc2e31"}`** — EXP-114가 "커밋 644a8856"을 읽은 것과 같은 지표다.
+  training server는 표본 0개라 학습을 건너뛰고, prediction server의 gated model 요청에 404를 낸다 — 첫 run에서 표본이 쌓인 뒤 사라지는지 확인한다.
+- **드라이버** `k8s/exp07/run_exp165_llmd.sh`: 논문 드라이버 `run_exp109_llmd.sh`의 `full`(한 시간 trace)과 같고 바뀐 것은 변형별 trace·fair 설정 선택, chat 2.5배에서 부하 생성 36개,
+  엔진 재시작 뒤 `llmd_endpoints.py`(InferencePool 포트 동기화, `run_exp139_llmd.sh`에서), 그리고 preflight에서 이미지·바이너리 sha256, 예측기 재시작 뒤 EPP가 보고하는 커밋을 검사해 다르면 ABORT.
+  run마다 엔진(`neutral-0`)과 예측기 셋·EPP를 재시작하고 training server가 표본 0개에서 시작하는지 확인한다(논문 run과 같다; 측정 한 시간 동안 예측기가 학습한다).
+- **실행**: 체인 `/home/nxclab/scratch/exp165l/run.sh`, 로그 `/home/nxclab/tools/exp165l_chain.log`. r1 = onlychat25, onlyswe, onlydr; r2 같은 순서. 6 run, 약 7.5시간.
+  판정은 위 판정 절과 같다(PolyServe·Llumnix SLO와는 세션이 하루 다르므로 세션 간 문턱을 쓴다).
