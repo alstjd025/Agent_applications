@@ -114,3 +114,60 @@ chat에서 36~37 %(p90 12 %)다. 운전점은 v0.6과 비슷하지만(chat 엔�
 - `pace`의 예측값은 판정 로그에 찍힌 "골라진 인스턴스의 예측"의 평균이고 실측은 같은 5분 구간 클러스터 전체 토큰 간격이다(인스턴스-포트 대응 없이). 예측/실측 비율이 모든 구간에서 같은 방향이라 결론에는 영향이 없다고 본다.
 - llm-d deepresearch 몰림의 처음 시작(어느 엔진이 왜 처음 골라지는가)은 기록이 없어 확인하지 않았다. 몰림을 유지하는 메커니즘(`least` 전략 + 예측기가 KV를 모름)과 거절을 만드는 메커니즘(포화 평균)은 코드와 지표로 확인했다.
 - Llumnix SLO의 `predicted_tpot`이 decode만의 한 step이라는 것은 판정 로그의 값(실측의 51~77 %)과 필터 설명(`scheduling_policy_registry.go:207-223`)에서 본 것이고 예측 함수 내부는 다시 읽지 않았다.
+
+## 5. 섞인 trace와 단일 클래스 trace 전체 — 정책별 원인 (2026-11-20, 하위 분석 넷, 사용자 지시 "섞인 트레이스와 섞이지 않은 트레이스 모두 … 멀티에이전트화")
+
+스크립트·출력: `/home/nxclab/scratch/exp169/{mixed_ps_slo,mixed_llmd,fluidserve,single_class}/`(각 `NOTES.md`/`NOTES.txt`). 섞인 trace의 PolyServe·Llumnix SLO 두 구성은 각 1 run(EXP-168 r1)이다.
+인스턴스↔엔진 포트는 스케줄러 로그의 `refreshInstanceMetadata … api_server_port` 줄 또는 1초 지표의 동시 처리 상관(r ≥ 0.99)으로, 요청↔엔진은 판정 로그 uuid ↔ `request_ids.jsonl`(`cmpl-<uuid>`)로 100 % 맞췄다.
+llm-d도 클라이언트 요청 번호 = `"cmpl-" + Envoy x-request-id`로 정확히 맞는다(200 응답 55,699/55,699) — EXP-114 이후 기록의 "llm-d는 클라이언트와 공유하는 식별자가 없다"는 틀렸다.
+
+### 5.1 정정 (이 문서 3절과 앞 기록에 대해)
+
+| 이전 서술 | 고친 서술 | 근거 |
+|---|---|---|
+| Llumnix SLO의 예측은 받은 뒤 batch·KV가 커지는 것을 빠뜨려 낮다 | **성장은 거의 0이다.** 엔진의 실제 이후 상태로 프로파일을 다시 계산해도 판정 때 값과 1 % 안. 차이는 전부 **prefill 간섭** — 프로파일(`tpot.json`)이 decode만의 step이다 | `metrics.go:553-580`, `predict_utils.go:298-319`; Python 재현이 로그의 `predicted_tpot`와 비 1.000. decode ÷ (1 − prefill 비중) 모델이 chat 실측의 0.88~0.92 |
+| PolyServe 정상상태 예측에 prefill을 넣으면 실측에 가까워진다 | **그대로 더하면 3.5~5.7배로 틀린다**(대기 chunk 하나 ≈ 520 ms를 매 step에 더함, `polyserve.go:155-170`). 맞는 것은 step에 prefill을 나눠 넣는 모델(chat 0.93~0.95) | `single_class` |
+| llm-d 예측기는 KV·preemption을 모른다 | **KV 사용률과 대기 수를 입력으로 쓴다**(`prediction_server.py:576-589`). 다만 꼬리를 과소예측(TTFT 10 s 초과: 예측 0.3 % 대 실제 16.4 %) | `single_class` |
+| FluidServe iteration 예측/실측 1.001 → 예측이 정확하다 | **1.001은 현재 상태의 재구성이라 맞을 수밖에 없다.** 요청을 하나 더 받으면 어떻게 되는지를 검증한 값이 아니다(받은 뒤 +4~5 ms) | `fluidserve` |
+| FluidServe 첫 토큰 예측은 1.3~1.5 s 비관적 | 판정에 걸리는 구간(예측이 budget의 60~100 %)에서는 **2.2~3.4 s 비관적**(대기열 항 3.3~4.9 s). deepresearch만에서는 반대로 낙관적 | `fluidserve` |
+
+### 5.2 정책 × trace: 덜 쓰는 원인과 더 쓰는 원인
+
+**FluidServe v0.6**
+- chat 2.5배: 거절 구간의 66~70 %에서 엔진 넷이 49.7 ms — 거절은 대부분 실제 용량 한계. 거절 구간의 23~27 %에 37~38 ms인 엔진이 하나 있었고 그것을 막은 것은 첫 토큰 판정(대기열 추정 5.13 s 대 그 엔진으로 간 요청의 실제 TTFT 중앙값 0.58 s; 거절의 약 5 %).
+- swe만 (**더 씀**, +4~5 ms): 받는 순간 예측한 받은 뒤 평균 iteration의 중앙값 75.0 ms = 판정선, 그 뒤 실측 80~82 ms. ① KV 항 +2.2 ms — 투영이 h 동안 끝날 요청의 KV(16.4만 토큰)를 빼고 도착은 더하지 않아(`--fluidserve-arrival-horizons` 0) 실제보다 17만 토큰 낮다. ② prefill 항 +1.9~2.9 ms — 같은 초에 몰려 보낸 prompt(인스턴스당 초당 6.7건)가 대기 prefill에 아직 없다(`max(대기 prefill, 기대 도착)`에서 대기가 이긴 경우 0.0 %). ③ 측정된 step이 낮은 순간(77 ms, 평균 80.5)에 받는 편향. v0.5도 같은 구조(판정선 67.5, 예측 69~70, 실측 76 ms).
+- deepresearch만 (**더 씀**, KV): 메모리 판정이 받는 양을 정한다(판정 기준 물리 KV 0.95, 실제 0.995). 투영이 끝날 요청의 KV(6.2만 토큰)를 빼서 5 % 여유를 먼저 쓰고, 대기 prefill(중앙값 1.2만 토큰)은 넣지 않는다. 받은 뒤 KV ≥ 0.99인 시간 80~84 %, preemption 엔진당 분당 47회.
+- 섞인 trace: 거절 구간의 93~97 %에서 엔진 넷이 가장 빡빡한 budget의 3 ms 안이거나 KV ≥ 0.95 — **덜 쓰는 구간은 약 3 %**. 거절 사유 84~86 % "가장 좋은 엔진에 보내도 자기 budget 못 지킴", 14~16 % "어느 엔진이든 처리 중 요청이 넘음"; instance cap만이 막은 경우 약 1 %.
+  더 쓰는 것은 swe가 가장 빡빡한 엔진에서 약 2 ms(swe만과 같은 원인, 85 엔진-분 중 21~23).
+
+**PolyServe**
+- 단일 클래스: 메모리 판정이 묶는다(swe 논리/물리 2.43 = prefix 적중 0.62에서 1/(1−0.62) ≈ 2.63과 맞다 — 같은 궤적의 호출끼리, 같은 transcript의 반복끼리 prefix를 공유). chat에서도 거절 판정의 89~90 %가 메모리이고, 그때 물리 KV 62 %인데 토큰 간격은 prefill 간섭으로 이미 약 70 ms다(정상상태 판정은 prefill을 빼서 45 ms 선을 통과).
+- 섞인 trace: tier 배분이 2(chat)/1(swe)/1(deepresearch)로 **한 시간 내내 고정**된다 — tier는 가장 빈 서버가 두 번 연속 비어야 서버를 돌려주는데 chat tier는 비지 않고, swe·deepresearch는 lazy promotion으로 chat 엔진에 손님으로 먼저 가서 pool에서 서버를 가져오는 단계까지 가지 않는다.
+  - **chat 엔진은 더 쓴다**: 51~68 ms(budget의 1.01~1.37배)인데 chat 요청은 `polyserve_iter_max` p90 44.3·최대 45.0 ms(= 0.9 × 50 선)로 받았다 — 예측이 실측의 0.59~0.70. 받은 chat의 54 %만 통과, 실패의 98 %가 평균 간격.
+  - **swe·deepresearch 엔진은 덜 쓴다**: 물리 KV 0.29~0.44 / 0.58, 토큰 간격 budget의 0.46~0.68, preemption 0인데 deepresearch 56 %·swe 19 %를 거절. 메모리 판정의 투영이 0.98~1.00(논리/물리 1.9~2.5, 1.36~1.40).
+  - **chat 엔진으로의 promotion도 막힌다**: 증가 항이 **받으려는 요청의** tier 기대 출력을 처리 중인 batch 전체에 곱한다(`forTier(request.TpotSloMs)`, `polyserve.go:121-139`). chat 약 400건을 처리 중인 엔진에 deepresearch 하나를 넣으면 985 × 401 토큰 = 용량의 0.63~0.70을 청구하므로, chat batch가 약 300을 넘으면 79~100 %의 시간 동안 메모리 판정에 걸린다. 정상상태 거절 4.8만의 92 %도 손님(swe·deepresearch)을 chat 호스트의 45 ms로 판정한 것이다.
+
+**Llumnix SLO**
+- 공통: 거절은 **100 % 게이트웨이의 5초 포기**(거절 지연 p10~p90 5.01~5.05 s, 포기 횟수 = 503 수). 예측은 decode만의 프로파일 → 실측의 0.50~0.77.
+- 단일 클래스: 먼저 막는 판정은 chat TPOT 100 %, deepresearch TTFT 100 %(판정 때 예측 p50 8,955 ms 대 9,000 ms 선), swe TTFT 59~64 %·TPOT 28~31 %. **받은 swe·deepresearch가 첫 토큰에서 실패**(TTFT p50 9.6 s·22.2 s; 실패의 96.5·100 %): TTFT 필터가 게이트웨이에서 이미 기다린 시간(받은 요청의 33~43 %가 평균 2.25 s)을 budget에서 빼지 않고(`filters.go:124-157`), KV 블록을 기다리는 대기를 보지 못한다.
+- 섞인 trace, 논문 구성: 엔진 넷이 모든 클래스를 비슷하게 받아 대부분 엔진에서 chat이 가장 빡빡하다. 60~84 ms(44 엔진-구간 중 26이 넘음). deepresearch가 KV를 채워(구간 4·5·10·11에 KV 1.00, 엔진당 대기 36~50, preemption 6,054) 받은 deepresearch의 30 %만 통과(실패의 99 %가 첫 토큰; 판정 때 TTFT 예측 8.63 s 대 실측 16.9 s).
+  chat은 긴 deepresearch 문맥 때문에 TPOT 예측이 49 ms 이상이 되어 거절된다.
+- 섞인 trace, 처리 중 요청 기준 판정(`slot75inc`): TPOT 판정의 66.5 %(81.5만/122.6만)에서 처리 중 요청의 budget이 기준이 됐다. 모든 클래스가 예측 TPOT ≤ 45 ms에서 받혀 deepresearch가 KV를 혼자 채우지 못하고(TTFT p50 1.14 s) deepresearch admitted 29.6 → 99.7, swe 43.9 → 77.4, chat 55.2 → 38.5.
+  예측이 실측의 0.46~0.62라 엔진은 59~97 ms(44 엔진-구간 중 40이 넘음) — 실패가 deepresearch 첫 토큰에서 chat 평균 간격(실패의 94 %)으로 옮겨 갔다. preemption은 비슷(6,136). 각 1 run.
+
+**llm-d**
+- 단일 클래스 p90: 예측이 실측보다 높아(TPOT chat 47.7 대 44.2, swe 70.0 대 61.8 ms) 덜 쓴다. 거절 출처: chat 500(admitter) 94.5k 대 429 1.4k, swe 35.1k 대 19.0k, deepresearch 429만 85k.
+  deepresearch에서 500이 없는 이유: admitter는 **KV 2 % 미만인 엔진이 하나라도 있으면 거절하지 않는다**(`latencyslo/plugin.go:133`) — r1에서 91 %의 시간 동안 그런 엔진이 있었다. 거절은 포화 평균(≥ 1인 시간 86 %, 429의 93 %가 그 시간)에서만 나온다.
+  몰림의 시작: 0초부터 배치의 약 60 %가 8001, 30 %가 8003(`least`가 여유가 가장 작은 엔진에 가장 높은 점수를 주므로 먼저 짐을 받은 엔진이 더 받는다) → 35~40초에 8001 KV 0.99·대기 18~26, 포화 > 1 → 21분 유지. r2의 초반 몰림(92~98 % 8003)은 약 380초에 예측이 8003을 budget 초과로 판정하면서 끝났다(포화와는 무관).
+  swe의 몰림 위반은 preemption이 아니다(최대 간격 중 preemption 1.0 %): 첫 토큰에 budget 7 s 중 3.4 s를 쓴 요청에서 8192토큰 prefill chunk를 포함한 step(약 0.57 s)들이 몰리면 그 뒤 토큰이 마감을 넘는다.
+- 단일 클래스 p50: swe에서 예측이 실측보다 낮다(75 ms 초과 비율 예측 23.3 % 대 실제 42.5 %) → 더 쓴다.
+- 섞인 trace: **swe·deepresearch는 chat의 50 ms에 묶여 덜 쓴다** — p50에서는 도착의 98~100 %, p90에서는 chat이 많은 구간 99~100 %·섞인 구간 73~77 %에 엔진 넷 모두 chat이 처리 중이었고, `bufferedTPOT = min(자기 SLO, podMinTPOTSLO)`로 판정한다. 받은 swe·deepresearch의 실제 간격 45~51·44~49 ms(budget의 60~67·44~49 %)인데 deepresearch 도착의 31~45 %가 500으로 거절(그때 가장 한가한 엔진의 간격 중앙값 38~43 ms).
+  **chat이 빠진 엔진에서는 더 쓴다**(p90): 판정이 75·100 ms로 풀리고 `least`가 그 엔진을 KV까지 채운다 — chat이 없는 엔진으로 간 swe는 간격 62~65 ms·p90 80~89 ms·통과 0.66~0.82(chat이 있는 엔진은 0.97~0.98), KV ≥ 0.95 시간의 71~90 %가 chat 없는 엔진.
+  p50은 예측이 낮아(TPOT 45.6 대 48 ms) chat을 1만~1.3만 건 더 받고 받은 chat의 35.5 %가 50 ms를 넘으며, chat이 엔진을 늘 차지해 deepresearch는 50 ms 기준에 계속 묶여 2,100~2,800건 더 거절된다.
+
+### 5.3 요약 — 두 가지 실패와 그 아래의 공통 원인
+
+1. **예측하는 양이 실제 step과 다르다** (더 쓰게 만든다): PolyServe·Llumnix SLO는 decode만의 step(prefill 간섭 없음)을 예측해 실측의 0.46~0.77. llm-d p50은 중앙값이라 SLO 바로 아래로 채우면 3분의 1이 넘는다. FluidServe는 prefill 간섭을 넣지만 같은 초에 몰린 도착과 h 동안의 도착을 빼서 swe에서 +4~5 ms.
+2. **KV를 세는 방식이 실제와 다르다** (덜 쓰거나 더 쓰게 만든다): PolyServe는 prefix 공유를 푼 논리 토큰 + (받으려는 요청의 기대 출력 × batch 전체)라 물리 KV 30~60 %에서 멈춘다. Llumnix SLO는 KV를 보지 않아 1.00까지 간다. FluidServe는 끝날 요청의 KV를 미리 빼고 대기 prefill을 넣지 않아 0.95 기준을 넘겨 0.995까지 간다.
+3. **클래스가 섞이면 판정 기준이 가장 빡빡한 클래스로 내려간다** (덜 쓰게 만든다): llm-d(`podMinTPOTSLO`)·Llumnix SLO 변경 구성·PolyServe promotion(호스트 tier로 판정)이 모두 chat의 50 ms를 swe·deepresearch에 적용한다. FluidServe는 클래스를 엔진별로 모아 chat이 없는 엔진을 75·100 ms 근처까지 쓴다 — 섞인 trace에서의 차이의 주된 원인.
+4. **경로 선택이 한 엔진에 몰고, 그 한 엔진이 클러스터 전체의 판정을 정한다** (llm-d `least` + 포화 평균; PolyServe의 고정된 tier 배분).
