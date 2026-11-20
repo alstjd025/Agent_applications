@@ -32,3 +32,40 @@ llm-d는 EXP-167에서 같은 trace로 쟀다(p90 모든 도착 56.76, admitted 
    `slot75inc`의 `scheduler_slo_incumbent_gate_total{binding="resident"}`(0이면 판정이 한 번도 바뀌지 않은 것이므로 그 run은 `slot75`와 같은 것으로 본다).
 4. **예상**: v0.6이 모든 도착·goodput에서 세 기준선보다 높다(EXP-161 80.7 대 논문 PolyServe 52.7·Llumnix SLO 27.9). PolyServe는 swe를 가장 잘 지키고(논문 swe 80.2) chat을 받은 뒤 놓친다.
    `slot75inc`는 `slot75`보다 admitted가 낮거나 같다(EXP-141과 같은 방향).
+
+## 결과 (2026-11-20 10:05 ~ 17:29 KST, 기준선 6 run, ladder95)
+
+체인 `=== EXP168 CHAIN DONE 2026-11-20 17:29:33`(`bin/` 복원, 게이트웨이 replica 0, Sionna 복귀). v0.6 두 자리는 의도대로 건너뜀(로그의 FAILED·WARN 두 줄씩). 6 run 모두 워크로드 확인(swe 7000/75 fair 설정),
+PolyServe tier 표 `50:428,75:494,100:985` 확인, `slot75inc`의 처리 중 요청 기준 판정 r1 815,308·r2 819,382회(자기 budget 410,512·384,370회), `slot75`는 카운터 없음(판정 꺼짐).
+⚠ 건너뛴 v0.6 자리 뒤에 저장된 `metrics_<rep>_fsg10dl_shift.txt`는 그때 떠 있던 `slot75inc` 스케줄러의 값이므로 쓰지 않는다. 모든 run이 trace의 도착을 전부 냈고 거절이 아닌 오류 0. 집계 `/home/nxclab/scratch/exp168/obs_*.txt`.
+
+| arm (2회 평균, 반복 범위) | 모든 도착 | admitted | 거절률 | chat 모든 도착 / admitted | deepresearch 모든 도착 / admitted | swe 모든 도착 / admitted | goodput (tok/s) | preemption r1·r2 | KV 평균 / p90 | 엔진 토큰 간격 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| PolyServe | 53.70 (0.67) | 65.58 | 17.9 % | 51.85 / 54.75 | 42.96 / 99.17 | 80.66 / 99.36 | 8,653 | 0 · 0 | 0.44 / 0.60 | 56.2 ms |
+| Llumnix SLO (논문) | 27.69 (0.00) | 45.97 | 39.5 % | 29.85 / 55.20 | 26.91 / 29.60 | 18.14 / 44.70 | 6,786 | 6,054 · 6,091 | 0.76 / 1.00 | 68.0 ms |
+| Llumnix SLO (처리 중 요청 기준) | 43.58 (0.10) | 51.62 | 15.3 % | 37.48 / 38.65 | 63.73 / 99.68 | 40.97 / 74.14 (범위 6.4) | 7,773 | 6,136 · 6,793 | 0.73 / 1.00 | 72.6 ms |
+| (참고) FluidServe v0.6, EXP-161 | 80.69 | 99.90 | 19.0 % | 85.43 / 99.99 | 69.19 / 99.86 | 75.89 / 99.41 | 11,764 | 1,612 · 1,728 | 0.57 / 0.99 | 55.6 ms |
+| (참고) llm-d p90, EXP-167 | 56.76 | 98.70 | 42.4 % | 55.73 / 98.85 | 66.42 / 99.58 | 45.96 / 95.72 | 8,950 | 85 · 166 | 0.38 / 0.52 | 42.6 ms |
+| (참고) llm-d p50, EXP-167 | 63.07 | 94.16 | 32.9 % | 67.83 / 92.34 | 54.83 / 99.59 | 52.79 / 97.40 | 9,396 | 52 · 54 | 0.44 / 0.61 | 48.7 ms |
+
+PolyServe 거절 판정(r2, 후보·재시도마다): memory 156,735(자기 tier) + 238,191(promotion), steady_state 4,000 + 44,165, 첫·둘째 토큰 390. tier 배분 chat 2 / swe 1 / deepresearch 1(r1·r2 같다).
+
+### 판정
+
+**Llumnix SLO 처리 중 요청 기준 대 논문 구성 (같은 세션, 문턱 4/1점, goodput 5 % 또는 반복 범위)**: 열 지표 중 아홉이 "다르다(좋음)" — 모든 도착 +15.9, admitted +5.7, 거절률 −24.2, chat 모든 도착 +7.6,
+deepresearch 모든 도착 +36.8·admitted +70.1, swe 모든 도착 +22.8·admitted +29.4(문턱 6.4), goodput +14.5 %. **chat admitted만 −16.6으로 나쁨**(55.2 → 38.7).
+EXP-141(정적 35 req/s)에서 admitted가 12.5점 낮았던 것과 반대 방향이다 — 그쪽은 정적 부하에서 쟀다.
+
+**각 기준선 대 v0.6 (EXP-161, 세션이 다르다; 문턱 모든 도착·거절률·클래스별 모든 도착 max(4.6, 범위), admitted max(1, 범위), goodput max(5 %, 범위))**:
+- PolyServe: 모든 도착 −27.0, admitted −34.3, chat 모든 도착 −33.6·admitted −45.2, deepresearch 모든 도착 −26.2, goodput −26 % **나쁨**; 거절률·deepresearch admitted·swe admitted 차이 없음; **swe 모든 도착 +4.8로 PolyServe가 좋음**(문턱 4.6 바로 위; 논문의 "PolyServe performs best for the Agent workload"와 같은 방향).
+- Llumnix SLO 논문: 열 지표 모두 나쁨(모든 도착 −53.0, goodput −42 %).
+- Llumnix SLO 처리 중 요청 기준: 거절률·deepresearch admitted 차이 없음, 나머지 여덟 나쁨(모든 도착 −37.1, goodput −34 %).
+
+**논문 값 재현 (EXP-109, `evidence.md` §4.9; 논문 반복 범위 ± 세션 간 4.6점)**: PolyServe 53.70 대 52.7, 거절 17.9 대 20.2 %, chat 51.85 대 49.5, deepresearch 42.96 대 45.6, swe 80.66 대 80.2 — **재현**
+(이번은 tier 표가 swe 494토큰, 논문 run은 드라이버가 463토큰 기본값을 썼을 가능성 — swe 차이 0.5점). Llumnix SLO 27.69 대 27.9, 거절 39.45 대 39.5 %, chat 29.85 대 30.0, deepresearch 26.91 대 27.1, swe 18.14 대 18.7 — **재현**.
+
+### 해석 (원인은 EXP-169 §5)
+
+- PolyServe: chat 엔진 둘은 정상상태 예측이 prefill을 빼서 실측의 0.59~0.70이라 budget을 넘기고(받은 chat 55 % 통과), swe·deepresearch 엔진 둘은 메모리 판정(논리 토큰, promotion에서는 받으려는 요청의 기대 출력 × chat batch)으로 KV 0.3~0.6에서 멈춘다. tier 배분은 한 시간 내내 2/1/1.
+- Llumnix SLO 논문: deepresearch가 KV를 1.00까지 채워 preemption 6천 회, 받은 deepresearch의 30 %만 통과. 처리 중 요청 기준은 모든 클래스를 예측 TPOT ≤ 45 ms에서 받게 해 deepresearch가 KV를 혼자 채우지 못하지만(admitted 99.7), 예측이 실측의 0.46~0.62라 chat이 평균 간격으로 실패한다(chat admitted 38.7).
+- 섞인 trace에서 v0.6은 모든 기준선보다 모든 도착·goodput이 높다(goodput 11,764 대 6,786~9,396). PolyServe가 swe 모든 도착에서만 4.8점 앞선다.
