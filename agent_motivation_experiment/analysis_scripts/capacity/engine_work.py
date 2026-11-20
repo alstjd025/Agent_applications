@@ -19,7 +19,7 @@ import glob, json, os, re, sys
 import numpy as np
 
 RES = "/home/nxclab/llumnix_reproduce/Agent_applications/agent_motivation_experiment/results/"
-OBS_DIRS = ["/home/nxclab/scratch/" + d for d in ("exp161", "exp164", "exp165", "exp165l", "exp166", "exp167", "exp168", "exp170", "capacity")]
+OBS_DIRS = ["/home/nxclab/scratch/" + d for d in ("exp161", "exp164", "exp165", "exp165l", "exp166", "exp167", "exp168", "exp170", "exp172/obs", "capacity")]
 LO, HI = 300, 3300
 
 
