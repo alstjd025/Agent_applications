@@ -60,8 +60,8 @@ projected는 run 내내 정확히 용량에 붙어 있다 — 메모리 판정�
 그 결과 swe만에서 엔진당 동시 처리 77·토큰 간격 53 ms로 budget 75 ms의 70 %에서 멈춘다. chat에서는 증가 항(처리 중 요청마다 이미 만든 토큰과 상관없이 기대 출력 428토큰 전체)이 크다. EXP-127(8 인스턴스)과 같은 원인이고,
 2026-09-11 사용자 결정으로 논문 충실성 때문에 고치지 않았다.
 
-**llm-d (p90): 예측기가 TTFT·TPOT의 90번째 백분위수를 예측하고 그것을 SLO와 여유 없이 비교한다.** (`prediction.go:149-177`, `LATENCY_QUANTILE_ALPHA` 기본 0.9). EPP 예측 평균은 실측보다 TPOT 8~11 %,
-TTFT 25~32 % 높다. 그래서 엔진 토큰 간격이 chat 41~47 ms(budget 50), swe 62~67 ms(75), 섞인 trace 37~48 ms에서 멈춘다.
+**llm-d (p90): 예측기가 TTFT·TPOT의 90번째 백분위수를 예측하고 그것을 SLO와 여유 없이 비교한다.** (`prediction.go:149-177`, `LATENCY_QUANTILE_ALPHA` 기본 0.9). EPP 예측 평균은 실측보다 TPOT 8~13 %,
+TTFT 16~32 % 높다(chat·섞인 trace·swe만). 그래서 엔진 토큰 간격이 chat 41~47 ms(budget 50), swe 62~67 ms(75), 섞인 trace 37~48 ms에서 멈춘다.
 
 **llm-d (섞인 trace): 모든 엔진이 chat의 50 ms에 묶인다.** llm-d는 chat을 네 대 모두에 퍼뜨리고(논문 그림 4, `evidence.md` §4.5), 엔진을 판정할 때 그 엔진에서 처리 중인 요청 중 가장 빡빡한 TPOT SLO(`podMinTPOTSLO`)를 쓴다
 (`prediction.go:162-168`). 그래서 swe·deepresearch도 50 ms 기준(여기에 p90 여유)으로 판정되어 엔진 넷이 모두 36~52 ms에서 돈다. v0.6은 chat을 일부 엔진에 모으고 나머지 엔진을 75 ms 근처까지 쓴다
