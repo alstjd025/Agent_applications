@@ -973,6 +973,8 @@ warn_if_overrun() {  # $1 job name, $2 expected minutes
 
 run_cell() {  # $1 arm, $2 variant (ablation|full)
   local arm=$1 variant=$2
+  # 2026-11-20 (user): FluidServe is not re-run to match sessions; EXP-168 runs the baselines only.
+  case "$arm" in fs*) echo "[exp168] SKIP: FluidServe arm '$arm' is not part of EXP-168 (user decision 2026-11-20)"; return 1 ;; esac
   local trace=${TRACE[$variant]:-} wcfg=${WCFG[$variant]:-}
   if [ "$arm" = "slo" ] && [ -n "${WCFG_FAIR[$variant]:-}" ]; then
     wcfg=${WCFG_FAIR[$variant]}
