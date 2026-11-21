@@ -66,3 +66,17 @@ B(KV 유입 속도 밸브)와 C(prefill 순 처리 속도와 Little의 법칙)�
 ### C r1 (`261121_1059_exp173hr1_fsxpflow_shift62`) — 구현 결함으로 무효, C2로 다시
 
 모든 도착 21.15, 거절률 77.8 %; 5분 창 거절률이 분 20부터 끝까지 100 %. **원인(코드)**: 순 처리 속도 ν가 0으로 떨어지면 대기 시간이 무한대가 되어 모두 거절하고, 받는 것이 없으니 대기열이 비고, "양 끝이 모두 빈 구간"은 ν를 갱신하지 않으므로 ν가 0에 영원히 머문다(반증 조건 "순 처리 속도 gauge가 시간의 5 % 넘게 0"에 해당). 이것은 개념의 반증이 아니라 추정기의 고착이다 — 대기열이 비어 있으면 Little의 법칙이 쓸 대기열이 없고 대기는 자기 prompt의 prefill뿐이다. **C2**(브랜치 `exp173-candC2` e357dab, 스케줄러 `eae3e238`): 대기열이 0이면 대기 = 자기 prompt prefill(용량 모델, v0.6의 `own`과 같은 값)로 하고, 대기열이 있을 때만 (Q + prompt) ÷ ν. 회귀 테스트 `TestPrefillFlow_EmptyBacklogNeverLocksOut` 추가. B+C도 같은 결함이 있어 **B+C2**(브랜치 `exp173-bc2` eceaf1b, 스케줄러 `956149dc`)로 바꿨다. 판정 규칙은 C·B+C와 같다.
+
+### B r1 (`261121_1220_exp173hr1_fsxbucket_shift62`)
+모든 도착 57.14, admitted 88.01, 거절률 34.95 %, goodput 64,933, chat 57.67 / deepresearch 62.82 / swe 45.09(admitted 87.73 / 91.82 / 81.87). 엔진: preemption 23.4k(−56 %), KV 평균 0.779 / p90 0.998, ITL 39.3 ms. v0.6 대비 admitted −8.8 → 나쁨(F1·A와 같은 모양).
+
+### 세 arm(F1·A·B)에 공통인 것 — FluidServe 판정을 거치지 않은 요청
+스케줄러 자신의 카운터(`scheduler_fluidserve_decisions_total`):
+
+| run | route | shed | pend(보류 주기) | 받아들인 요청(채점) | route 없이 받아들인 요청 |
+|---|---|---|---|---|---|
+| v0.6 r1 | 415,877 | 199,356 | 112,964 | 413.7k | ≈ 0 |
+| F1 r1 | 313,194 | 207,450 | 1,184,547 | 405.7k | ≈ 92k |
+| B r1 | 279,107 | 213,419 | 1,215,495 | 397.0k | ≈ 118k |
+
+보류 주기가 v0.6의 10배가 되고, **받아들인 요청 가운데 9~12만 건이 FluidServe의 route 결정 없이 엔진에 들어갔다**(판정 로그에도 없다 — 앞의 "로그 유실" 해석은 틀렸다). 그 요청들의 SLO 실패율은 34~41 %(첫 토큰 중앙값 6.0~7.3 s), route된 요청은 0.3~2.1 %. 게이트웨이 코드(`pkg/gateway/load-balancer/composite_balancer.go:121` `getWithFallback`)는 스케줄러 호출이 "scheduler not ready"로 끝나면(스케줄러 HTTP 호출이 실패한 경우도 이 오류로 바뀐다, `scheduler_client.go`) **round-robin으로 직접 배치한다**. 보류가 10배로 늘어 게이트웨이의 재시도 호출이 폭증하면 이 경로가 열리는 것이 가설이며, 지금 도는 L run의 혼잡 구간에서 게이트웨이 로그의 "fallback policy(round-robin) is applied" 줄 수로 확인한다. **맞다면 F1·A·B의 admitted 하락은 정책의 결과가 아니라 측정 경로(게이트웨이 대체 배치)의 결과이고, 세 arm은 다시 판정해야 한다.**
