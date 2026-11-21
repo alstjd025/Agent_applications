@@ -132,7 +132,7 @@ r3 (`261120_2250_exp172hr3_fsxnocap_shift62`): 모든 도착 66.72, admitted 96.
 
 ### 후보 1 (AIMD 창, 2회) 판정
 
-r2 (`261121_0006_exp172hr2_fsxc1_shift62`): 모든 도착 66.50, admitted 96.10, 거절률 30.70 %, goodput 70,233, preemption 7.9k(observe), TTFT p99 6.5 s. 후보 1 평균(r1·r2): 모든 도착 65.59(범위 1.83), admitted 96.23, 거절률 31.75, goodput 69,341. **A1과 같은 세션 비교: 모든 도착 −0.9, admitted +0.5, goodput −1.6 % → 전부 차이 없음.** preemption은 A1(observe 29.0k / 29.1k) 대비 9.1k / 7.9k로 약 70 % 줄고 TTFT p99가 11.4 / ? → 14.9 / 6.5 s, 엔진 ITL 42 → 32 ms. 창은 preemption을 줄이지만, 그만큼 수용이 늘지 않아 점수는 그대로다(거절의 원인이 KV가 아니라 첫 토큰 예측이기 때문). 신호가 실제 preemption의 0.3~1.5 %만 잡는다는 문제(위)도 그대로다.
+r2 (`261121_0006_exp172hr2_fsxc1_shift62`): 모든 도착 66.50, admitted 96.10, 거절률 30.70 %, goodput 70,233, preemption 7.9k(observe), TTFT p99 6.5 s. 후보 1 평균(r1·r2): 모든 도착 65.59(범위 1.83), admitted 96.23, 거절률 31.75, goodput 69,341. **A1과 같은 세션 비교: 모든 도착 −0.9, admitted +0.5, goodput −1.6 % → 전부 차이 없음.** preemption은 A1(observe 29.0k / 29.1k) 대비 9.1k / 7.9k로 약 70 % 줄고 TTFT p99는 A1 r1 11.4 s 대 후보 1 r1 14.9 s·r2 6.5 s로 방향이 일정하지 않고, 엔진 ITL은 42 → 32 ms. 창은 preemption을 줄이지만, 그만큼 수용이 늘지 않아 점수는 그대로다(거절의 원인이 KV가 아니라 첫 토큰 예측이기 때문). 신호가 실제 preemption의 0.3~1.5 %만 잡는다는 문제(위)도 그대로다.
 
 ## 정리 (2026-11-21 18:20, 체인 종료·70B 복구 확인)
 
