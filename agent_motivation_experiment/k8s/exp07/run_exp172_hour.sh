@@ -990,7 +990,7 @@ prep_sched() {
   kubectl -n llumnix get deploy scheduler -o json | python3 -c "
 import json, sys
 d = json.load(sys.stdin); c = d['spec']['template']['spec']['containers'][0]; a = c['args']; out = []; i = 0
-pre = ('--fluidserve-kv-window', '--fluidserve-kv-epsilon', '--fluidserve-kv-price')
+pre = ('--fluidserve-kv-window', '--fluidserve-kv-epsilon', '--fluidserve-kv-price', '--fluidserve-inflow-memory', '--fluidserve-kv-bucket', '--fluidserve-prefill-flow')
 while i < len(a):
     if a[i].startswith(pre):
         if '=' not in a[i] and i + 1 < len(a) and not a[i + 1].startswith('--'):

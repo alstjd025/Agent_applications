@@ -276,6 +276,11 @@ GATEWAY_METRICS = {
     "gateway_scheduling_wait_milliseconds_count",
     "gateway_scheduling_gave_up_total",
     "gateway_scheduling_rejected_total",
+    # EXP-174. Requests the gateway placed with its local round-robin fallback
+    # because the call to the scheduler failed: they received no admission or
+    # routing decision. Exported as 0 from start-up by gateways built from
+    # 02ee187 on; absent on older gateways.
+    "gateway_scheduling_fallback_total",
     "gateway_pending_requests",
     "gateway_current_requests",
     "request_total",
