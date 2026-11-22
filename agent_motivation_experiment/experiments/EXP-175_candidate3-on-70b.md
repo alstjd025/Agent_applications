@@ -98,3 +98,42 @@ workload 줄 `7000 75 None dyn60_shift_m2Am1B_b1045.csv 12`, tier table `50:428,
 
 run 2(후보 3 r1, `261122_0803_exp175hr1_fsxc3_shift`)는 01:02에 떴다: scheduler 파드 `5d52124e`, 기동 줄에 `--fluidserve-class-instance-cap=false`,
 `--fluidserve-kv-price=on`, `verified: every FluidServe flag matches what was applied`.
+
+### run 2 — 후보 3 r1 (`261122_0803_exp175hr1_fsxc3_shift`, 부하 2026-11-23 01:02~02:15) — 1회차 값, 아직 판정하지 않는다
+
+유효성(규칙 (가)): gateway의 대체 배치 counter 0건(gateway 로그의 `cannot assign` 0줄), scheduler 파드 `5d52124e`, gateway 파드 `3590c1af`(재시작 0),
+workload 줄 `7000 25 None dyn60_shift_m2Am1B_b1045.csv 12`, 기동 줄 `--fluidserve-class-instance-cap=false`, `--fluidserve-kv-price=on`,
+`verified: every FluidServe flag matches what was applied`, 엔진 4대 모두 지표 보고. 유효하다.
+
+| 지표 | 후보 3 r1 (이번 chain, 새 gateway) | FluidServe v0.6, EXP-161 r1 / r2 (2026-11-16, 옛 gateway) | PolyServe r1 (이번 chain) |
+|---|---|---|---|
+| 채점된 도착 수 | 97,968 | 97,964 / 97,968 | 97,999 |
+| 모든 도착 | 82.07 | 80.78 / 80.60 | 53.84 |
+| admitted | 99.93 | 99.92 / 99.87 | 65.83 |
+| 거절률 % | 17.65 | 18.94 / 19.07 | 18.01 |
+| token goodput tok/s | 11,936 | 11,767 / 11,760 | 8,666 |
+| 엔진이 만든 토큰 전체 tok/s | 11,939 | 11,772 / 11,769 | 11,101 |
+| chat 모든 도착 / admitted / 거절률 | 87.17 / 99.99 / 12.76 | 85.64 / 99.99 / 14.30, 85.22 / 99.99 / 14.71 | 52.18 / 55.15 / 5.24 |
+| deepresearch | 68.63 / 99.99 / 30.71 | 68.52 / 99.85 / 30.71, 69.86 / 99.87 / 29.35 | 42.72 / 98.78 / 56.48 |
+| swe | 78.67 / 99.53 / 20.82 | 76.63 / 99.61 / 22.96, 75.16 / 99.22 / 24.13 | 80.46 / 99.39 / 18.97 |
+| preemption 횟수 (v0.6과는 세션이 달라 비교하지 않는다) | 1,227 | 1,612 / 1,728 | 0 |
+| KV 사용률 평균 / p90 | 0.54 / 0.99 | 0.57 / 0.99 | 0.42 / 0.61 |
+
+메모(판정은 후보 3 r2와 PolyServe r2가 끝난 뒤 규칙 (다)·(라)로 한다):
+
+- v0.6(EXP-161, 2회)과의 차이는 1회차 값으로 모든 도착 +1.38점, 거절률 −1.36점, goodput +1.5 %, chat 모든 도착 +1.74점, swe 모든 도착 +2.78점,
+  deepresearch 모든 도착 −0.56점이다. 전부 세션 간 문턱(모든 도착·거절률·클래스별 모든 도착 4.6점, goodput 5 %)보다 작다. admitted는 0.03점 차이다.
+  사전에 적은 위험(class instance cap을 끄면 chat이 deepresearch·swe가 있는 인스턴스에 놓여 그 인스턴스의 허용 token 간격이 50 ms가 되고,
+  deepresearch·swe의 클래스별 값이 나빠진다)은 1회차에서는 나타나지 않았다 — swe와 deepresearch의 admitted가 99.53, 99.99이고 클래스별 모든 도착도
+  v0.6의 두 run 범위 안이거나 그보다 높다.
+- 이번 chain의 PolyServe r1과는 모든 도착 +28.23점, admitted +34.10점, goodput +37.7 %이고 거절률은 0.36점 차이다. 클래스별로는 chat +34.99점,
+  deepresearch +25.91점, swe −1.79점(swe는 PolyServe가 높고, 같은 chain 문턱 4점보다 작다).
+- **KV 가격이 실제로 결정에 관여한 횟수**(`server_metrics/scheduler.jsonl`의 scheduler counter, run 끝 값). counter는 요청 수가 아니라
+  "(routing 시도 한 번, 후보 인스턴스 하나)를 평가한 횟수"를 센다(`fluidserve.go`의 feasibility 판정에서 조건 하나가 실패할 때마다 1 증가,
+  queueing 중인 요청은 다시 평가될 때마다 또 센다). 가격 조건(λ·c > 1)이 실패한 평가는 deepresearch 26,963회, swe 16회, chat 5회이고,
+  **가격이 그 후보를 제외한 유일한 조건이었던 평가는 deepresearch 739회, swe·chat 0회**다. 같은 run에서 token 간격 조건(gate)이 유일한
+  조건이었던 평가는 49,522회, 이미 있는 요청의 budget 조건(incumbents)은 42,858회다. 즉 70B에서는 가격이 결정을 바꾼 경우가 다른 조건의
+  1/60 수준이고 전부 deepresearch다. EXP-172의 offline 추정(70B에서 가격이 deepresearch 도착의 0.35~0.46 %를 거절)과 같은 크기다.
+  → 후보 3과 v0.6의 차이가 있다면 대부분 class instance cap을 끈 데서 나온다는 뜻이고, 이것은 run 5·6(`fsxnocap`)이 규칙 (마)로 직접 가린다.
+
+run 3(후보 3 r2, `261122_0917_exp175hr2_fsxc3_shift`)은 02:16에 떴다: scheduler 파드 `5d52124e`, 같은 기동 줄.
