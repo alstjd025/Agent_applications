@@ -126,3 +126,13 @@ B(KV 유입 속도 밸브)와 C(prefill 순 처리 속도와 Little의 법칙)�
 
 ### C2 r1 (`261121_1456_exp173hr1_fsxpflow2_shift62`) — 우회 0
 모든 도착 61.14, admitted 91.54, 거절률 33.04 %, goodput 68,544, chat 63.50 / deepresearch 68.95 / swe 36.47(admitted 93.44 / 91.01 / 79.01). 엔진: preemption 59.0k(v0.6과 같은 수준), KV p90 0.999, ITL 42.5 ms. 첫 토큰 예측은 이제 낙관적이다 — 실제 − 예측 p10/p50/p90 −0.21 / +0.39 / +3.43 s, 실제가 더 긴 비율 79.6 %. **v0.6 대비**: admitted −5.2 → 나쁨(반증 조건 "admitted 2점 넘게 하락"에 해당), swe 모든 도착 −12.0 → 나쁨, 모든 도착 −2.7·거절률·goodput·chat·deepresearch 모든 도착은 차이 없음. **읽은 것**: Little의 법칙 대기 시간은 대기열 자체는 맞게 보지만, KV가 넘친 채(preemption이 v0.6과 같다) preemption된 요청이 대기열 맨 앞으로 끼어들어 이미 줄 선 요청의 실제 대기를 늘린다 — 순 처리 속도 ν가 재계산 유입을 빼고 있어도 그 끼어듦이 판정 이후에 일어나므로 예측이 낙관적이 된다. **첫 토큰 판정을 정확하게 만드는 것은 KV를 한계 아래로 지키는 장치 없이는 안 된다**는 이전 결론(EXP-118, c13ft)을 우회 없는 조건에서 다시 확인했다. B+C2가 그 조합이다.
+
+### ✅ 우회 기전 확인 (B+C2 run 중 게이트웨이 로그, 2026-11-22 09:41·10:06)
+run 시작 후 25분(혼잡 전)에는 0건, 30분과 55분 시점에는 로그 창 안에서만 각각 3,040건·2,203건:
+```
+W1122 00:40:19 scheduler_client.go:143] [47e1993b-…] do request scheduling fail: Post "http://scheduler:8088/schedule": dial tcp 10.43.106.28:8088: connect: cannot assign requested address
+I1122 00:40:19 composite_balancer.go:136] [47e1993b-…] fallback policy(round-robin) is applied, select endpoints: neutral-…:8006-…
+```
+**원인은 스케줄러가 느린 것이 아니라 게이트웨이의 연결 고갈이다**: 게이트웨이의 스케줄러 HTTP client(`pkg/gateway/load-balancer/scheduler_client.go:41`, `&http.Client{Timeout: 2s}`)는 Go 기본 Transport를 써서 호스트당 유휴 연결을 2개만 남기므로, 보류된 요청 수백~수천 건이 500 ms마다 다시 부르면 호출마다 새 TCP 연결을 열고 닫는다. 닫힌 연결은 TIME_WAIT로 약 60초 포트를 잡고 있어 임시 포트(약 2.8만 개)가 고갈되면 `connect: cannot assign requested address`가 나고, 그 오류가 "scheduler not ready"로 바뀌어 **round-robin 대체 배치**가 된다. EXP-54의 클라이언트 쪽 포트 고갈과 같은 종류의 문제가 게이트웨이↔스케줄러 사이에서 난 것이다. 70B는 도착률이 낮아 고갈에 닿지 않는다(우회 0).
+
+**고치는 방법(측정 경로·게이트웨이 코드, 사용자 결정 필요)**: 스케줄러 client에 연결 재사용 Transport(호스트당 유휴 연결 수를 동시 보류 수 이상으로)를 주는 것이 원인에 맞는 수정이다. 연결 실패를 대체 배치가 아니라 재시도로 처리하는 것은 그다음 안전장치다. 수정 뒤에는 영향받은 8B run(EXP-170 PolyServe, EXP-172·173 후보)을 다시 재야 한다.
