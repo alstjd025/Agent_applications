@@ -73,3 +73,28 @@ FluidServe v0.6에서 두 가지를 바꾼 것이다.
 ## 5. 결과
 
 (run이 끝난 뒤에 적는다)
+
+### run 1 — PolyServe r1 (`261122_0648_exp175hr1_polyservept75_shift`, 부하 2026-11-22 23:53~2026-11-23 00:56) — 1회차 값, 아직 판정하지 않는다
+
+유효성(규칙 (가)): gateway의 대체 배치 counter 0건(gateway 로그의 `cannot assign` 0줄), scheduler 파드 `7dc2355c`, gateway 파드 `3590c1af`(재시작 0),
+workload 줄 `7000 75 None dyn60_shift_m2Am1B_b1045.csv 12`, tier table `50:428,75:494,100:985`, 엔진 4대 모두 지표 보고. 유효하다.
+
+| 지표 | 이번 r1 (새 gateway) | EXP-168 PolyServe r1 / r2 (옛 gateway `05745270`) |
+|---|---|---|
+| 채점된 도착 수 | 97,999 | 98,012 / 98,044 |
+| 모든 도착 | 53.84 | 53.37 / 54.04 |
+| admitted | 65.83 | 65.18 / 65.98 |
+| 거절률 % | 18.01 | 17.93 / 17.85 |
+| token goodput tok/s | 8,666 | 8,637 / 8,669 |
+| 엔진이 만든 토큰 전체 tok/s | 11,101 | 11,130 / 11,107 |
+| chat 모든 도착 / admitted / 거절률 | 52.18 / 55.15 / 5.24 | 51.30 / 54.21 / 5.22, 52.41 / 55.30 / 5.04 |
+| deepresearch | 42.72 / 98.78 / 56.48 | 43.07 / 99.07 / 56.27, 42.85 / 99.27 / 56.53 |
+| swe | 80.46 / 99.39 / 18.97 | 80.66 / 99.42 / 18.80, 80.65 / 99.29 / 18.67 |
+| preemption 횟수 (세션이 달라 비교하지 않는다) | 0 | 0 / 0 |
+| KV 사용률 평균 / p90 | 0.42 / 0.61 | 0.44 / 0.60 |
+
+메모(판정은 r2가 끝난 뒤 규칙 (나)로 한다): 1회차 값은 모든 지표가 EXP-168의 두 run 사이이거나 0.5점 안에 있다. 예측(70B에서는 gateway의 대체 배치가
+0건이었으므로 gateway 수정이 PolyServe 값을 바꾸지 않는다)과 같은 방향이다.
+
+run 2(후보 3 r1, `261122_0803_exp175hr1_fsxc3_shift`)는 01:02에 떴다: scheduler 파드 `5d52124e`, 기동 줄에 `--fluidserve-class-instance-cap=false`,
+`--fluidserve-kv-price=on`, `verified: every FluidServe flag matches what was applied`.
