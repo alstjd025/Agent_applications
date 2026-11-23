@@ -115,3 +115,20 @@ goodput·엔진 출력 5 %; 두 구성 각각의 반복 범위가 더 크면 그
 더 낮은 것을 설명하지 못한다), ② scheduler 바이너리가 다르다(EXP-126 `903889ac`, 이번 `7dc2355c`; 그 사이 EXP-127이 PolyServe의 메모리 판정을 다뤘다),
 ③ EXP-165가 찾은 hour 드라이버의 tier 표 결함(2026-11-18 이전의 hour 드라이버는 PolyServe tier 표를 기본 파일에서 만들었다; EXP-126 기록은 기동 전 출력으로
 25/38/50을 확인했다고 적었으므로 해당하지 않을 수 있다). 2회차 뒤에 run 디렉토리의 scheduler 기동 인자(`scheduler_deploy_*.yaml`)로 확인한다.
+
+### run 2 — 후보 3 r1, 절반 budget (`261122_1919_exp176hr1_fsxc3_shift62h`, 부하 2026-11-23 12:18~13:28) — 1회차 값, 아직 판정하지 않는다
+
+유효성(규칙 (가)): gateway 대체 배치 0건, scheduler 파드 `5d52124e`, gateway 파드 `3590c1af` 재시작 0회, 엔진 8/8, 워크로드 slo 2500/50 · 5000/100 · 3500/25
+(FluidServe의 tier key 파일), 기동 인자 `--fluidserve-class-budgets 25:decode:38,50:decode:25,100:decode:50`·`--fluidserve-class-instance-cap false`·
+`--fluidserve-kv-price on`, 설정 스크립트의 `verified: every FluidServe flag matches what was applied` — 전부 맞다.
+
+| 지표 | 값 |
+|---|---|
+| 채점된 도착 수 | 608,852 (미완료 810) |
+| 모든 도착 / admitted / 거절률 | 76.92 / 99.73 / 22.76 % |
+| token goodput / 엔진이 만든 토큰 전체 | 76,376 / 76,635 tok/s |
+| request goodput | 130.65 r/s |
+| chat (모든 도착 / admitted / 거절률) | 80.12 / 99.86 / 19.76 |
+| deepresearch | 68.10 / 99.51 / 31.20 |
+| swe | 75.43 / 99.31 / 24.01 |
+| preemption / KV 사용률 평균·p90 | 7,239 / 0.595 · 0.990 |
