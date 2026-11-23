@@ -296,3 +296,26 @@ v0.6 쪽은 run 6 뒤에 판정한다.
 3. 클래스 선택이 다르다: PolyServe는 deepresearch의 54 %를 거절하고 swe를 90 % 처리하며, FluidServe는 세 클래스의 거절률이 21~30 %로 고르다.
 4. 절반 budget에서는 후보 3과 v0.6이 사실상 같다(deepresearch admitted 하나, preemption 방향). 표준 budget 8B(EXP-174)에서 후보 3이 v0.6보다 모든 도착 +20.4점
    높았던 차이는 KV가 먼저 한계인 조건에서만 나타난다.
+
+### run 7 — PolyServe r1, 더 빡빡한 budget (`261123_0136_exp176hr1_polyservept75_shift62t`, 부하 2026-11-23 18:45~19:55) — 1회차 값, 아직 판정하지 않는다
+
+유효성(규칙 (가)): gateway 대체 배치 counter **1건**(받아들인 요청의 0.1 % 기준 약 420건보다 훨씬 작다 → 유효), scheduler 파드 `7dc2355c`, gateway 파드 `3590c1af`
+재시작 0회, 엔진 8/8, 워크로드 slo 2500/15 · 5000/35 · 3500/25, 기동 인자의 tier 표 `15:403,25:464,35:1094` — 맞다. 채점은 더 빡빡한 budget 여섯 개
+(`FS_CHAT_TBT_MS=15 FS_DR_TBT_MS=35 FS_SWE_TBT_MS=25`, 첫 토큰 2.5 / 5 / 3.5 s).
+
+| 지표 | 값 |
+|---|---|
+| 채점된 도착 수 | 609,434 (미완료 362) |
+| 모든 도착 / admitted / 거절률 | 64.35 / 94.05 / 31.54 % |
+| token goodput / 엔진이 만든 토큰 전체 | 62,608 / 65,412 tok/s |
+| request goodput | 109.29 r/s |
+| chat (모든 도착 / admitted / 거절률) | 67.37 / 91.91 / 26.69 |
+| deepresearch | 48.44 / 99.52 / 51.22 |
+| swe | 75.39 / 98.62 / 23.54 |
+| preemption / KV 사용률 평균·p90 | 0 / 0.278 · 0.588 |
+
+**체인의 기록 파일 이름 충돌(2026-11-23 20:00 발견)**: 체인이 run마다 쓰는 gateway 로그·지표 사본(`/home/nxclab/scratch/exp176/gwlog_<rep>_<arm>.log.gz`,
+`gwmetrics_<rep>_<arm>.txt`)의 이름에 budget 변형이 없어서, run 7이 run 1(PolyServe r1, 절반 budget)의 두 파일을 덮어썼다. **잃은 것은 run 1의 gateway
+로그 원문 하나**다. run 1의 대체 배치 counter는 체인 로그(0건, 로그 줄 0개)와 run 디렉토리의 `server_metrics/gateway.jsonl`(마지막 값 0)에 남아 있어
+유효성 판정은 바뀌지 않는다. 남은 절반 budget 파일 다섯 쌍은 덮어쓰이기 전에 `_shift62h`를 붙인 사본으로 복사했고, run 7의 파일도 `_shift62t` 사본을
+만들었다. 체인 스크립트는 실행 중이라 고치지 않았다(남은 run 8~12는 각각 절반 budget의 원래 이름 파일을 덮어쓰지만 그 내용은 사본에 있다).
