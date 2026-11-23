@@ -149,3 +149,47 @@ goodput·엔진 출력 5 %; 두 구성 각각의 반복 범위가 더 크면 그
 | deepresearch | 67.20 / 97.64 / 30.82 |
 | swe | 72.58 / 99.22 / 26.80 |
 | preemption / KV 사용률 평균·p90 | 10,284 / 0.602 · 0.996 |
+
+### run 4 — PolyServe r2, 절반 budget (`261122_2150_exp176hr2_polyservept75_shift62h`, 부하 2026-11-23 14:49~15:58)
+
+유효성(규칙 (가)): gateway 대체 배치 0건, scheduler 파드 `7dc2355c`, gateway 파드 `3590c1af` 재시작 0회, 엔진 8/8, 워크로드 slo 2500/25 · 5000/50 · 3500/38,
+기동 인자의 tier 표 `25:403,38:464,50:1094` — 전부 맞다.
+
+| 지표 | r2 | r1 / r2 (평균, 범위) |
+|---|---|---|
+| 채점된 도착 수 | 608,959 (미완료 468) | |
+| 모든 도착 | 75.70 | 74.07 / 75.70 (74.89, 1.63) |
+| admitted | 96.65 | 97.03 / 96.65 (96.84, 0.38) |
+| 거절률 | 21.62 % | 23.61 / 21.62 (22.62, 1.99) |
+| token goodput / 엔진이 만든 토큰 전체 | 70,421 / 72,398 tok/s | goodput 69,451 / 70,421 (69,936) |
+| request goodput | 128.65 r/s | 125.82 / 128.65 (127.24) |
+| chat (모든 도착 / admitted / 거절률) | 83.00 / 95.53 / 13.09 | 모든 도착 79.68 / 83.00 (범위 3.32) |
+| deepresearch | 45.66 / 99.92 / 54.18 | 모든 도착 46.12 / 45.66 |
+| swe | 88.56 / 99.39 / 10.89 | 모든 도착 91.91 / 88.56 (범위 3.35) |
+| preemption / KV 사용률 평균·p90 | 0 / 0.443 · 0.604 | |
+
+#### 규칙 (다) 판정 — 이번 PolyServe(절반 budget, 2회) 대 EXP-126 PolyServe(2회)
+
+- 거절률: 22.62 % 대 36.8~37.2 %(평균 약 37.0), 차이 **−14.4점** > 문턱 4.6 → **다르다**.
+- request goodput: 127.24 대 92.78 / 92.72 r/s, **+37 %** > 5 % → **다르다**.
+
+실행 전 규칙대로 이것을 정책의 차이로 읽지 않고 "측정 경로가 같은지"를 확인했다. 원인 후보 셋:
+
+1. **EXP-165의 tier 표 결함 — EXP-126의 PolyServe arm에 있었다(확인).** EXP-126 체인 로그(`/home/nxclab/tools/exp126.log` 113~120행, PolyServe
+   arm으로 전환한 직후)에 scheduler가 받은 tier 표가 `--polyserve-tier-decode-tokens=25:464,50:403,100:1094`로 찍혀 있다. 이 표는 기본 파일
+   (`mix_short_m1_balanced.json`, swe 25 / chat 50 / deepresearch 100)에서 만든 것이고, 그 run의 요청은 절반 파일의 tier(chat 25 / deepresearch 50 /
+   swe 38)를 달고 있었다. EXP-126 체인 스크립트(`/home/nxclab/tools/exp126_halfslo_hour.sh` 136행)는 `PS_MIX_CONFIG`를 사전 점검용 python 안에서만
+   설정했고, 드라이버의 `set_arm`은 그 변수를 지웠다(EXP-165가 찾은 결함). EXP-126 기록 §3의 "tier 경계 25/38/50을 사전 출력으로 확인했다"는 그
+   사전 점검의 출력이었고 scheduler가 실제로 받은 값이 아니었다.
+   PolyServe 코드에서 이 표는 tier의 출력 길이를 찾는 데만 쓰인다(`polyserve.go`의 KV 투영 `decodeTokens.forTier`, `polyserve_repartition.go`의
+   tier별 수요 계산). tier 자체는 요청의 TPOT budget이 정한다. 그래서 EXP-126의 PolyServe는 chat 요청을 swe의 길이 464로, deepresearch 요청을 chat의
+   길이 403(실제 클래스 평균 1,094)으로, swe 요청을 표에 없는 tier로 보고 기본값으로 계산했다. 즉 KV 투영과 tier별 서버 배분이 클래스 길이를 잘못
+   쓴 상태로 돌았다. 이것이 거절률 차이 −14.4점을 얼마나 설명하는지는 이 자료로는 정하지 못한다(EXP-126의 run 디렉토리가 이 기계에 없다).
+2. **바이너리 차이(`903889ac` 대 `7dc2355c`)**: EXP-126 이후 PolyServe 파일(`polyserve*.go`)의 커밋은 `2e752f2`(2026-09-23, 메모리 거절의 두 비교값을
+   지표로 내보내는 계측) 하나뿐이다. PolyServe의 결정 코드는 같다고 본다(공유 코드의 변경은 확인하지 않았다).
+3. **옛 gateway**: 대체 배치는 admission 판정 없이 받아들이는 쪽이라 거절률을 낮춘다. EXP-126의 거절률이 더 높으므로 이것으로는 설명되지 않는다.
+
+**결론**: 제출 논문의 8B 패널(그림 11·12 (c))의 PolyServe 값은 tier 표 결함이 있는 상태로 잰 값이다. 같은 절반 budget에서 결함 없이 잰 PolyServe는
+request goodput 127.24 r/s(2회)로, 논문의 FluidServe v0.4 값(123.67 / 123.61 r/s)과 비슷하다. 논문의 "8B에서 PolyServe 대비 1.33배"는 이 결함 위의
+값이다. 같은 결함이 70B 한 시간 trace(EXP-109, 그림 11·12 (a))의 PolyServe에도 있었는지는 EXP-165 기록과 대조해야 한다(EXP-165는 "run_exp109_hour.sh
+이후 모든 hour 드라이버"라고 적었다; 70B는 tier 키가 표준 budget과 같은 25/50/100이라 swe만 75 대 25로 어긋났다).
