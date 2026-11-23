@@ -132,3 +132,20 @@ goodput·엔진 출력 5 %; 두 구성 각각의 반복 범위가 더 크면 그
 | deepresearch | 68.10 / 99.51 / 31.20 |
 | swe | 75.43 / 99.31 / 24.01 |
 | preemption / KV 사용률 평균·p90 | 7,239 / 0.595 · 0.990 |
+
+### run 3 — v0.6 r1, 절반 budget (`261122_2039_exp176hr1_fsg10dl_shift62h`, 부하 2026-11-23 13:38~14:48) — 1회차 값, 아직 판정하지 않는다
+
+유효성(규칙 (가)): gateway 대체 배치 0건, scheduler 파드 `7dc2355c`, gateway 파드 `3590c1af` 재시작 0회, 엔진 8/8, 워크로드 slo 2500/50 · 5000/100 · 3500/25,
+기동 인자 `--fluidserve-class-budgets 25:decode:38,50:decode:25,100:decode:50`·`--fluidserve-class-instance-cap true`·KV 가격 플래그 없음,
+설정 스크립트의 `verified: every FluidServe flag matches what was applied` — 전부 맞다.
+
+| 지표 | 값 |
+|---|---|
+| 채점된 도착 수 | 608,787 (미완료 812) |
+| 모든 도착 / admitted / 거절률 | 75.94 / 99.38 / 23.48 % |
+| token goodput / 엔진이 만든 토큰 전체 | 75,931 / 76,213 tok/s |
+| request goodput | 129.02 r/s |
+| chat (모든 도착 / admitted / 거절률) | 79.48 / 99.91 / 20.42 |
+| deepresearch | 67.20 / 97.64 / 30.82 |
+| swe | 72.58 / 99.22 / 26.80 |
+| preemption / KV 사용률 평균·p90 | 10,284 / 0.602 · 0.996 |
