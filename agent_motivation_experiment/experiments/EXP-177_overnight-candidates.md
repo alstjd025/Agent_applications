@@ -210,3 +210,12 @@ v0.6 대비 +11.98, 후보 3 대비 +11.93. 에이전트 ④의 절반 budget �
 **읽기**: 절반 budget에서 FluidServe가 PolyServe와 처리한 요청 수가 같았던 이유(늘어난 처리 능력이 deepresearch로 감)가 GPU 시간 가격으로 풀렸다 —
 deepresearch를 41.6 % 거절하는 대신 chat 96.8, swe 89.0을 처리한다(의도적으로 포기하는 것: deepresearch, 가치 1당 GPU 시간·KV를 가장 많이 쓰는 클래스).
 어느 가격(KV λ와 GPU 시간 μ)이 결정을 바꿨는지는 가격 단독 counter로 나뉘지 않는다 — 지금 도는 T(절반 budget, GPU 시간 가격만)가 그 몫을 잰다. 2회째는 낮 12시 이후로 미룬다.
+
+### T r1, 절반 budget (`261123_1626_exp177bhr1_fsxtime_shift62h`, 부하 2026-11-24 09:25~10:35)
+
+유효성: gateway 대체 배치 0건, scheduler 파드 `58a6e641`, gateway `3590c1af` 재시작 0회, 워크로드·budget 문자열 맞음. 체인 끝: `bin/` 3251836a·590242b0, gateway 0, 엔진 0, Sionna 10:36(감시 하위 셸을 먼저 정리해 지연 없음).
+모든 도착 **87.28**, admitted 99.78, 거절률 12.40 %, token goodput 82,048, 엔진 출력 82,223, request goodput 148.24 r/s, chat 96.24 / 99.83 / 3.57, deepresearch 59.33 / 99.82 / 40.25,
+swe 88.42 / 99.47 / 11.05, preemption 852, KV 평균 0.511. 가격 단독 거절 dr 1,675,914 · swe 215,735 · chat 210,005.
+
+**D3 대비(같은 chain, 1회씩, 방향만)**: 모든 도착 −0.15, request goodput −0.2 %, 클래스별 1.3점 안 — **절반 budget에서 D3의 이득은 GPU 시간 가격 하나가 거의 전부 낸다**(KV 가격은 이 조건에서 몫이 없다).
+표준 budget에서는 반대로 GPU 시간 가격만(T)은 A보다 11.9점 낮았다 → **묶이는 자원에 따라 필요한 가격이 다르고, 두 가격을 같이 두는 D3가 두 조건을 다 덮는지가 다음 질문**이다(D3 표준 budget은 아직 안 돌렸다).
